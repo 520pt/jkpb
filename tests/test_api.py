@@ -28,6 +28,19 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'id="mentionMobile" placeholder="10000000000"' in html
 
 
+def test_review_busy_overlay_is_hidden_until_import_starts(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    html = response.text
+    assert 'id="reviewBusyOverlay" class="review-busy-overlay" hidden' in html
+    assert ".review-busy-overlay[hidden]" in html
+    assert ".review-busy-overlay[hidden] {\n      display: none;" in html
+
+
 def test_health_check(tmp_path):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
