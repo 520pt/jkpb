@@ -68,6 +68,27 @@ def extract_roster_image(image_path: str | Path) -> dict[str, Any]:
 
 
 def _read_ocr_texts(path: Path) -> list[OcrText]:
+    texts = _read_rapidocr_texts(path)
+    if texts:
+        return texts
+    return _read_paddleocr_texts(path)
+
+
+def _read_rapidocr_texts(path: Path) -> list[OcrText]:
+    try:
+        from rapidocr_onnxruntime import RapidOCR  # type: ignore
+    except Exception:
+        return []
+
+    try:
+        ocr = RapidOCR()
+        raw_result, _ = ocr(str(path))
+    except Exception:
+        return []
+    return _rapid_result_to_texts(raw_result)
+
+
+def _read_paddleocr_texts(path: Path) -> list[OcrText]:
     try:
         from paddleocr import PaddleOCR  # type: ignore
     except Exception:
@@ -301,6 +322,24 @@ def _nearest_day(value: float, day_headers: list[tuple[int, float]]) -> int | No
     return day if distance <= 25 else None
 
 
+def _rapid_result_to_texts(raw_result: Any) -> list[OcrText]:
+    texts: list[OcrText] = []
+    if not isinstance(raw_result, list):
+        return texts
+
+    for line in raw_result:
+        try:
+            box = line[0]
+            text = line[1]
+            score = line[2] if len(line) > 2 else 1.0
+            xs = [point[0] for point in box]
+            ys = [point[1] for point in box]
+            texts.append(OcrText(text=str(text).strip(), x=sum(xs) / len(xs), y=sum(ys) / len(ys), confidence=float(score)))
+        except Exception:
+            continue
+    return texts
+
+
 def _paddle_result_to_texts(raw_result: Any) -> list[OcrText]:
     lines: list[Any] = []
     if isinstance(raw_result, list):
@@ -321,5 +360,3 @@ def _paddle_result_to_texts(raw_result: Any) -> list[OcrText]:
         except Exception:
             continue
     return texts
-
-

@@ -129,6 +129,25 @@ def test_confirm_roster_and_preview_reminders(tmp_path):
     assert any(event["send_at"] == "2025-09-15T23:50:00+08:00" for event in events)
 
 
+def test_confirm_roster_rejects_placeholder_names(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/rosters/confirm",
+        json={
+            "year": 2025,
+            "month": 9,
+            "source_image_path": "uploads/month.png",
+            "grid": [{"name": "第1行", "days": {"16": "中"}}],
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "请先补全所有人员姓名，再确认导入"
+    assert client.get("/api/rosters").json()["rosters"] == []
+
+
 def test_notification_config_and_people_mobile_are_saved(tmp_path):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
@@ -779,5 +798,4 @@ def test_recheck_roster_corrects_mismatched_cells_from_source_image(tmp_path):
             "box": {"x": 257, "y": 120, "width": 24, "height": 33},
         }
     ]
-
 

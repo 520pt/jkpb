@@ -24,6 +24,13 @@ if (-not $NeedsInstall) {
     }
 }
 
+if (-not $NeedsInstall) {
+    & $VenvPython -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('rapidocr_onnxruntime') else 1)"
+    if ($LASTEXITCODE -ne 0) {
+        $NeedsInstall = $true
+    }
+}
+
 if ($NeedsInstall) {
     & $VenvPython -m pip install --upgrade pip
     if ($LASTEXITCODE -ne 0) {

@@ -84,7 +84,7 @@ docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-默认 Docker 构建不安装 OCR 大模型依赖，上传图片后仍可在页面快速补录/校对。需要启用 PaddleOCR 时，本地构建可以使用：
+默认 Docker 构建会安装轻量 RapidOCR，用于识别排班图片里的姓名、年月，再结合模板识别班次颜色。需要额外启用 PaddleOCR 大模型兜底时，本地构建可以使用：
 
 ```bash
 INSTALL_OCR=true docker compose up -d --build

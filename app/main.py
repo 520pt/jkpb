@@ -223,6 +223,8 @@ def create_app(
 
     @app.post("/api/rosters/confirm")
     def confirm_roster(request: RosterConfirmRequest):
+        if _has_unconfirmed_roster_names(request.grid):
+            raise HTTPException(status_code=422, detail="请先补全所有人员姓名，再确认导入")
         existing = repo.get_roster_month(request.year, request.month)
         if existing and not request.overwrite:
             diffs = _diff_roster_grids(existing.get("grid", []), request.grid)
@@ -455,6 +457,13 @@ def _validate_hhmm(value: str) -> str:
 def _coerce_hhmm(value: str, default: str) -> str:
     text = str(value or "").strip()
     return text if HHMM_PATTERN.match(text) else default
+
+
+def _has_unconfirmed_roster_names(grid: list[dict[str, Any]]) -> bool:
+    return any(
+        not str(row.get("name") or "").strip() or re.fullmatch(r"第\d+行", str(row.get("name") or "").strip())
+        for row in grid
+    )
 
 
 def _parse_hhmm(value: str):
@@ -908,5 +917,4 @@ def _wecom_client_from_env() -> WeComClient | None:
 
 
 app = create_app(start_scheduler=os.getenv("ENABLE_SCHEDULER", "false").lower() == "true")
-
 

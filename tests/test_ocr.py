@@ -1,4 +1,4 @@
-from app.ocr import OcrText, build_review_grid, fallback_review_grid
+from app.ocr import OcrText, _rapid_result_to_texts, build_review_grid, fallback_review_grid
 
 
 def test_build_review_grid_from_positioned_ocr_text():
@@ -27,5 +27,19 @@ def test_fallback_review_grid_keeps_uploaded_image_path():
     assert review["source_image_path"] == "uploads/month.png"
     assert review["grid"] == []
     assert 1 <= review["month"] <= 12
+
+
+def test_rapid_result_to_texts_converts_boxes_to_centers():
+    texts = _rapid_result_to_texts(
+        [
+            [
+                [[100.0, 129.0], [130.0, 129.0], [130.0, 148.0], [100.0, 148.0]],
+                "罗森",
+                0.99,
+            ]
+        ]
+    )
+
+    assert texts == [OcrText(text="罗森", x=115.0, y=138.5, confidence=0.99)]
 
 
