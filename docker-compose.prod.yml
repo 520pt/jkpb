@@ -3,35 +3,13 @@ services:
     image: ghcr.io/520pt/jkpb:latest
     container_name: duty-reminder
     restart: unless-stopped
-    environment:
-      TZ: "${TZ:-Asia/Shanghai}"
-      DATA_DIR: "/app/data"
-      UPLOAD_DIR: "/app/uploads"
-      ENABLE_SCHEDULER: "${ENABLE_SCHEDULER:-true}"
-      ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
-      ADMIN_PASSWORD: "${ADMIN_PASSWORD:?请在 .env 中设置 ADMIN_PASSWORD}"
-      MAX_UPLOAD_MB: "${MAX_UPLOAD_MB:-10}"
-      UPLOAD_KEEP_DAYS: "${UPLOAD_KEEP_DAYS:-90}"
-      WECOM_CORP_ID: "${WECOM_CORP_ID:-}"
-      WECOM_CORP_SECRET: "${WECOM_CORP_SECRET:-}"
-      WECOM_AGENT_ID: "${WECOM_AGENT_ID:-}"
     ports:
-      - "${APP_PORT:-8080}:8080"
+      - "8080:8080"
+    environment:
+      TZ: Asia/Shanghai
+      ENABLE_SCHEDULER: "true"
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: CHANGE_THIS_PASSWORD
     volumes:
-      - duty-data:/app/data
-      - duty-uploads:/app/uploads
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-volumes:
-  duty-data:
-  duty-uploads:
+      - ./data:/app/data
+      - ./uploads:/app/uploads

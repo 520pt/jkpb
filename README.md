@@ -51,38 +51,7 @@ ghcr.io/520pt/jkpb:latest
 
 ### 服务器推荐部署
 
-服务器推荐使用 `docker-compose.prod.yml`，直接拉取 GitHub Actions 打包好的镜像，不需要在服务器本地构建。
-
-1. 复制环境变量模板：
-
-```bash
-cp .env.example .env
-```
-
-2. 修改 `.env`，至少要把 `ADMIN_PASSWORD` 改成你自己的登录密码。
-
-3. 拉取镜像并启动：
-
-```bash
-docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml up -d
-```
-
-4. 查看状态：
-
-```bash
-docker compose -f docker-compose.prod.yml ps
-docker compose -f docker-compose.prod.yml logs -f
-```
-
-5. 更新到最新镜像：
-
-```bash
-docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml up -d
-```
-
-完整 `docker-compose.prod.yml`：
+直接用仓库里的 `docker-compose.prod.yml`，结构尽量保持简单：
 
 ```yaml
 services:
@@ -90,38 +59,29 @@ services:
     image: ghcr.io/520pt/jkpb:latest
     container_name: duty-reminder
     restart: unless-stopped
-    environment:
-      TZ: "${TZ:-Asia/Shanghai}"
-      DATA_DIR: "/app/data"
-      UPLOAD_DIR: "/app/uploads"
-      ENABLE_SCHEDULER: "${ENABLE_SCHEDULER:-true}"
-      ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
-      ADMIN_PASSWORD: "${ADMIN_PASSWORD:?请在 .env 中设置 ADMIN_PASSWORD}"
-      MAX_UPLOAD_MB: "${MAX_UPLOAD_MB:-10}"
-      UPLOAD_KEEP_DAYS: "${UPLOAD_KEEP_DAYS:-90}"
-      WECOM_CORP_ID: "${WECOM_CORP_ID:-}"
-      WECOM_CORP_SECRET: "${WECOM_CORP_SECRET:-}"
-      WECOM_AGENT_ID: "${WECOM_AGENT_ID:-}"
     ports:
-      - "${APP_PORT:-8080}:8080"
+      - "8080:8080"
+    environment:
+      TZ: Asia/Shanghai
+      ENABLE_SCHEDULER: "true"
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: CHANGE_THIS_PASSWORD
     volumes:
-      - duty-data:/app/data
-      - duty-uploads:/app/uploads
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+```
 
-volumes:
-  duty-data:
-  duty-uploads:
+部署步骤：
+
+```bash
+docker compose -f docker-compose.prod.yml up -d
+```
+
+部署前把 `docker-compose.prod.yml` 里的 `ADMIN_PASSWORD: CHANGE_THIS_PASSWORD` 改成你自己的密码。更新镜像时再执行一次：
+
+```bash
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 默认 Docker 构建不安装 OCR 大模型依赖，上传图片后仍可在页面快速补录/校对。需要启用 PaddleOCR 时，本地构建可以使用：
@@ -132,12 +92,19 @@ INSTALL_OCR=true docker compose up -d --build
 
 ### Docker 持久化存储
 
-默认 `docker-compose.yml` 已经把业务数据挂到 Docker volume：
+服务器简洁版 `docker-compose.prod.yml` 会把业务数据保存到当前目录：
+
+- `./data:/app/data`：SQLite 数据库、排班、配置、发送记录。
+- `./uploads:/app/uploads`：上传的排班图片。
+
+因此更新镜像、重新 `docker compose -f docker-compose.prod.yml up -d` 后数据仍会保留。不要删除服务器目录里的 `data` 和 `uploads`。
+
+本地构建用的 `docker-compose.yml` 默认使用 Docker volume：
 
 - `duty-data:/app/data`：SQLite 数据库、排班、配置、发送记录。
 - `duty-uploads:/app/uploads`：上传的排班图片。
 
-因此重建镜像、重新 `docker compose up -d --build` 或普通 `docker compose down` 后数据仍会保留。不要执行 `docker compose down -v` 或手动删除 `duty-data` / `duty-uploads` volume，否则会删除持久化数据。
+不要执行 `docker compose down -v` 或手动删除 `duty-data` / `duty-uploads` volume，否则会删除本地构建环境的数据。
 
 备份可以先查看实际 volume 名：
 
