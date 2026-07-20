@@ -35,6 +35,18 @@
       color: white;
     }
     header h1 { margin: 0; font-size: 18px; font-weight: 650; }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .logout-link {
+      color: #dbeafe;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 650;
+    }
+    .logout-link:hover { color: white; }
     .tabs {
       display: flex;
       gap: 8px;
@@ -834,7 +846,10 @@
 <body>
   <header>
     <h1>监控班提醒</h1>
-    <span id="clock"></span>
+    <div class="header-actions">
+      <span id="clock"></span>
+      <a class="logout-link" href="/logout">退出</a>
+    </div>
   </header>
 
   <nav class="tabs">

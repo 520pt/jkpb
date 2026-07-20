@@ -1,5 +1,4 @@
 import asyncio
-import base64
 from datetime import date, datetime
 
 from fastapi.testclient import TestClient
@@ -8,11 +7,6 @@ import app.main as main_module
 from app.main import create_app
 from app.storage import DutyRepository
 from tests.test_template_parser import _write_synthetic_roster
-
-
-def _auth_header(username: str = "admin", password: str = "secret") -> dict[str, str]:
-    token = base64.b64encode(f"{username}:{password}".encode()).decode()
-    return {"Authorization": f"Basic {token}"}
 
 
 def test_static_page_uses_synthetic_placeholders(tmp_path):
@@ -51,7 +45,7 @@ def test_health_check(tmp_path):
     assert response.json() == {"status": "ok"}
 
 
-def test_basic_auth_protects_pages_and_api_when_configured(tmp_path):
+def test_app_login_protects_pages_and_api_when_configured(tmp_path):
     app = create_app(
         data_dir=tmp_path / "data",
         upload_dir=tmp_path / "uploads",
@@ -61,10 +55,34 @@ def test_basic_auth_protects_pages_and_api_when_configured(tmp_path):
     client = TestClient(app)
 
     assert client.get("/health").status_code == 200
-    assert client.get("/").status_code == 401
+    page_response = client.get("/")
+    api_response = client.get("/api/rosters")
+    assert page_response.status_code == 200
+    assert "监控班提醒登录" in page_response.text
+    assert 'autocomplete="current-password"' in page_response.text
+    assert "www-authenticate" not in page_response.headers
+    assert api_response.status_code == 401
+    assert "www-authenticate" not in api_response.headers
+
+    bad_login = client.post("/login", data={"username": "admin", "password": "bad"})
+    assert bad_login.status_code == 401
+    assert "账号或密码不正确" in bad_login.text
+
+    login_response = client.post(
+        "/login",
+        data={"username": "admin", "password": "secret", "remember": "on"},
+        follow_redirects=False,
+    )
+    assert login_response.status_code == 303
+    assert "duty_session=" in login_response.headers["set-cookie"]
+    assert "Max-Age=" in login_response.headers["set-cookie"]
+    assert client.get("/").status_code == 200
+    assert client.get("/api/rosters").status_code == 200
+
+    logout_response = client.get("/logout", follow_redirects=False)
+    assert logout_response.status_code == 303
+    assert "duty_session=" in logout_response.headers["set-cookie"]
     assert client.get("/api/rosters").status_code == 401
-    assert client.get("/", headers=_auth_header()).status_code == 200
-    assert client.get("/api/rosters", headers=_auth_header()).status_code == 200
 
 
 def test_upload_image_returns_review_grid(tmp_path, monkeypatch):

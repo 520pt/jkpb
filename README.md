@@ -41,7 +41,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-部署前请先修改 `.env` 里的 `ADMIN_PASSWORD`。设置后页面和接口会启用 Basic Auth 登录保护，`/health` 保持不鉴权用于健康检查。
+部署前请先修改 `.env` 里的 `ADMIN_PASSWORD`。设置后页面和接口会启用应用内登录保护，`/health` 保持不鉴权用于健康检查。
 
 GitHub Actions 会自动构建镜像并推送到 GitHub Container Registry：
 
@@ -131,7 +131,8 @@ https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_WEBHOOK_KEY
 
 ## 运行安全
 
-- `ADMIN_PASSWORD`：设置后启用登录保护。
+- `ADMIN_PASSWORD`：设置后启用应用内登录保护。
+- `ADMIN_SESSION_SECRET`：可选，用于固定登录 cookie 签名密钥；不设置时使用 `ADMIN_PASSWORD`。
 - `MAX_UPLOAD_MB`：限制上传图片大小，默认 `10`。
 - `UPLOAD_KEEP_DAYS`：自动清理超过指定天数的旧上传图片，默认 `90`。
 - Docker 镜像已安装 `fonts-noto-cjk`，用于生成中文“今日在岗”图片。

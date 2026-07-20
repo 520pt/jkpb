@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
+import hmac
+import html as html_lib
 import logging
 import os
 import re
 import secrets
+import time
 import uuid
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -13,7 +17,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
@@ -29,6 +33,9 @@ TZ = ZoneInfo(os.getenv("TZ", "Asia/Shanghai"))
 REMINDER_SEND_GRACE = timedelta(minutes=1)
 LOGGER = logging.getLogger(__name__)
 HHMM_PATTERN = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+SESSION_COOKIE_NAME = "duty_session"
+SESSION_DURATION_SECONDS = 12 * 60 * 60
+REMEMBER_SESSION_SECONDS = 30 * 24 * 60 * 60
 ALLOWED_UPLOAD_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 ALLOWED_UPLOAD_TYPES = {"image/jpeg", "image/png", "image/webp", "image/bmp"}
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_MB", "10")) * 1024 * 1024
@@ -119,19 +126,20 @@ def create_app(
 
     configured_admin_password = admin_password if admin_password is not None else os.getenv("ADMIN_PASSWORD", "")
     admin_username = os.getenv("ADMIN_USERNAME", "admin")
+    session_secret = os.getenv("ADMIN_SESSION_SECRET") or configured_admin_password
 
     if configured_admin_password:
         @app.middleware("http")
-        async def require_basic_auth(request: Request, call_next):
+        async def require_login(request: Request, call_next):
             if request.url.path == "/health":
                 return await call_next(request)
-            if _is_authorized(request.headers.get("authorization", ""), admin_username, configured_admin_password):
+            if request.url.path in {"/login", "/logout"}:
                 return await call_next(request)
-            return Response(
-                "Unauthorized",
-                status_code=401,
-                headers={"WWW-Authenticate": 'Basic realm="Duty Reminder"'},
-            )
+            if _is_request_authorized(request, admin_username, configured_admin_password, session_secret):
+                return await call_next(request)
+            if request.url.path.startswith("/api/"):
+                return JSONResponse({"detail": "未登录或登录已过期"}, status_code=401)
+            return _login_page_response(static_dir, next_url=request.url.path)
 
     static_dir = Path(__file__).parent / "static"
     if static_dir.exists():
@@ -140,6 +148,46 @@ def create_app(
     @app.get("/")
     def index():
         return FileResponse(static_dir / "index.html")
+
+    @app.get("/login")
+    def login_page(request: Request):
+        if not configured_admin_password:
+            return RedirectResponse("/", status_code=303)
+        next_url = request.query_params.get("next", "/")
+        return _login_page_response(static_dir, next_url=_safe_next_url(next_url))
+
+    @app.post("/login")
+    async def login(request: Request):
+        if not configured_admin_password:
+            return RedirectResponse("/", status_code=303)
+        form = await request.form()
+        username = str(form.get("username") or "")
+        password = str(form.get("password") or "")
+        next_url = _safe_next_url(str(form.get("next") or "/"))
+        remember = bool(form.get("remember"))
+        if not (
+            secrets.compare_digest(username, admin_username)
+            and secrets.compare_digest(password, configured_admin_password)
+        ):
+            return _login_page_response(static_dir, error="账号或密码不正确", next_url=next_url, status_code=401)
+        max_age = REMEMBER_SESSION_SECONDS if remember else SESSION_DURATION_SECONDS
+        token = _create_session_token(admin_username, session_secret, max_age)
+        response = RedirectResponse(next_url, status_code=303)
+        response.set_cookie(
+            SESSION_COOKIE_NAME,
+            token,
+            max_age=max_age if remember else None,
+            httponly=True,
+            samesite="lax",
+            secure=request.url.scheme == "https",
+        )
+        return response
+
+    @app.get("/logout")
+    def logout():
+        response = RedirectResponse("/login", status_code=303)
+        response.delete_cookie(SESSION_COOKIE_NAME)
+        return response
 
     @app.get("/health")
     def health():
@@ -509,6 +557,58 @@ def _is_authorized(header: str, username: str, password: str) -> bool:
         and secrets.compare_digest(supplied_username, username)
         and secrets.compare_digest(supplied_password, password)
     )
+
+
+def _is_request_authorized(request: Request, username: str, password: str, session_secret: str) -> bool:
+    if _is_authorized(request.headers.get("authorization", ""), username, password):
+        return True
+    return _verify_session_token(request.cookies.get(SESSION_COOKIE_NAME, ""), username, session_secret)
+
+
+def _create_session_token(username: str, secret: str, max_age_seconds: int) -> str:
+    expires_at = int(time.time()) + max_age_seconds
+    payload = f"{username}|{expires_at}"
+    signature = hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    token = f"{payload}|{signature}".encode("utf-8")
+    return base64.urlsafe_b64encode(token).decode("ascii")
+
+
+def _verify_session_token(token: str, username: str, secret: str) -> bool:
+    if not token:
+        return False
+    try:
+        decoded = base64.urlsafe_b64decode(token.encode("ascii")).decode("utf-8")
+    except Exception:
+        return False
+    supplied_username, expires_text, supplied_signature = (decoded.split("|", 2) + ["", "", ""])[:3]
+    if not supplied_username or not expires_text or not supplied_signature:
+        return False
+    try:
+        expires_at = int(expires_text)
+    except ValueError:
+        return False
+    if expires_at < int(time.time()):
+        return False
+    payload = f"{supplied_username}|{expires_at}"
+    expected_signature = hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return secrets.compare_digest(supplied_username, username) and secrets.compare_digest(supplied_signature, expected_signature)
+
+
+def _safe_next_url(next_url: str) -> str:
+    text = str(next_url or "/").strip()
+    if not text.startswith("/") or text.startswith("//"):
+        return "/"
+    return text
+
+
+def _login_page_response(static_dir: Path, *, error: str = "", next_url: str = "/", status_code: int = 200) -> HTMLResponse:
+    template = (static_dir / "login.html").read_text(encoding="utf-8")
+    error_html = f'<div class="login-error">{html_lib.escape(error)}</div>' if error else ""
+    page_html = (
+        template.replace("{{error_html}}", error_html)
+        .replace("{{next_url}}", html_lib.escape(_safe_next_url(next_url), quote=True))
+    )
+    return HTMLResponse(page_html, status_code=status_code)
 
 
 def _public_notification_config(config: dict[str, Any]) -> dict[str, Any]:

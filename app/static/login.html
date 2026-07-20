@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>监控班提醒登录</title>
+  <style>
+    :root {
+      --bg: #eef2f7;
+      --panel: #ffffff;
+      --ink: #111827;
+      --muted: #64748b;
+      --line: #cbd5e1;
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --danger: #b91c1c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      color: var(--ink);
+      background:
+        linear-gradient(180deg, rgba(15, 23, 42, 0.04), transparent 180px),
+        var(--bg);
+      font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+    }
+    .login-shell {
+      width: min(420px, 100%);
+      display: grid;
+      gap: 14px;
+    }
+    .brand {
+      display: grid;
+      gap: 6px;
+      text-align: center;
+    }
+    .brand h1 {
+      margin: 0;
+      font-size: 26px;
+      letter-spacing: 0;
+    }
+    .brand span {
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .login-card {
+      display: grid;
+      gap: 16px;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 18px 46px rgba(15, 23, 42, 0.12);
+    }
+    label {
+      display: grid;
+      gap: 7px;
+      font-size: 14px;
+      font-weight: 650;
+    }
+    input[type="text"],
+    input[type="password"] {
+      width: 100%;
+      height: 42px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--ink);
+      background: #fff;
+      font-size: 15px;
+      outline: none;
+    }
+    input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+    }
+    .login-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .remember {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-weight: 500;
+    }
+    .remember input {
+      width: 16px;
+      height: 16px;
+      margin: 0;
+    }
+    button {
+      height: 42px;
+      border: 1px solid var(--primary);
+      border-radius: 6px;
+      color: #fff;
+      background: var(--primary);
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button:hover { background: var(--primary-dark); }
+    .login-error {
+      padding: 10px 12px;
+      border: 1px solid #fecaca;
+      border-radius: 6px;
+      color: var(--danger);
+      background: #fef2f2;
+      font-size: 13px;
+      font-weight: 650;
+    }
+    .login-note {
+      margin: 0;
+      color: var(--muted);
+      text-align: center;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <main class="login-shell">
+    <div class="brand">
+      <h1>监控班提醒</h1>
+      <span>登录后管理排班、提醒和企业微信通知</span>
+    </div>
+    <form class="login-card" method="post" action="/login">
+      {{error_html}}
+      <input type="hidden" name="next" value="{{next_url}}" />
+      <label>
+        账号
+        <input name="username" type="text" value="admin" autocomplete="username" required autofocus />
+      </label>
+      <label>
+        密码
+        <input name="password" type="password" autocomplete="current-password" required />
+      </label>
+      <div class="login-row">
+        <label class="remember">
+          <input name="remember" type="checkbox" checked />
+          记住登录
+        </label>
+        <span>默认 30 天</span>
+      </div>
+      <button type="submit">登录</button>
+    </form>
+    <p class="login-note">浏览器可保存账号密码，下次打开更方便。</p>
+  </main>
+</body>
+</html>
