@@ -1,0 +1,32 @@
+[project]
+name = "duty-reminder"
+version = "0.1.0"
+description = "Monitoring duty reminder service with roster image import and WeCom notifications."
+requires-python = ">=3.10"
+dependencies = [
+  "apscheduler>=3.10,<4",
+  "fastapi>=0.116,<1",
+  "httpx>=0.28,<1",
+  "opencv-python-headless>=4.6,<5",
+  "pillow>=10,<13",
+  "pydantic>=2.8,<3",
+  "python-multipart>=0.0.9,<1",
+  "uvicorn>=0.35,<1",
+]
+
+[project.optional-dependencies]
+ocr = [
+  "paddleocr>=2.7,<3",
+  "paddlepaddle>=2.6,<3",
+]
+test = [
+  "pytest>=8,<9",
+  "pytest-asyncio>=0.23,<1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.setuptools.packages.find]
+include = ["app*"]

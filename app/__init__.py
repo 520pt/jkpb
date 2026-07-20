@@ -1,0 +1,1 @@
+"""Duty reminder application package."""

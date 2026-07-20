@@ -1,0 +1,2367 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>监控班提醒</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --ink: #18212f;
+      --muted: #6a7484;
+      --line: #d8dee8;
+      --blue: #2563eb;
+      --green: #0f8a5f;
+      --red: #c2410c;
+      --yellow: #fff45b;
+      --early: #10b981;
+      --night: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    header {
+      height: 54px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 22px;
+      background: #172033;
+      color: white;
+    }
+    header h1 { margin: 0; font-size: 18px; font-weight: 650; }
+    .tabs {
+      display: flex;
+      gap: 8px;
+      padding: 12px 16px 0;
+    }
+    .tab-button {
+      min-width: 104px;
+      height: 36px;
+      border: 1px solid var(--line);
+      border-bottom-color: #c7d0df;
+      background: #edf2f9;
+      color: var(--ink);
+      border-radius: 8px 8px 0 0;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .tab-button.active {
+      background: white;
+      border-color: #b7c3d6;
+      color: var(--blue);
+    }
+    main {
+      display: grid;
+      gap: 16px;
+      padding: 0 16px 16px;
+    }
+    .hidden, .tab-page.hidden { display: none !important; }
+    #reviewPage.dragover {
+      border-color: var(--blue);
+      box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.2);
+    }
+    section, aside {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      min-width: 0;
+    }
+    .section-head {
+      min-height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    h2, h3 { margin: 0; }
+    h2 { font-size: 15px; }
+    h3 { font-size: 14px; }
+    .review-title {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+    .month-fields {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      font-size: 13px;
+      font-weight: 400;
+    }
+    .toolbar, .form-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    input, select, button {
+      height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 0 9px;
+      font: inherit;
+      background: white;
+      color: var(--ink);
+    }
+    textarea {
+      min-height: 92px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 9px;
+      font: inherit;
+      resize: vertical;
+      color: var(--ink);
+    }
+    input[type="number"] { width: 82px; }
+    input[type="time"] { width: 112px; }
+    input[type="checkbox"], input[type="radio"] {
+      width: auto;
+      height: auto;
+      padding: 0;
+    }
+    button {
+      cursor: pointer;
+      border-color: #b8c1d1;
+      font-weight: 650;
+    }
+    button.primary {
+      background: var(--blue);
+      border-color: var(--blue);
+      color: white;
+    }
+    button.green {
+      background: var(--green);
+      border-color: var(--green);
+      color: white;
+    }
+    button.danger { color: var(--red); }
+    .download-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 116px;
+      height: 34px;
+      border: 1px solid #b8c1d1;
+      border-radius: 6px;
+      padding: 0 9px;
+      background: white;
+      color: var(--ink);
+      text-decoration: none;
+      font-weight: 650;
+      font-size: 13px;
+    }
+    .body { padding: 14px; }
+    .status {
+      min-height: 22px;
+      color: var(--muted);
+      font-size: 13px;
+      margin: 8px 0 0;
+    }
+    .status.error { color: var(--red); }
+    .status.ok { color: var(--green); }
+    #reviewPage .body {
+      padding: 2px 10px 10px;
+    }
+    #reviewPage #status {
+      margin: 0 0 6px;
+    }
+    #reviewPage #status:empty {
+      min-height: 0;
+      margin: 0;
+    }
+    .drop-zone {
+      min-width: 250px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px dashed #9fb0c8;
+      border-radius: 8px;
+      color: var(--muted);
+      background: #f8fbff;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .drop-zone.dragover {
+      border-color: var(--blue);
+      background: #eaf1ff;
+      color: var(--blue);
+    }
+    #file { width: 300px; }
+    .review-layout {
+      display: grid;
+      grid-template-columns: minmax(460px, 45%) minmax(0, 1fr);
+      gap: 12px;
+      align-items: stretch;
+      margin-top: 8px;
+    }
+    #reviewPage .review-layout {
+      margin-top: 2px;
+    }
+    .image-panel, .table-panel {
+      min-width: 0;
+      display: grid;
+      grid-template-rows: 36px minmax(0, 1fr);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fbfcff;
+    }
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 0 9px;
+      border-bottom: 1px solid var(--line);
+      background: #eef2f8;
+      font-size: 13px;
+      font-weight: 650;
+    }
+    .panel-head button {
+      height: 26px;
+      min-width: 32px;
+      padding: 0 7px;
+      font-size: 12px;
+    }
+    .filter-bar button.active {
+      color: white;
+      background: #334155;
+      border-color: #334155;
+    }
+    .image-frame {
+      height: calc(100vh - 215px);
+      overflow: auto;
+      background: #f8fafc;
+      position: relative;
+    }
+    .image-frame.empty {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .image-canvas {
+      position: relative;
+      width: max-content;
+      height: max-content;
+    }
+    .image-canvas[hidden] {
+      display: none;
+    }
+    #sourceImage {
+      display: block;
+      max-width: none;
+      height: auto;
+    }
+    .overlay-layer {
+      position: absolute;
+      inset: 0 auto auto 0;
+      pointer-events: none;
+    }
+    .cell-overlay {
+      position: absolute;
+      border: 1px solid rgba(37, 99, 235, 0.55);
+      background: rgba(37, 99, 235, 0.16);
+      opacity: 0;
+    }
+    .cell-overlay.match { opacity: 1; }
+    .cell-overlay.selected {
+      opacity: 1;
+      z-index: 3;
+      border: 2px solid #dc2626;
+      background: rgba(220, 38, 38, 0.22);
+      box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.8);
+    }
+    .cell-overlay.recheck-issue {
+      opacity: 1;
+      z-index: 2;
+      border: 2px solid #facc15;
+      background: rgba(250, 204, 21, 0.22);
+    }
+    .table-wrap {
+      overflow: auto;
+      height: calc(100vh - 215px);
+      background: white;
+    }
+    .saved-wrap {
+      overflow: auto;
+      height: calc(100vh - 210px);
+      background: white;
+      border-top: 1px solid var(--line);
+    }
+    #savedPage .body {
+      display: grid;
+      grid-template-rows: auto minmax(180px, 1fr);
+      gap: 10px;
+      height: calc(100vh - 130px);
+      min-height: 0;
+    }
+    #savedPage .saved-wrap {
+      height: auto;
+      min-height: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .saved-duty-inline {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+    }
+    .saved-duty-head {
+      min-height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 7px 10px;
+      border-bottom: 1px solid var(--line);
+      background: #eef2f8;
+      font-size: 13px;
+      font-weight: 650;
+    }
+    .saved-duty-chart {
+      overflow: visible;
+      padding: 10px 0 0;
+      background: transparent;
+    }
+    .saved-duty-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 8px;
+    }
+    .saved-duty-card {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f9fbff;
+      padding: 10px 10px 8px;
+    }
+    .saved-duty-card h4 {
+      margin: 0 0 8px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .saved-duty-card.monitor { border-color: #bfd2ff; background: #f4f8ff; }
+    .saved-duty-card.driver { border-color: #cce8dd; background: #f4fbf7; }
+    .saved-duty-card.standby { border-color: #e0d3ff; background: #faf7ff; }
+    .saved-duty-card.rest { border-color: #ffd9c7; background: #fff9f5; }
+    .saved-duty-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      min-height: 28px;
+    }
+    .saved-duty-item {
+      display: grid;
+      gap: 6px;
+      margin-top: 2px;
+    }
+    .saved-duty-item strong {
+      font-size: 12px;
+      font-weight: 650;
+      color: var(--ink);
+    }
+    .saved-duty-chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: white;
+      border: 1px solid var(--line);
+      font-size: 12px;
+      line-height: 1;
+    }
+    .saved-duty-empty {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 26px;
+    }
+    .saved-duty-status-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .saved-duty-status {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 10px;
+      background: #fbfcff;
+      font-size: 12px;
+    }
+    .saved-duty-status strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 12px;
+    }
+    .saved-duty-status.rest-start { border-color: #fee2e2; background: #fff8f8; }
+    .saved-duty-status.resting { border-color: #fde68a; background: #fffdf3; }
+    .saved-duty-status.return { border-color: #bfdbfe; background: #f7fbff; }
+    .saved-duty-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    table {
+      width: max-content;
+      min-width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      font-size: 13px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      border-right: 1px solid var(--line);
+      padding: 4px;
+      text-align: center;
+      white-space: nowrap;
+      background: white;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      background: #eef2f8;
+      font-weight: 650;
+    }
+    th.name, td.name {
+      position: sticky;
+      left: 0;
+      z-index: 6;
+      background: white;
+    }
+    th.name { background: #eef2f8; }
+    td.name input { width: 92px; }
+    td.shift-cell {
+      transition: background 120ms ease, opacity 120ms ease;
+    }
+    td.shift-cell select {
+      width: 48px;
+      padding: 0 4px;
+      background: transparent;
+    }
+    td.shift-cell.selected {
+      outline: 2px solid #dc2626;
+      outline-offset: -2px;
+    }
+    td.shift-cell.recheck-issue {
+      outline: 2px solid #facc15;
+      outline-offset: -2px;
+      box-shadow: inset 0 0 0 2px #facc15;
+    }
+    td.shift-cell.recheck-issue select {
+      border-color: #facc15;
+      background: rgba(250, 204, 21, 0.12);
+    }
+    td.shift-cell.match {
+      background: rgba(37, 99, 235, 0.12);
+    }
+    td.shift-cell.dim {
+      opacity: 0.32;
+      background: #f1f5f9;
+    }
+    td.shift-mid { background: #ffffff; }
+    td.shift-rest { background: #fff9a8; }
+    td.shift-early { background: #c7f7df; }
+    td.shift-night { background: #ffe0e0; }
+    td.shift-trip { background: #e5e7eb; }
+    #savedGrid th.saved-col-highlight,
+    #savedGrid td.name.saved-row-highlight {
+      background: #bfdbfe;
+      color: #1d4ed8;
+    }
+    #savedGrid td.shift-cell.saved-row-highlight,
+    #savedGrid td.shift-cell.saved-col-highlight {
+      box-shadow: inset 0 0 0 999px rgba(37, 99, 235, 0.20);
+    }
+    #savedGrid td.shift-cell.saved-active-cell {
+      outline: 3px solid #1d4ed8;
+      outline-offset: -3px;
+      box-shadow: inset 0 0 0 999px rgba(37, 99, 235, 0.34);
+      color: #0f172a;
+      font-weight: 800;
+    }
+    .saved-summary {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .conflict-panel {
+      margin: 8px 0 12px;
+      border: 1px solid #facc15;
+      background: #fffbeb;
+      border-radius: 8px;
+      padding: 10px;
+    }
+    .conflict-panel h3 {
+      margin-bottom: 8px;
+      color: #92400e;
+    }
+    .conflict-wrap {
+      max-height: 220px;
+      overflow: auto;
+      border: 1px solid #fde68a;
+      background: white;
+      margin: 8px 0;
+    }
+    .conflict-wrap table {
+      width: 100%;
+      min-width: 520px;
+    }
+    .settings-shell {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      min-height: calc(100vh - 132px);
+    }
+    .settings-nav {
+      border-right: 1px solid var(--line);
+      background: #f8fafc;
+      padding: 14px;
+    }
+    .settings-nav h3 {
+      margin-bottom: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .settings-nav button {
+      display: block;
+      width: 100%;
+      padding: 9px 10px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--ink);
+      background: transparent;
+      font-size: 13px;
+      font-weight: 650;
+      text-align: left;
+      cursor: pointer;
+    }
+    .settings-nav button:hover,
+    .settings-nav button.active {
+      background: #eaf1ff;
+      color: var(--blue);
+    }
+    .settings-grid {
+      padding: 14px;
+    }
+    .settings-panel {
+      display: none;
+      gap: 14px;
+      align-items: start;
+      grid-template-columns: minmax(360px, 1fr) minmax(360px, 1fr);
+    }
+    .settings-panel.active { display: grid; }
+    .settings-panel.single { grid-template-columns: minmax(0, 860px); }
+    .side-block {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+    }
+    .side-block h3 {
+      padding-bottom: 10px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .side-block.wide {
+      grid-column: 1 / -1;
+    }
+    .stack { display: grid; gap: 8px; }
+    .stack label {
+      display: grid;
+      gap: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .stack label input {
+      width: 100%;
+      color: var(--ink);
+    }
+    .stack label.checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      color: var(--ink);
+    }
+    .stack label.checkbox-label input {
+      width: auto;
+      flex: 0 0 auto;
+    }
+    .field-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .field-grid label {
+      min-width: 0;
+    }
+    .driver-tag-grid {
+      align-items: stretch;
+    }
+    .driver-tag-grid label {
+      grid-template-rows: auto 1fr auto;
+    }
+    .driver-tag-grid .tag-editor {
+      height: 100%;
+      align-content: flex-start;
+    }
+    .settings-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding-top: 2px;
+    }
+    .settings-actions button {
+      min-width: 116px;
+    }
+    .tag-editor {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      min-height: 42px;
+      padding: 7px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcff;
+    }
+    .tag-empty {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .tag-input-row,
+    .driver-picker-row {
+      display: grid;
+      grid-template-columns: minmax(180px, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+    }
+    .driver-picker-row {
+      grid-template-columns: minmax(160px, 240px) minmax(180px, 1fr);
+    }
+    .name-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 28px;
+      padding: 0 9px;
+      border: 1px solid #cbd5e1;
+      border-radius: 999px;
+      background: #eef2f8;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 650;
+    }
+    .name-tag button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      min-width: 18px;
+      padding: 0;
+      border: 0;
+      border-radius: 50%;
+      background: #d8dee8;
+      color: #334155;
+      line-height: 18px;
+      font-size: 14px;
+    }
+    .hidden-field {
+      display: none;
+    }
+    .people-list, .events, .records-list, .version-list {
+      display: grid;
+      gap: 8px;
+      max-height: 380px;
+      overflow: auto;
+    }
+    .item {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 8px;
+      background: #fbfcff;
+      font-size: 13px;
+    }
+    .item strong { display: block; margin-bottom: 3px; }
+    .item small { color: var(--muted); }
+    .record-item {
+      display: grid;
+      grid-template-columns: 170px 112px 130px 72px minmax(180px, 1fr) 92px;
+      gap: 8px;
+      align-items: start;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 8px;
+      background: #fbfcff;
+      font-size: 12px;
+    }
+    .record-item.success {
+      border-color: #bde5d1;
+      background: #f7fcf9;
+    }
+    .record-item.failed {
+      border-color: #fecaca;
+      background: #fff8f8;
+    }
+    .record-item strong { display: block; font-size: 13px; }
+    .record-item small { color: var(--muted); }
+    .record-item button {
+      width: 76px;
+      height: 30px;
+      padding: 0 6px;
+      font-size: 12px;
+    }
+    .version-panel,
+    .status-grid {
+      display: grid;
+      gap: 10px;
+    }
+    .version-item,
+    .status-card {
+      display: grid;
+      gap: 4px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 9px;
+      background: #fbfcff;
+      font-size: 13px;
+    }
+    .version-item {
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+    }
+    .version-item small,
+    .status-card small {
+      color: var(--muted);
+    }
+    .status-grid {
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+    .daily-duty-visual {
+      display: grid;
+      gap: 8px;
+    }
+    .daily-duty-visual img {
+      display: block;
+      width: 100%;
+      max-width: 900px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: white;
+    }
+    @media (max-width: 960px) {
+      .review-layout { grid-template-columns: 1fr; }
+      .settings-shell { grid-template-columns: 1fr; }
+      .settings-nav {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .settings-nav button {
+        display: inline-block;
+        width: auto;
+        margin: 0 6px 6px 0;
+      }
+      .settings-panel,
+      .settings-panel.single { grid-template-columns: 1fr; }
+      .side-block.wide { grid-column: auto; }
+      .field-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>监控班提醒</h1>
+    <span id="clock"></span>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab-button active" data-tab="review">排班核对</button>
+    <button class="tab-button" data-tab="saved">已导入排班</button>
+    <button class="tab-button" data-tab="settings">监测配置</button>
+    <button class="tab-button" data-tab="records">发送记录</button>
+    <button class="tab-button" data-tab="status">系统状态</button>
+  </nav>
+
+  <main>
+    <section id="reviewPage" class="tab-page">
+      <div class="section-head">
+        <div class="review-title">
+          <h2>排班表</h2>
+          <div class="month-fields">
+            <label>年份 <input id="year" type="number" min="2020" max="2099" /></label>
+            <label>月份 <input id="month" type="number" min="1" max="12" /></label>
+          </div>
+        </div>
+        <div class="toolbar">
+          <input id="file" type="file" accept="image/*" />
+          <div id="dropZone" class="drop-zone">拖入图片到任意位置</div>
+          <button class="primary" id="uploadBtn">重新识别</button>
+          <button id="recheckBtn">自动核对</button>
+          <button id="addRowBtn">新增人员</button>
+          <button class="green" id="confirmBtn">确认导入</button>
+        </div>
+      </div>
+      <div class="body">
+        <p id="status" class="status"></p>
+        <div id="conflictPanel" class="conflict-panel hidden">
+          <h3>同月份排班已存在</h3>
+          <div id="conflictMessage"></div>
+          <div class="conflict-wrap">
+            <table id="conflictDiffs"></table>
+          </div>
+          <div class="toolbar">
+            <button class="green" id="overwriteImportBtn">替换导入</button>
+            <button id="cancelConflictBtn">取消导入</button>
+          </div>
+        </div>
+        <div class="review-layout">
+          <div class="image-panel">
+            <div class="panel-head">
+              <span>原图</span>
+              <div class="toolbar">
+                <button id="zoomOutBtn">-</button>
+                <button id="zoomResetBtn">100%</button>
+                <button id="zoomInBtn">+</button>
+              </div>
+            </div>
+            <div id="imageFrame" class="image-frame empty">
+              <span id="imageEmpty">上传后显示原图</span>
+              <div id="imageCanvas" class="image-canvas" hidden>
+                <img id="sourceImage" alt="排班原图" hidden />
+                <div id="overlayLayer" class="overlay-layer"></div>
+              </div>
+            </div>
+          </div>
+          <div class="table-panel">
+            <div class="panel-head">
+              <span>识别结果</span>
+              <div class="toolbar filter-bar" id="filterBar">
+                <button data-filter="全部" class="active">全部</button>
+                <button data-filter="中">中</button>
+                <button data-filter="早">早</button>
+                <button data-filter="晚">晚</button>
+                <button data-filter="休">休</button>
+                <button data-filter="出差">出差</button>
+              </div>
+              <span id="gridSummary"></span>
+            </div>
+            <div id="tableWrap" class="table-wrap">
+              <table id="grid"></table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="savedPage" class="tab-page hidden">
+      <div class="section-head">
+        <h2>已导入排班</h2>
+        <div class="toolbar">
+          <select id="savedRosterSelect"></select>
+          <button id="refreshSavedBtn">刷新</button>
+          <button id="editSavedBtn">编辑</button>
+          <button class="green hidden" id="saveSavedBtn">保存修改</button>
+          <button class="hidden" id="cancelSavedEditBtn">取消</button>
+          <span id="savedSummary" class="saved-summary"></span>
+        </div>
+      </div>
+      <div class="body">
+        <p id="savedStatus" class="status"></p>
+        <div class="saved-wrap">
+          <table id="savedGrid"></table>
+          <div class="saved-duty-inline">
+            <div class="saved-duty-head">
+              <span>今日在岗信息</span>
+              <div class="toolbar">
+                <input id="savedDutyDate" type="date" />
+                <button id="savedDutyRefreshBtn">刷新</button>
+              </div>
+            </div>
+            <div id="savedDutyChart" class="saved-duty-chart"></div>
+          </div>
+          <div class="saved-duty-inline">
+            <div class="saved-duty-head">
+              <span>排班版本历史</span>
+              <div class="toolbar">
+                <button id="refreshVersionsBtn">刷新版本</button>
+              </div>
+            </div>
+            <div id="rosterVersionsList" class="version-list"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside id="settingsPage" class="tab-page hidden">
+      <div class="settings-shell">
+        <nav class="settings-nav">
+          <h3>配置目录</h3>
+          <button class="active" data-settings-target="wecomSettings">企业微信通知</button>
+          <button data-settings-target="monitorSettings">监控班提醒</button>
+          <button data-settings-target="personnelSettings">人员名单</button>
+          <button data-settings-target="driverSettings">今日在岗提醒</button>
+          <button data-settings-target="previewSettings">提醒预览</button>
+        </nav>
+
+        <div class="settings-grid">
+          <section class="settings-panel single active" id="wecomSettings">
+            <div class="side-block wide">
+              <h3>企业微信通知</h3>
+              <div class="stack">
+                <label>群机器人地址 <input id="webhookUrl" placeholder="未配置，保存时请输入机器人地址" /></label>
+                <div class="field-grid">
+                  <label>测试@手机号 <input id="testMobile" placeholder="10000000000" /></label>
+                </div>
+                <div class="settings-actions">
+                  <button class="primary" id="saveNotificationBtn">保存通知配置</button>
+                  <button id="testNotificationBtn">测试发送</button>
+                </div>
+                <p id="notificationStatus" class="status"></p>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-panel" id="monitorSettings">
+            <div class="side-block">
+              <h3>监控班提醒</h3>
+              <div class="stack">
+                <div class="field-grid">
+                  <label>姓名 <input id="personName" placeholder="示例甲" /></label>
+                  <label>@ 手机号 <input id="mentionMobile" placeholder="10000000000" /></label>
+                </div>
+                <div class="field-grid">
+                  <label>每日提醒时间 <input id="dailyTime" type="time" value="07:50" /></label>
+                  <label>班次提前提醒分钟 <input id="beforeMinutes" type="number" min="0" max="1440" value="10" /></label>
+                </div>
+                <label>监控排班提醒文案 <textarea id="messageTemplate" placeholder="{name} {date}（{time_range})是你的{shift_label}"></textarea></label>
+                <div class="field-grid">
+                  <label class="checkbox-label"><input id="restReminderEnabled" type="checkbox" /> 启用休息提醒</label>
+                </div>
+                <div id="restReminderFields" class="stack hidden">
+                  <label>休息提醒时间 <input id="restReminderTime" type="time" value="08:30" /></label>
+                  <label>休息提醒文案（{rest_status}=今日下午休息 / 正在休息到日期 / 今日下午到岗） <textarea id="restMessageTemplate" placeholder="{name} {rest_status}">{name} {rest_status}</textarea></label>
+                </div>
+                <div class="settings-actions">
+                  <button class="primary" id="savePersonBtn">保存监控班提醒</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="side-block">
+              <h3>已配置监控班提醒</h3>
+              <div id="peopleList" class="people-list"></div>
+            </div>
+          </section>
+
+          <section class="settings-panel single" id="personnelSettings">
+            <div class="side-block">
+              <h3>人员名单</h3>
+              <div class="stack">
+                <label>名单
+                  <div id="personnelNamesEditor" class="tag-editor" data-hidden-input="personnelNames" data-placeholder="输入姓名后回车"></div>
+                  <textarea id="personnelNames" class="hidden-field"></textarea>
+                </label>
+                <div class="tag-input-row">
+                  <input id="personnelNamesTagInput" placeholder="输入姓名后回车" />
+                  <button id="addPersonnelNameBtn" type="button">添加姓名</button>
+                </div>
+                <div class="settings-actions">
+                  <button class="primary" id="savePersonnelBtn">保存名单</button>
+                </div>
+                <p id="personnelStatus" class="status"></p>
+              </div>
+            </div>
+
+            <div class="side-block">
+              <h3>驾驶员名单</h3>
+              <div class="stack">
+                <div class="driver-picker-row">
+                  <select id="driverNameSelect"></select>
+                  <input id="driverManualName" placeholder="手动输入姓名，填写后优先使用" />
+                </div>
+                <div class="settings-actions">
+                  <button id="addBigDriverBtn" type="button">加入大车</button>
+                  <button id="addSmallDriverBtn" type="button">加入小车</button>
+                </div>
+                <div class="field-grid driver-tag-grid">
+                  <label>大车驾驶员
+                    <div id="bigDriverNamesEditor" class="tag-editor" data-hidden-input="bigDriverNames"></div>
+                    <textarea id="bigDriverNames" class="hidden-field"></textarea>
+                  </label>
+                  <label>小车驾驶员
+                    <div id="smallDriverNamesEditor" class="tag-editor" data-hidden-input="smallDriverNames"></div>
+                    <textarea id="smallDriverNames" class="hidden-field"></textarea>
+                  </label>
+                </div>
+                <div class="settings-actions">
+                  <button class="primary" id="saveDriverNamesBtn" type="button">保存驾驶员名单</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-panel single" id="driverSettings">
+            <div class="side-block">
+              <h3>今日在岗提醒</h3>
+              <div class="stack">
+                <div class="field-grid">
+                  <label class="checkbox-label"><input id="dailyDutyEnabled" type="checkbox" checked /> 启用今日在岗提醒</label>
+                  <label>提醒时间 <input id="dailyDutyTime" type="time" value="07:50" /></label>
+                </div>
+                <label>今日在岗提醒文案 <textarea id="dailyDutyTemplate" placeholder="今日在岗人员&#10;监控班：早班：{early}，中班：{middle}，晚班：{night}&#10;驾驶员：大车：{big_drivers} 小车：{small_drivers}&#10;备勤人员：{standby}&#10;今日下午休息：{afternoon_rest}&#10;正在休息：{resting}&#10;今日下午到岗：{afternoon_return}"></textarea></label>
+                <div class="settings-actions">
+                  <input id="dailyDutyPreviewDate" type="date" />
+                  <button class="primary" id="saveDailyDutyBtn">保存今日在岗配置</button>
+                  <button id="previewDailyDutyBtn">预览今日在岗</button>
+                  <button id="testDailyDutyBtn">测试发送今日在岗</button>
+                </div>
+                <p id="dailyDutyStatus" class="status"></p>
+                <div id="dailyDutyPreview" class="item"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-panel single" id="previewSettings">
+            <div class="side-block">
+              <h3>提醒预览</h3>
+              <div class="stack">
+                <div class="settings-actions">
+                  <input id="previewDate" type="date" />
+                  <button id="previewBtn">预览</button>
+                </div>
+                <p id="previewStatus" class="status"></p>
+                <div id="events" class="events"></div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </aside>
+
+    <section id="recordsPage" class="tab-page hidden">
+      <div class="section-head">
+        <h2>发送记录</h2>
+        <div class="toolbar">
+          <button id="refreshRecordsBtn">刷新</button>
+          <span id="recordsSummary" class="saved-summary"></span>
+        </div>
+      </div>
+      <div class="body">
+        <p id="recordsStatus" class="status"></p>
+        <div id="recordsList" class="records-list"></div>
+      </div>
+    </section>
+
+    <section id="statusPage" class="tab-page hidden">
+      <div class="section-head">
+        <h2>系统状态</h2>
+        <div class="toolbar">
+          <button id="refreshSystemStatusBtn">刷新</button>
+          <span id="systemStatusSummary" class="saved-summary"></span>
+        </div>
+      </div>
+      <div class="body">
+        <p id="systemStatusText" class="status"></p>
+        <div id="systemStatusGrid" class="status-grid"></div>
+        <h3 style="margin-top:14px;">下一次提醒</h3>
+        <div id="nextEventsList" class="events"></div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const state = {
+      year: "",
+      month: "",
+      sourceImagePath: "",
+      sourceImageUrl: "",
+      imageZoom: 140,
+      grid: [],
+      activeCell: null,
+      filter: "全部",
+      recheckIssues: new Set(),
+      savedRosters: [],
+      selectedSavedRoster: "",
+      savedActiveCell: null,
+      savedEditMode: false,
+      savedDraft: null,
+      pendingImport: null,
+      rosterVersions: [],
+    };
+    const BEIJING_TIME_ZONE = "Asia/Shanghai";
+    const shiftOptions = ["", "早", "中", "晚", "休", "出差"];
+    const shiftClass = { "中": "mid", "早": "early", "晚": "night", "休": "rest", "出差": "trip" };
+    const $ = (id) => document.getElementById(id);
+
+    function setStatus(text, type = "") {
+      $("status").textContent = text;
+      $("status").className = `status ${type}`;
+    }
+
+    function daysInMonth(year, month) {
+      return new Date(year, month, 0).getDate();
+    }
+
+    function reviewDayCount() {
+      return state.year && state.month ? daysInMonth(Number(state.year), Number(state.month)) : 0;
+    }
+
+    function syncFields() {
+      $("year").value = state.year;
+      $("month").value = state.month;
+      const dayCount = reviewDayCount();
+      $("gridSummary").textContent = state.grid.length && dayCount ? `${state.grid.length} 人 × ${dayCount} 天` : "";
+      renderImage();
+    }
+
+    function renderImage() {
+      const image = $("sourceImage");
+      const empty = $("imageEmpty");
+      const frame = $("imageFrame");
+      if (!state.sourceImageUrl) {
+        image.hidden = true;
+        image.removeAttribute("src");
+        $("imageCanvas").hidden = true;
+        empty.hidden = false;
+        frame.classList.add("empty");
+        $("overlayLayer").innerHTML = "";
+        return;
+      }
+      $("imageCanvas").hidden = false;
+      image.src = state.sourceImageUrl;
+      image.hidden = false;
+      empty.hidden = true;
+      frame.classList.remove("empty");
+      $("zoomResetBtn").textContent = `${state.imageZoom}%`;
+      updateImageScale();
+    }
+
+    function updateImageScale() {
+      const image = $("sourceImage");
+      if (!image.naturalWidth) return;
+      const width = Math.round(image.naturalWidth * state.imageZoom / 100);
+      image.style.width = `${width}px`;
+      $("imageCanvas").style.width = `${width}px`;
+      $("imageCanvas").style.height = `${Math.round(image.naturalHeight * state.imageZoom / 100)}px`;
+      renderOverlays();
+    }
+
+    function renderOverlays() {
+      const image = $("sourceImage");
+      const layer = $("overlayLayer");
+      layer.innerHTML = "";
+      if (!image.naturalWidth || !state.grid.length) return;
+      const scale = (image.naturalWidth * state.imageZoom / 100) / image.naturalWidth;
+      layer.style.width = `${Math.round(image.naturalWidth * scale)}px`;
+      layer.style.height = `${Math.round(image.naturalHeight * scale)}px`;
+
+      state.grid.forEach((row, rowIndex) => {
+        const boxes = row.boxes || {};
+        Object.entries(boxes).forEach(([day, box]) => {
+          const value = (row.days || {})[day] || "";
+          const div = document.createElement("div");
+          div.className = `cell-overlay ${matchesFilter(value) ? "match" : ""}`;
+          if (hasRecheckIssue(rowIndex, day)) div.classList.add("recheck-issue");
+          if (isActiveCell(rowIndex, day)) div.classList.add("selected");
+          div.style.left = `${box.x * scale}px`;
+          div.style.top = `${box.y * scale}px`;
+          div.style.width = `${box.width * scale}px`;
+          div.style.height = `${box.height * scale}px`;
+          layer.appendChild(div);
+        });
+      });
+    }
+
+    function renderGrid() {
+      syncFields();
+      const dayCount = reviewDayCount();
+      const table = $("grid");
+      table.innerHTML = "";
+      const head = document.createElement("tr");
+      head.innerHTML = `<th class="name">姓名</th>${Array.from({ length: dayCount }, (_, i) => `<th>${i + 1}</th>`).join("")}<th>操作</th>`;
+      table.appendChild(head);
+
+      state.grid.forEach((row, rowIndex) => {
+        const tr = document.createElement("tr");
+        const name = document.createElement("td");
+        name.className = "name";
+        name.innerHTML = `<input value="${escapeHtml(row.name || "")}" data-row="${rowIndex}" data-name="1" />`;
+        tr.appendChild(name);
+        for (let day = 1; day <= dayCount; day++) {
+          const dayText = String(day);
+          const value = (row.days || {})[dayText] || "";
+          const td = document.createElement("td");
+          td.className = `shift-cell shift-${shiftClass[value] || "blank"}`;
+          if (isActiveCell(rowIndex, dayText)) td.classList.add("selected");
+          if (hasRecheckIssue(rowIndex, dayText)) td.classList.add("recheck-issue");
+          if (matchesFilter(value)) td.classList.add("match");
+          if (!matchesFilter(value)) td.classList.add("dim");
+          td.dataset.row = String(rowIndex);
+          td.dataset.day = dayText;
+          const select = document.createElement("select");
+          select.dataset.row = String(rowIndex);
+          select.dataset.day = dayText;
+          shiftOptions.forEach((optionValue) => {
+            const option = document.createElement("option");
+            option.value = optionValue;
+            option.textContent = optionValue || "-";
+            if (value === optionValue) option.selected = true;
+            select.appendChild(option);
+          });
+          td.appendChild(select);
+          tr.appendChild(td);
+        }
+        const action = document.createElement("td");
+        action.innerHTML = `<button class="danger" data-remove="${rowIndex}">删除</button>`;
+        tr.appendChild(action);
+        table.appendChild(tr);
+      });
+    }
+
+    function matchesFilter(value) {
+      return state.filter === "全部" || value === state.filter;
+    }
+
+    function isActiveCell(rowIndex, day) {
+      return state.activeCell && state.activeCell.row === rowIndex && state.activeCell.day === String(day);
+    }
+
+    function issueKey(rowIndex, day) {
+      return `${Number(rowIndex)}:${String(day)}`;
+    }
+
+    function hasRecheckIssue(rowIndex, day) {
+      return state.recheckIssues.has(issueKey(rowIndex, day));
+    }
+
+    function setRecheckIssues(issues) {
+      state.recheckIssues = new Set((issues || []).map((issue) => issueKey(issue.row, issue.day)));
+    }
+
+    function setActiveCell(rowIndex, day, options = {}) {
+      const shouldRender = options.render !== false;
+      const shouldScroll = options.scroll !== false;
+      state.activeCell = { row: Number(rowIndex), day: String(day) };
+      if (shouldRender) renderGrid();
+      else updateSelectionHighlights();
+      renderOverlays();
+      if (shouldScroll) scrollImageToCell();
+    }
+
+    function updateSelectionHighlights() {
+      document.querySelectorAll("td.shift-cell.selected").forEach((cell) => cell.classList.remove("selected"));
+      if (!state.activeCell) return;
+      const selector = `td.shift-cell[data-row="${state.activeCell.row}"][data-day="${state.activeCell.day}"]`;
+      const cell = document.querySelector(selector);
+      if (cell) cell.classList.add("selected");
+    }
+
+    function scrollImageToCell() {
+      if (!state.activeCell) return;
+      const row = state.grid[state.activeCell.row];
+      const box = row && row.boxes && row.boxes[state.activeCell.day];
+      const image = $("sourceImage");
+      if (!box || !image.naturalWidth) return;
+      const scale = (image.naturalWidth * state.imageZoom / 100) / image.naturalWidth;
+      const frame = $("imageFrame");
+      const targetLeft = box.x * scale - frame.clientWidth / 2 + box.width * scale / 2;
+      const targetTop = box.y * scale - frame.clientHeight / 2 + box.height * scale / 2;
+      frame.scrollTo({ left: Math.max(0, targetLeft), top: Math.max(0, targetTop), behavior: "smooth" });
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+    }
+
+    async function uploadSelectedFile(file) {
+      if (!file) return setStatus("请选择图片", "error");
+      setStatus("正在上传识别...");
+      const form = new FormData();
+      form.append("file", file);
+      const response = await fetch("/api/rosters/upload", { method: "POST", body: form });
+      const body = await response.json();
+      if (!response.ok) return setStatus(body.detail || "上传失败", "error");
+      state.year = body.year;
+      state.month = body.month;
+      state.sourceImagePath = body.source_image_path;
+      state.sourceImageUrl = body.source_image_url || "";
+      state.imageZoom = 140;
+      state.grid = body.grid || [];
+      state.activeCell = null;
+      state.filter = "全部";
+      state.pendingImport = null;
+      hideConflictPanel();
+      setRecheckIssues([]);
+      setFilterButtons();
+      renderGrid();
+      if (body.ocr_status === "ok" || body.ocr_status === "template_ok") {
+        setStatus(`识别完成：${state.grid.length} 人 × ${daysInMonth(Number(state.year), Number(state.month))} 天，请校对后确认导入`, "ok");
+      } else {
+        setStatus("识别失败，请检查图片格式或手动补全表格", "error");
+      }
+    }
+
+    function setFilterButtons() {
+      document.querySelectorAll("#filterBar button").forEach((button) => {
+        button.classList.toggle("active", button.dataset.filter === state.filter);
+      });
+    }
+
+    document.querySelectorAll(".tab-button").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".tab-button").forEach((item) => item.classList.remove("active"));
+        button.classList.add("active");
+        const tab = button.dataset.tab;
+        $("reviewPage").classList.toggle("hidden", tab !== "review");
+        $("savedPage").classList.toggle("hidden", tab !== "saved");
+        $("settingsPage").classList.toggle("hidden", tab !== "settings");
+        $("recordsPage").classList.toggle("hidden", tab !== "records");
+        $("statusPage").classList.toggle("hidden", tab !== "status");
+        if (tab === "saved") {
+          loadSavedRosters();
+          loadSavedDutyChart();
+        }
+        if (tab === "records") loadSendRecords();
+        if (tab === "status") loadSystemStatus();
+      });
+    });
+
+    function switchSettingsPanel(targetId) {
+      document.querySelectorAll(".settings-nav button").forEach((button) => {
+        button.classList.toggle("active", button.dataset.settingsTarget === targetId);
+      });
+      document.querySelectorAll(".settings-panel").forEach((panel) => {
+        panel.classList.toggle("active", panel.id === targetId);
+      });
+    }
+
+    document.querySelectorAll(".settings-nav button").forEach((button) => {
+      button.addEventListener("click", () => switchSettingsPanel(button.dataset.settingsTarget));
+    });
+
+    $("sourceImage").addEventListener("load", updateImageScale);
+
+    $("grid").addEventListener("input", (event) => {
+      const input = event.target;
+      if (input.dataset && input.dataset.name) {
+        state.grid[Number(input.dataset.row)].name = input.value;
+      }
+    });
+
+    $("grid").addEventListener("change", (event) => {
+      const select = event.target;
+      if (select.dataset && select.dataset.day) {
+        const row = state.grid[Number(select.dataset.row)];
+        row.days = row.days || {};
+        if (select.value) row.days[select.dataset.day] = select.value;
+        else delete row.days[select.dataset.day];
+        state.recheckIssues.delete(issueKey(select.dataset.row, select.dataset.day));
+        setActiveCell(Number(select.dataset.row), select.dataset.day);
+      }
+    });
+
+    $("grid").addEventListener("focusin", (event) => {
+      const select = event.target.closest("select");
+      if (!select || !select.dataset.day) return;
+      setActiveCell(Number(select.dataset.row), select.dataset.day, { render: false });
+    });
+
+    $("grid").addEventListener("click", (event) => {
+      const removeButton = event.target.closest("button[data-remove]");
+      if (removeButton) {
+        state.grid.splice(Number(removeButton.dataset.remove), 1);
+        state.activeCell = null;
+        setRecheckIssues([]);
+        renderGrid();
+        renderOverlays();
+        return;
+      }
+      const select = event.target.closest("select");
+      if (select && select.dataset.day) {
+        setActiveCell(Number(select.dataset.row), select.dataset.day, { render: false });
+        return;
+      }
+      const cell = event.target.closest("td.shift-cell");
+      if (cell) setActiveCell(Number(cell.dataset.row), cell.dataset.day);
+    });
+
+    $("filterBar").addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-filter]");
+      if (!button) return;
+      state.filter = button.dataset.filter;
+      setFilterButtons();
+      renderGrid();
+      renderOverlays();
+    });
+
+    $("month").addEventListener("change", () => { state.month = $("month").value ? Number($("month").value) : ""; renderGrid(); });
+    $("year").addEventListener("change", () => { state.year = $("year").value ? Number($("year").value) : ""; renderGrid(); });
+    $("addRowBtn").addEventListener("click", () => { state.grid.push({ name: "", days: {}, boxes: {} }); setRecheckIssues([]); renderGrid(); });
+    $("file").addEventListener("change", () => uploadSelectedFile($("file").files[0]));
+    $("uploadBtn").addEventListener("click", () => uploadSelectedFile($("file").files[0]));
+    $("recheckBtn").addEventListener("click", autoRecheck);
+    $("dropZone").addEventListener("click", () => $("file").click());
+
+    function setDragState(active) {
+      $("dropZone").classList.toggle("dragover", active);
+      $("reviewPage").classList.toggle("dragover", active);
+    }
+
+    ["dragenter", "dragover"].forEach((eventName) => {
+      $("reviewPage").addEventListener(eventName, (event) => {
+        event.preventDefault();
+        setDragState(true);
+      });
+    });
+    ["dragleave", "drop"].forEach((eventName) => {
+      $("reviewPage").addEventListener(eventName, (event) => {
+        event.preventDefault();
+        if (eventName === "drop" || event.target === $("reviewPage")) setDragState(false);
+      });
+    });
+    $("reviewPage").addEventListener("drop", (event) => {
+      const file = event.dataTransfer.files[0];
+      if (file) {
+        const transfer = new DataTransfer();
+        transfer.items.add(file);
+        $("file").files = transfer.files;
+        uploadSelectedFile(file);
+      }
+    });
+
+    $("confirmBtn").addEventListener("click", async () => {
+      if (!state.year || !state.month) return setStatus("请先上传识别排班图片，确认年份和月份后再导入", "error");
+      const gridForSave = state.grid.map((row) => ({ name: row.name, days: row.days || {} }));
+      const payload = { year: Number(state.year), month: Number(state.month), source_image_path: state.sourceImagePath, grid: gridForSave };
+      await confirmRosterImport(payload);
+    });
+
+    async function confirmRosterImport(payload) {
+      const response = await fetch("/api/rosters/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const body = await response.json();
+      if (response.status === 409 && body.conflict) {
+        state.pendingImport = payload;
+        showConflictPanel(body);
+        setStatus(body.message || "同月份排班已存在，请确认是否替换", "error");
+        return;
+      }
+      setStatus(body.success ? "已确认导入" : "导入失败", body.success ? "ok" : "error");
+      if (body.success) {
+        state.pendingImport = null;
+        hideConflictPanel();
+        await loadSavedRosters();
+        await loadPersonnel();
+      }
+    }
+
+    function showConflictPanel(body) {
+      $("conflictPanel").classList.remove("hidden");
+      $("conflictMessage").textContent = `${body.message || "该月份排班表已存在"}，发现 ${body.diffs ? body.diffs.length : 0} 处差异。`;
+      const rows = (body.diffs || []).slice(0, 80).map((diff) => `
+        <tr>
+          <td>${escapeHtml(diff.name || "")}</td>
+          <td>${escapeHtml(diff.day || "")}</td>
+          <td>${escapeHtml(diff.before || "-")}</td>
+          <td>${escapeHtml(diff.after || "-")}</td>
+        </tr>
+      `).join("");
+      $("conflictDiffs").innerHTML = `<tr><th>人员</th><th>日期</th><th>原排班</th><th>新排班</th></tr>${rows || "<tr><td colspan='4'>没有班次差异</td></tr>"}`;
+    }
+
+    function hideConflictPanel() {
+      $("conflictPanel").classList.add("hidden");
+      $("conflictDiffs").innerHTML = "";
+      $("conflictMessage").textContent = "";
+    }
+
+    $("overwriteImportBtn").addEventListener("click", async () => {
+      if (!state.pendingImport) return;
+      await confirmRosterImport({ ...state.pendingImport, overwrite: true });
+    });
+
+    $("cancelConflictBtn").addEventListener("click", () => {
+      state.pendingImport = null;
+      hideConflictPanel();
+      setStatus("已取消导入", "");
+    });
+
+    async function loadSavedRosters() {
+      $("savedStatus").textContent = "正在加载...";
+      const response = await fetch("/api/rosters");
+      const body = await response.json();
+      if (!response.ok) {
+        $("savedStatus").textContent = body.detail || "加载失败";
+        $("savedStatus").className = "status error";
+        return;
+      }
+      state.savedRosters = body.rosters || [];
+      if (!state.selectedSavedRoster && state.savedRosters.length) {
+      const latest = state.savedRosters[state.savedRosters.length - 1];
+        state.selectedSavedRoster = savedRosterKey(latest);
+      }
+      state.savedEditMode = false;
+      state.savedDraft = null;
+      renderSavedRosterSelector();
+      renderSavedRoster();
+    }
+
+    function savedRosterKey(roster) {
+      return `${roster.year}-${String(roster.month).padStart(2, "0")}`;
+    }
+
+    function renderSavedRosterSelector() {
+      const select = $("savedRosterSelect");
+      select.innerHTML = "";
+      if (!state.savedRosters.length) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "暂无已导入排班";
+        select.appendChild(option);
+        return;
+      }
+      state.savedRosters.forEach((roster) => {
+        const option = document.createElement("option");
+        option.value = savedRosterKey(roster);
+        option.textContent = `${roster.year}年${roster.month}月`;
+        if (option.value === state.selectedSavedRoster) option.selected = true;
+        select.appendChild(option);
+      });
+    }
+
+    function renderSavedRoster() {
+      const table = $("savedGrid");
+      const roster = state.savedRosters.find((item) => savedRosterKey(item) === state.selectedSavedRoster);
+      $("editSavedBtn").classList.toggle("hidden", !roster || state.savedEditMode);
+      $("saveSavedBtn").classList.toggle("hidden", !roster || !state.savedEditMode);
+      $("cancelSavedEditBtn").classList.toggle("hidden", !roster || !state.savedEditMode);
+      table.innerHTML = "";
+      if (!roster) {
+        state.savedActiveCell = null;
+        $("savedStatus").textContent = "暂无已确认导入的排班表";
+        $("savedStatus").className = "status";
+        $("savedSummary").textContent = "";
+        $("rosterVersionsList").innerHTML = "<div class='item'>暂无版本</div>";
+        return;
+      }
+      $("savedStatus").textContent = roster.confirmed_at ? `导入时间：${roster.confirmed_at}` : "";
+      $("savedStatus").className = "status ok";
+      const dayCount = daysInMonth(Number(roster.year), Number(roster.month));
+      const grid = state.savedEditMode && state.savedDraft ? state.savedDraft.grid : roster.grid;
+      $("savedSummary").textContent = `${grid.length} 人 × ${dayCount} 天`;
+      loadRosterVersions(roster);
+      const head = document.createElement("tr");
+      head.innerHTML = `<th class="name">姓名</th>${Array.from({ length: dayCount }, (_, i) => {
+        const day = String(i + 1);
+        return `<th data-saved-day="${day}">${day}</th>`;
+      }).join("")}`;
+      table.appendChild(head);
+      grid.forEach((row, rowIndex) => {
+        const tr = document.createElement("tr");
+        const name = document.createElement("td");
+        name.className = "name";
+        name.dataset.savedRow = String(rowIndex);
+        if (state.savedEditMode) {
+          name.innerHTML = `<input value="${escapeHtml(row.name || "")}" data-saved-row="${rowIndex}" data-saved-name="1" />`;
+        } else {
+          name.textContent = row.name || "";
+        }
+        tr.appendChild(name);
+        for (let day = 1; day <= dayCount; day++) {
+          const dayText = String(day);
+          const value = (row.days || {})[dayText] || "";
+          const td = document.createElement("td");
+          td.className = `shift-cell shift-${shiftClass[value] || "blank"}`;
+          td.dataset.savedRow = String(rowIndex);
+          td.dataset.savedDay = dayText;
+          applySavedCellHighlight(td, rowIndex, dayText);
+          if (state.savedEditMode) {
+            const select = document.createElement("select");
+            select.dataset.savedRow = String(rowIndex);
+            select.dataset.savedDay = dayText;
+            shiftOptions.forEach((optionValue) => {
+              const option = document.createElement("option");
+              option.value = optionValue;
+              option.textContent = optionValue || "-";
+              if (value === optionValue) option.selected = true;
+              select.appendChild(option);
+            });
+            td.appendChild(select);
+          } else {
+            td.textContent = value || "-";
+          }
+          tr.appendChild(td);
+        }
+        table.appendChild(tr);
+      });
+      updateSavedSelectionHighlights();
+    }
+
+    function isSavedActiveCell(rowIndex, day) {
+      return state.savedActiveCell && state.savedActiveCell.row === Number(rowIndex) && state.savedActiveCell.day === String(day);
+    }
+
+    function applySavedCellHighlight(cell, rowIndex, day) {
+      if (!state.savedActiveCell) return;
+      if (state.savedActiveCell.row === Number(rowIndex)) cell.classList.add("saved-row-highlight");
+      if (state.savedActiveCell.day === String(day)) cell.classList.add("saved-col-highlight");
+      if (isSavedActiveCell(rowIndex, day)) cell.classList.add("saved-active-cell");
+    }
+
+    function setSavedActiveCell(rowIndex, day) {
+      state.savedActiveCell = { row: Number(rowIndex), day: String(day) };
+      updateSavedSelectionHighlights();
+    }
+
+    function updateSavedSelectionHighlights() {
+      const table = $("savedGrid");
+      table.querySelectorAll(".saved-row-highlight, .saved-col-highlight, .saved-active-cell").forEach((cell) => {
+        cell.classList.remove("saved-row-highlight", "saved-col-highlight", "saved-active-cell");
+      });
+      if (!state.savedActiveCell) return;
+      table.querySelectorAll(`[data-saved-row="${state.savedActiveCell.row}"]`).forEach((cell) => cell.classList.add("saved-row-highlight"));
+      table.querySelectorAll(`[data-saved-day="${state.savedActiveCell.day}"]`).forEach((cell) => cell.classList.add("saved-col-highlight"));
+      const activeCell = table.querySelector(`td.shift-cell[data-saved-row="${state.savedActiveCell.row}"][data-saved-day="${state.savedActiveCell.day}"]`);
+      if (activeCell) activeCell.classList.add("saved-active-cell");
+    }
+
+    $("savedRosterSelect").addEventListener("change", () => {
+      state.selectedSavedRoster = $("savedRosterSelect").value;
+      state.savedActiveCell = null;
+      state.savedEditMode = false;
+      state.savedDraft = null;
+      renderSavedRoster();
+    });
+    $("refreshSavedBtn").addEventListener("click", loadSavedRosters);
+    $("refreshVersionsBtn").addEventListener("click", () => {
+      const roster = state.savedRosters.find((item) => savedRosterKey(item) === state.selectedSavedRoster);
+      if (roster) loadRosterVersions(roster);
+    });
+    $("savedDutyRefreshBtn").addEventListener("click", loadSavedDutyChart);
+    $("savedDutyDate").addEventListener("change", loadSavedDutyChart);
+    $("editSavedBtn").addEventListener("click", () => {
+      const roster = state.savedRosters.find((item) => savedRosterKey(item) === state.selectedSavedRoster);
+      if (!roster) return;
+      state.savedDraft = JSON.parse(JSON.stringify(roster));
+      state.savedEditMode = true;
+      renderSavedRoster();
+    });
+    $("cancelSavedEditBtn").addEventListener("click", () => {
+      state.savedDraft = null;
+      state.savedEditMode = false;
+      renderSavedRoster();
+    });
+    $("savedGrid").addEventListener("click", (event) => {
+      const cell = event.target.closest("td.shift-cell");
+      if (!cell || !cell.dataset.savedRow || !cell.dataset.savedDay) return;
+      setSavedActiveCell(cell.dataset.savedRow, cell.dataset.savedDay);
+    });
+    $("savedGrid").addEventListener("input", (event) => {
+      const input = event.target;
+      if (!state.savedDraft || !input.dataset || !input.dataset.savedName) return;
+      state.savedDraft.grid[Number(input.dataset.savedRow)].name = input.value;
+    });
+    $("savedGrid").addEventListener("change", (event) => {
+      const select = event.target;
+      if (!state.savedDraft || !select.dataset || !select.dataset.savedDay) return;
+      const row = state.savedDraft.grid[Number(select.dataset.savedRow)];
+      row.days = row.days || {};
+      if (select.value) row.days[select.dataset.savedDay] = select.value;
+      else delete row.days[select.dataset.savedDay];
+    });
+    $("saveSavedBtn").addEventListener("click", async () => {
+      if (!state.savedDraft) return;
+      const gridForSave = state.savedDraft.grid.map((row) => ({ name: row.name, days: row.days || {} }));
+      const response = await fetch("/api/rosters/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          year: Number(state.savedDraft.year),
+          month: Number(state.savedDraft.month),
+          source_image_path: state.savedDraft.source_image_path || "",
+          grid: gridForSave,
+          overwrite: true
+        })
+      });
+      const body = await response.json();
+      $("savedStatus").textContent = body.success ? "已保存修改" : "保存失败";
+      $("savedStatus").className = `status ${body.success ? "ok" : "error"}`;
+      if (body.success) await loadSavedRosters();
+    });
+
+    async function loadRosterVersions(roster) {
+      const box = $("rosterVersionsList");
+      if (!roster) {
+        box.innerHTML = "<div class='item'>暂无版本</div>";
+        return;
+      }
+      box.innerHTML = "<div class='item'>正在加载版本...</div>";
+      try {
+        const response = await fetch(`/api/rosters/${roster.year}/${roster.month}/versions`);
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.detail || "版本加载失败");
+        state.rosterVersions = body.versions || [];
+        box.innerHTML = state.rosterVersions.length ? state.rosterVersions.map((version, index) => `
+          <div class="version-item">
+            <div>
+              <strong>${escapeHtml(formatIsoMinute(version.created_at))}${index === 0 ? " · 当前" : ""}</strong>
+              <small>${escapeHtml(version.source_image_path || "无原图路径")} · ${escapeHtml((version.grid || []).length)} 人</small>
+            </div>
+            <button data-restore-version="${version.id}" ${index === 0 ? "disabled" : ""}>回滚</button>
+          </div>
+        `).join("") : "<div class='item'>暂无版本</div>";
+      } catch (error) {
+        box.innerHTML = `<div class="item">版本加载失败：${escapeHtml(error.message || error)}</div>`;
+      }
+    }
+
+    $("rosterVersionsList").addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-restore-version]");
+      if (!button) return;
+      const roster = state.savedRosters.find((item) => savedRosterKey(item) === state.selectedSavedRoster);
+      if (!roster) return;
+      if (!confirm("确认回滚到这个排班版本？当前排班会另存为新的版本记录。")) return;
+      button.disabled = true;
+      const response = await fetch(`/api/rosters/${roster.year}/${roster.month}/versions/${button.dataset.restoreVersion}/restore`, { method: "POST" });
+      const body = await response.json();
+      $("savedStatus").textContent = response.ok && body.success ? "已回滚到所选版本" : body.detail || "回滚失败";
+      $("savedStatus").className = `status ${response.ok && body.success ? "ok" : "error"}`;
+      if (response.ok && body.success) await loadSavedRosters();
+      button.disabled = false;
+    });
+
+    async function autoRecheck() {
+      if (!state.sourceImagePath || !state.grid.length) return setStatus("请先上传排班图片", "error");
+      setStatus("正在自动核对...");
+      const response = await fetch("/api/rosters/recheck", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source_image_path: state.sourceImagePath, grid: state.grid })
+      });
+      const body = await response.json();
+      if (!response.ok) return setStatus(body.detail || "自动核对失败", "error");
+      state.year = body.year || state.year;
+      state.month = body.month || state.month;
+      state.sourceImagePath = body.source_image_path || state.sourceImagePath;
+      state.sourceImageUrl = body.source_image_url || state.sourceImageUrl;
+      state.grid = body.grid || [];
+      setRecheckIssues(body.issues || []);
+      renderGrid();
+      renderOverlays();
+      setStatus(`自动核对完成：修正 ${body.issues ? body.issues.length : 0} 个格子，黄框为已修正位置`, "ok");
+    }
+
+    $("zoomOutBtn").addEventListener("click", () => {
+      state.imageZoom = Math.max(60, state.imageZoom - 20);
+      renderImage();
+    });
+    $("zoomResetBtn").addEventListener("click", () => {
+      state.imageZoom = 100;
+      renderImage();
+    });
+    $("zoomInBtn").addEventListener("click", () => {
+      state.imageZoom = Math.min(240, state.imageZoom + 20);
+      renderImage();
+    });
+
+    function updateRestReminderFields() {
+      $("restReminderFields").classList.toggle("hidden", !$("restReminderEnabled").checked);
+    }
+
+    $("restReminderEnabled").addEventListener("change", updateRestReminderFields);
+    updateRestReminderFields();
+
+    $("savePersonBtn").addEventListener("click", async () => {
+      const payload = {
+        name: $("personName").value.trim(),
+        mention_mobile: $("mentionMobile").value.trim(),
+        daily_time: $("dailyTime").value || "07:50",
+        before_shift_minutes: Number($("beforeMinutes").value || 10),
+        rest_reminder_enabled: $("restReminderEnabled").checked,
+        rest_reminder_time: $("restReminderTime").value || "08:30",
+        rest_message_template: $("restMessageTemplate").value.trim(),
+        enabled: true
+      };
+      if (!payload.name || !payload.mention_mobile) return;
+      await saveNotificationConfig(false);
+      await fetch("/api/people", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      await loadPeople();
+    });
+
+    async function loadPeople() {
+      const response = await fetch("/api/people");
+      const body = await response.json();
+      $("peopleList").innerHTML = (body.people || []).map((person) => `
+        <div class="item">
+          <strong>${escapeHtml(person.name)}</strong>
+          <small>@手机号 ${escapeHtml(person.mention_mobile || "未填写")} · 每日提醒时间 ${escapeHtml(person.daily_time)} · 班次提前提醒 ${person.before_shift_minutes} 分钟 · 休息提醒 ${person.rest_reminder_enabled ? escapeHtml(person.rest_reminder_time) : "未启用"}</small>
+          ${person.rest_reminder_enabled ? `<small>休息文案 ${escapeHtml(person.rest_message_template || "{name} {rest_status}")}</small>` : ""}
+        </div>
+      `).join("") || `<div class="item"><small>暂无人员</small></div>`;
+    }
+
+    function parseNameList(value) {
+      return Array.from(new Set(String(value || "").split(/[\n,，、\s]+/).map((item) => item.trim()).filter(Boolean)));
+    }
+
+    function formatNameList(names) {
+      return (names || []).join("\n");
+    }
+
+    function setNameListValue(targetId, names) {
+      $(targetId).value = formatNameList(names);
+      renderNameTagEditor(targetId);
+      if (["personnelNames", "bigDriverNames", "smallDriverNames"].includes(targetId)) {
+        updateDriverNameOptions();
+      }
+    }
+
+    function renderNameTagEditor(targetId) {
+      const editor = $(`${targetId}Editor`);
+      if (!editor) return;
+      const names = parseNameList($(targetId).value);
+      editor.innerHTML = names.map((name) => `
+        <span class="name-tag">
+          ${escapeHtml(name)}
+          <button type="button" title="删除" data-tag-remove="${escapeHtml(targetId)}" data-name="${escapeHtml(name)}">×</button>
+        </span>
+      `).join("") || `<span class="tag-empty">暂无</span>`;
+    }
+
+    function addNameTag(targetId, value) {
+      const incoming = parseNameList(value);
+      if (!incoming.length) return;
+      const names = parseNameList($(targetId).value);
+      incoming.forEach((name) => {
+        if (!names.includes(name)) names.push(name);
+      });
+      setNameListValue(targetId, names);
+      const input = $(`${targetId}TagInput`);
+      if (input) input.value = "";
+    }
+
+    function removeNameTag(targetId, name) {
+      setNameListValue(targetId, parseNameList($(targetId).value).filter((item) => item !== name));
+    }
+
+    function setupNameTagEditor(targetId) {
+      const editor = $(`${targetId}Editor`);
+      if (!editor) return;
+      editor.addEventListener("click", (event) => {
+        const removeButton = event.target.closest("[data-tag-remove]");
+        if (removeButton) {
+          removeNameTag(removeButton.dataset.tagRemove, removeButton.dataset.name);
+        }
+      });
+      const input = $(`${targetId}TagInput`);
+      if (input) input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === "," || event.key === "，") {
+          event.preventDefault();
+          addNameTag(targetId, event.target.value);
+        }
+      });
+      if (input) input.addEventListener("blur", (event) => addNameTag(targetId, event.target.value));
+      renderNameTagEditor(targetId);
+    }
+
+    function formatIsoMinute(value) {
+      const text = String(value || "");
+      const match = text.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+      if (match) return `${match[1]} ${match[2]}`;
+      const date = new Date(text);
+      return Number.isNaN(date.getTime()) ? text : date.toLocaleString();
+    }
+
+    function beijingDateParts(date = new Date()) {
+      const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: BEIJING_TIME_ZONE,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+      }).formatToParts(date);
+      return Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+    }
+
+    function beijingDateInputValue(date = new Date()) {
+      const parts = beijingDateParts(date);
+      return `${parts.year}-${parts.month}-${parts.day}`;
+    }
+
+    function formatBeijingClock(date = new Date()) {
+      return new Intl.DateTimeFormat("zh-CN", {
+        timeZone: BEIJING_TIME_ZONE,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false
+      }).format(date);
+    }
+
+    async function loadPersonnel() {
+      const response = await fetch("/api/personnel");
+      const body = await response.json();
+      const names = body.names || [];
+      setNameListValue("personnelNames", names);
+    }
+
+    function updateDriverNameOptions() {
+      const select = $("driverNameSelect");
+      if (!select) return;
+      const previous = select.value;
+      const assigned = new Set([
+        ...parseNameList($("bigDriverNames").value),
+        ...parseNameList($("smallDriverNames").value),
+      ]);
+      const available = parseNameList($("personnelNames").value).filter((name) => !assigned.has(name));
+      select.innerHTML = available.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("") || `<option value="">暂无可选人员</option>`;
+      if (available.includes(previous)) select.value = previous;
+    }
+
+    $("savePersonnelBtn").addEventListener("click", async () => {
+      const names = parseNameList($("personnelNames").value);
+      const response = await fetch("/api/personnel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ names })
+      });
+      const body = await response.json();
+      $("personnelStatus").textContent = body.success ? `已保存 ${body.names.length} 人` : "保存失败";
+      $("personnelStatus").className = `status ${body.success ? "ok" : "error"}`;
+      await loadPersonnel();
+    });
+    $("addPersonnelNameBtn").addEventListener("click", () => addNameTag("personnelNames", $("personnelNamesTagInput").value));
+
+    function addDriverName(targetId) {
+      const manualName = $("driverManualName").value.trim();
+      const name = manualName || $("driverNameSelect").value;
+      if (!name) return;
+      addNameTag(targetId, name);
+      if (manualName) $("driverManualName").value = "";
+    }
+
+    $("addBigDriverBtn").addEventListener("click", () => addDriverName("bigDriverNames"));
+    $("addSmallDriverBtn").addEventListener("click", () => addDriverName("smallDriverNames"));
+
+    async function loadDailyDutyConfig() {
+      const response = await fetch("/api/daily-duty-config");
+      const body = await response.json();
+      const config = body.config || {};
+      $("dailyDutyEnabled").checked = config.enabled !== false;
+      $("dailyDutyTime").value = config.reminder_time || "07:50";
+      setNameListValue("bigDriverNames", config.big_driver_names || []);
+      setNameListValue("smallDriverNames", config.small_driver_names || []);
+      $("dailyDutyTemplate").value = config.message_template || "";
+    }
+
+    async function saveDailyDutyConfig() {
+      const response = await fetch("/api/daily-duty-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled: $("dailyDutyEnabled").checked,
+          reminder_time: $("dailyDutyTime").value || "07:50",
+          big_driver_names: parseNameList($("bigDriverNames").value),
+          small_driver_names: parseNameList($("smallDriverNames").value),
+          message_template: $("dailyDutyTemplate").value.trim()
+        })
+      });
+      const body = await response.json();
+      $("dailyDutyStatus").textContent = body.success ? "已保存驾驶员监测配置" : "保存失败";
+      $("dailyDutyStatus").className = `status ${body.success ? "ok" : "error"}`;
+      return body.success;
+    }
+
+    $("saveDailyDutyBtn").addEventListener("click", saveDailyDutyConfig);
+    $("saveDriverNamesBtn").addEventListener("click", saveDailyDutyConfig);
+
+    function dailyDutyImageUrl(targetDate) {
+      return `/api/daily-duty-image${targetDate ? `?target_date=${encodeURIComponent(targetDate)}` : ""}`;
+    }
+
+    function renderDailyDutyPreview(preview) {
+      const targetDate = String(preview.send_at || "").slice(0, 10);
+      const imageUrl = dailyDutyImageUrl(targetDate);
+      const filename = `今日在岗人员-${targetDate}.png`;
+      $("dailyDutyPreview").innerHTML = `
+        <div class="daily-duty-visual">
+          <strong>${escapeHtml(formatIsoMinute(preview.send_at))}</strong>
+          <img alt="今日在岗人员表格" src="${imageUrl}" />
+          <div class="settings-actions">
+            <a class="download-link" href="${imageUrl}" download="${escapeHtml(filename)}">下载表格图片</a>
+          </div>
+          <small>发送文案</small>
+          <div>${escapeHtml(preview.content || "").replace(/\n/g, "<br>")}</div>
+        </div>
+      `;
+    }
+
+    function splitNameText(value) {
+      return Array.from(new Set(String(value || "").split(/[，,、\s]+/).map((item) => item.trim()).filter(Boolean)));
+    }
+
+    function renderDutyChipList(value) {
+      const names = splitNameText(value);
+      if (!names.length) return `<span class="saved-duty-empty">无</span>`;
+      return names.map((name) => `<span class="saved-duty-chip">${escapeHtml(name)}</span>`).join("");
+    }
+
+    function renderSavedDutyChart(preview) {
+      const details = preview.details || {};
+      const sendAtText = escapeHtml(formatIsoMinute(preview.send_at));
+      $("savedDutyChart").innerHTML = `
+        <div class="saved-duty-meta">
+          <span>预览时间：${sendAtText}</span>
+          <span>今日在岗信息汇总</span>
+        </div>
+        <div class="saved-duty-grid">
+          <section class="saved-duty-card monitor">
+            <h4>监控班</h4>
+            <div class="saved-duty-item">
+              <strong>早班</strong>
+              <div class="saved-duty-list">${renderDutyChipList(details.early)}</div>
+            </div>
+            <div class="saved-duty-item">
+              <strong>中班</strong>
+              <div class="saved-duty-list">${renderDutyChipList(details.middle)}</div>
+            </div>
+            <div class="saved-duty-item">
+              <strong>晚班</strong>
+              <div class="saved-duty-list">${renderDutyChipList(details.night)}</div>
+            </div>
+          </section>
+          <section class="saved-duty-card driver">
+            <h4>驾驶员</h4>
+            <div class="saved-duty-item">
+              <strong>大车</strong>
+              <div class="saved-duty-list">${renderDutyChipList(details.big_drivers)}</div>
+            </div>
+            <div class="saved-duty-item">
+              <strong>小车</strong>
+              <div class="saved-duty-list">${renderDutyChipList(details.small_drivers)}</div>
+            </div>
+          </section>
+          <section class="saved-duty-card standby">
+            <h4>备勤人员</h4>
+            <div class="saved-duty-item">
+              <strong>在岗</strong>
+              <div class="saved-duty-list">${renderDutyChipList(details.standby)}</div>
+            </div>
+          </section>
+          <section class="saved-duty-card rest">
+            <h4>休息状态</h4>
+            <div class="saved-duty-item">
+              <strong>今日下午休息</strong>
+              <div class="saved-duty-list">${renderDutyChipList(details.afternoon_rest)}</div>
+            </div>
+            <div class="saved-duty-item">
+              <strong>正在休息</strong>
+              <div class="saved-duty-list">${renderDutyChipList(details.resting)}</div>
+            </div>
+            <div class="saved-duty-item">
+              <strong>今日下午到岗</strong>
+              <div class="saved-duty-list">${renderDutyChipList(details.afternoon_return)}</div>
+            </div>
+          </section>
+        </div>
+      `;
+    }
+
+    async function loadSavedDutyChart() {
+      const dateInput = $("savedDutyDate");
+      if (!dateInput.value) dateInput.value = beijingDateInputValue();
+      $("savedDutyChart").innerHTML = `<p class="status">正在加载今日在岗信息统计图...</p>`;
+      try {
+        const response = await fetch("/api/daily-duty-preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ target_date: dateInput.value || null })
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.detail || "加载失败");
+        renderSavedDutyChart(body);
+      } catch (error) {
+        $("savedDutyChart").innerHTML = `<p class="status error">加载失败：${escapeHtml(error.message || error)}</p>`;
+      }
+    }
+
+    $("previewDailyDutyBtn").addEventListener("click", async () => {
+      await saveDailyDutyConfig();
+      const response = await fetch("/api/daily-duty-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target_date: $("dailyDutyPreviewDate").value || null })
+      });
+      const body = await response.json();
+      renderDailyDutyPreview(body);
+    });
+
+    async function saveNotificationConfig(showStatus = true) {
+      if (showStatus) $("notificationStatus").textContent = "正在保存...";
+      const response = await fetch("/api/notification-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          webhook_url: $("webhookUrl").value.trim(),
+          message_template: $("messageTemplate").value.trim()
+        })
+      });
+      const body = await response.json();
+      if (showStatus) {
+        $("notificationStatus").textContent = body.success ? "已保存企业微信通知配置" : "保存失败";
+        $("notificationStatus").className = `status ${body.success ? "ok" : "error"}`;
+      }
+      return body.success;
+    }
+
+    $("saveNotificationBtn").addEventListener("click", () => saveNotificationConfig(true));
+
+    $("testNotificationBtn").addEventListener("click", async () => {
+      const button = $("testNotificationBtn");
+      button.disabled = true;
+      $("notificationStatus").textContent = "正在发送测试消息...";
+      $("notificationStatus").className = "status";
+      try {
+        const saved = await saveNotificationConfig(false);
+        if (!saved) throw new Error("通知配置保存失败");
+        const response = await fetch("/api/notification-config/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ test_mobile: $("testMobile").value.trim() })
+        });
+        const text = await response.text();
+        const body = text ? JSON.parse(text) : {};
+        $("notificationStatus").textContent = response.ok && body.success ? `测试消息已发送：${body.content}` : body.detail || "测试发送失败";
+        $("notificationStatus").className = `status ${response.ok && body.success ? "ok" : "error"}`;
+      } catch (error) {
+        $("notificationStatus").textContent = `测试发送失败：${error.message || error}`;
+        $("notificationStatus").className = "status error";
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    $("testDailyDutyBtn").addEventListener("click", async () => {
+      const button = $("testDailyDutyBtn");
+      button.disabled = true;
+      $("dailyDutyStatus").textContent = "正在发送今日在岗测试图片...";
+      $("dailyDutyStatus").className = "status";
+      try {
+        const notificationSaved = await saveNotificationConfig(false);
+        const dutySaved = await saveDailyDutyConfig();
+        if (!notificationSaved || !dutySaved) throw new Error("配置保存失败");
+        const response = await fetch("/api/daily-duty-config/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ target_date: $("dailyDutyPreviewDate").value || null })
+        });
+        const text = await response.text();
+        const body = text ? JSON.parse(text) : {};
+        $("dailyDutyStatus").textContent = response.ok && body.success ? "今日在岗测试图片已发送" : body.detail || "测试发送失败";
+        $("dailyDutyStatus").className = `status ${response.ok && body.success ? "ok" : "error"}`;
+        if (body.content) {
+          renderDailyDutyPreview(body);
+        }
+      } catch (error) {
+        $("dailyDutyStatus").textContent = `测试发送失败：${error.message || error}`;
+        $("dailyDutyStatus").className = "status error";
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    async function loadNotificationConfig() {
+      const response = await fetch("/api/notification-config");
+      const body = await response.json();
+      $("webhookUrl").value = "";
+      $("webhookUrl").placeholder = body.config && body.config.webhook_configured ? "已配置，如需修改请输入新地址" : "未配置，保存时请输入机器人地址";
+      $("messageTemplate").value = body.config ? body.config.message_template || "" : "";
+    }
+
+    function sendRecordKindLabel(kind) {
+      return ({
+        daily_duty: "今日在岗",
+        daily_duty_test: "今日在岗测试",
+        daily_duty_resend: "今日在岗补发",
+        daily_duty_test_resend: "今日在岗测试补发",
+        notification_test: "通知测试",
+        notification_test_resend: "通知测试补发",
+        daily: "每日提醒",
+        daily_resend: "每日提醒补发",
+        before_shift: "班前提醒",
+        before_shift_resend: "班前提醒补发",
+        rest: "休息提醒",
+        rest_resend: "休息提醒补发",
+      })[kind] || kind;
+    }
+
+    function sendRecordStatusLabel(status) {
+      return status === "success" ? "成功" : "失败";
+    }
+
+    async function loadSendRecords() {
+      $("recordsStatus").textContent = "正在加载...";
+      try {
+        const response = await fetch("/api/send-records");
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.detail || "加载失败");
+        const records = body.records || [];
+        $("recordsSummary").textContent = records.length ? `最近 ${records.length} 条` : "";
+        $("recordsStatus").textContent = records.length ? "" : "暂无发送记录";
+        $("recordsStatus").className = "status";
+        $("recordsList").innerHTML = records.map((record) => `
+          <div class="record-item ${record.status === "success" ? "success" : "failed"}">
+            <div><strong>${escapeHtml(formatIsoMinute(record.created_at))}</strong><small>创建时间</small></div>
+            <div><strong>${escapeHtml(sendRecordKindLabel(record.kind))}</strong><small>类型</small></div>
+            <div><strong>${escapeHtml(record.target || "-")}</strong><small>目标</small></div>
+            <div><strong>${escapeHtml(sendRecordStatusLabel(record.status))}</strong><small>状态</small></div>
+            <div>
+              <strong>${escapeHtml(record.scheduled_at ? formatIsoMinute(record.scheduled_at) : "-")}</strong>
+              <small>${escapeHtml(record.error || record.content || "")}</small>
+            </div>
+            <div><button data-resend-record="${record.id}">补发</button></div>
+          </div>
+        `).join("");
+      } catch (error) {
+        $("recordsStatus").textContent = `加载失败：${error.message || error}`;
+        $("recordsStatus").className = "status error";
+      }
+    }
+
+    $("refreshRecordsBtn").addEventListener("click", loadSendRecords);
+    $("recordsList").addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-resend-record]");
+      if (!button) return;
+      button.disabled = true;
+      $("recordsStatus").textContent = "正在补发...";
+      $("recordsStatus").className = "status";
+      try {
+        const response = await fetch(`/api/send-records/${button.dataset.resendRecord}/resend`, { method: "POST" });
+        const body = await response.json();
+        if (!response.ok || !body.success) throw new Error(body.detail || "补发失败");
+        $("recordsStatus").textContent = "补发成功";
+        $("recordsStatus").className = "status ok";
+        await loadSendRecords();
+      } catch (error) {
+        $("recordsStatus").textContent = `补发失败：${error.message || error}`;
+        $("recordsStatus").className = "status error";
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    function yesNo(value) {
+      return value ? "正常" : "未启用";
+    }
+
+    async function loadSystemStatus() {
+      $("systemStatusText").textContent = "正在加载...";
+      try {
+        const response = await fetch("/api/system-status");
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.detail || "加载失败");
+        $("systemStatusSummary").textContent = `北京时间 ${formatIsoMinute(body.now_beijing)}`;
+        $("systemStatusText").textContent = body.today_failed_count ? `今日失败 ${body.today_failed_count} 条：${body.last_error || "请查看发送记录"}` : "系统状态正常";
+        $("systemStatusText").className = `status ${body.today_failed_count ? "error" : "ok"}`;
+        const cards = [
+          ["北京时间", formatIsoMinute(body.now_beijing), body.timezone || ""],
+          ["定时任务", yesNo(body.scheduler_enabled), body.scheduler_enabled ? "会自动发送到期提醒" : "当前不会自动发送"],
+          ["企业微信机器人", body.webhook_configured ? "已配置" : "未配置", body.webhook_configured ? "可发送群机器人消息" : "请先配置机器人地址"],
+          ["中文字体", body.cjk_font_ready ? "正常" : "缺失", body.cjk_font_ready ? "今日在岗图片中文可渲染" : "Docker 需安装中文字体"],
+          ["排班表", `${body.roster_month_count || 0} 个月`, "已确认导入"],
+          ["监控班提醒人员", `${body.monitored_people_count || 0} 人`, "已配置人员"],
+          ["今日发送成功", `${body.today_success_count || 0} 条`, "以发送记录为准"],
+          ["今日发送失败", `${body.today_failed_count || 0} 条`, body.last_error || "无"],
+        ];
+        $("systemStatusGrid").innerHTML = cards.map(([title, value, note]) => `
+          <div class="status-card">
+            <strong>${escapeHtml(title)}</strong>
+            <div>${escapeHtml(value)}</div>
+            <small>${escapeHtml(note)}</small>
+          </div>
+        `).join("");
+        const events = body.next_events || [];
+        $("nextEventsList").innerHTML = events.length ? events.map((event) => `
+          <div class="item">
+            <strong>${escapeHtml(formatIsoMinute(event.send_at))}</strong>
+            <small>${escapeHtml(sendRecordKindLabel(event.kind))} · ${escapeHtml(event.person_name)}</small>
+            <div>${escapeHtml(event.content || "").replace(/\n/g, "<br>")}</div>
+          </div>
+        `).join("") : "<div class='item'>未来 7 天没有待发送提醒</div>";
+      } catch (error) {
+        $("systemStatusText").textContent = `加载失败：${error.message || error}`;
+        $("systemStatusText").className = "status error";
+      }
+    }
+
+    $("refreshSystemStatusBtn").addEventListener("click", loadSystemStatus);
+
+    $("previewBtn").addEventListener("click", async () => {
+      await saveNotificationConfig(false);
+      await saveDailyDutyConfig();
+      const targetDate = $("previewDate").value;
+      const response = await fetch("/api/reminders/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target_date: targetDate || null })
+      });
+      const body = await response.json();
+      const events = body.events || [];
+      $("previewStatus").textContent = events.length ? `共 ${events.length} 条` : "无提醒";
+      $("events").innerHTML = events.map((event) => `
+        <div class="item">
+          <strong>${escapeHtml(formatIsoMinute(event.send_at))}</strong>
+          <small>${escapeHtml(event.kind)} · ${escapeHtml(event.person_name)}</small>
+          <div>${escapeHtml(event.content).replace(/\n/g, "<br>")}</div>
+        </div>
+      `).join("");
+    });
+
+    function tick() {
+      $("clock").textContent = `北京时间 ${formatBeijingClock()}`;
+    }
+    setInterval(tick, 1000);
+    tick();
+    $("previewDate").value = beijingDateInputValue();
+    $("dailyDutyPreviewDate").value = beijingDateInputValue();
+    $("savedDutyDate").value = beijingDateInputValue();
+    setupNameTagEditor("personnelNames");
+    setupNameTagEditor("bigDriverNames");
+    setupNameTagEditor("smallDriverNames");
+    renderGrid();
+    loadSavedRosters();
+    loadSavedDutyChart();
+    loadNotificationConfig();
+    loadPersonnel();
+    loadDailyDutyConfig();
+    loadPeople();
+  </script>
+</body>
+</html>
+
+
