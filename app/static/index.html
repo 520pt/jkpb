@@ -1314,11 +1314,17 @@
       setRecheckIssues([]);
       setFilterButtons();
       renderGrid();
-      if (body.ocr_status === "ok" || body.ocr_status === "template_ok") {
+      if (body.ocr_status === "template_ok" && hasPlaceholderNames(state.grid)) {
+        setStatus(`班次识别完成：${state.grid.length} 行 × ${daysInMonth(Number(state.year), Number(state.month))} 天，请先补全姓名再确认导入`, "error");
+      } else if (body.ocr_status === "ok" || body.ocr_status === "template_ok") {
         setStatus(`识别完成：${state.grid.length} 人 × ${daysInMonth(Number(state.year), Number(state.month))} 天，请校对后确认导入`, "ok");
       } else {
         setStatus("识别失败，请检查图片格式或手动补全表格", "error");
       }
+    }
+
+    function hasPlaceholderNames(grid) {
+      return (grid || []).some((row) => /^第\d+行$/.test(String(row.name || "")));
     }
 
     function setFilterButtons() {

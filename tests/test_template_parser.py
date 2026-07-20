@@ -3,7 +3,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from app.ocr import extract_roster_image
+from app.ocr import OcrText, extract_roster_image
 
 
 def test_template_parser_reads_fixed_roster_grid(tmp_path: Path):
@@ -22,6 +22,37 @@ def test_template_parser_reads_fixed_roster_grid(tmp_path: Path):
     assert result["grid"][0]["days"]["5"] == "晚"
     assert result["grid"][0]["days"]["6"] == "出差"
     assert result["grid"][0]["boxes"]["1"] == {"x": 161, "y": 120, "width": 24, "height": 33}
+
+
+def test_template_parser_does_not_show_sample_names_when_ocr_is_unavailable(tmp_path: Path):
+    image_path = tmp_path / "roster.png"
+    _write_synthetic_roster(image_path)
+
+    result = extract_roster_image(image_path)
+
+    assert result["grid"][0]["name"] == "第1行"
+    assert result["grid"][1]["name"] == "第2行"
+
+
+def test_template_parser_merges_ocr_names_and_month(tmp_path: Path, monkeypatch):
+    image_path = tmp_path / "roster.png"
+    _write_synthetic_roster(image_path)
+    monkeypatch.setattr(
+        "app.ocr._read_ocr_texts",
+        lambda path: [
+            OcrText(text="2026年5月", x=60, y=705),
+            OcrText(text="罗森", x=105, y=136),
+            OcrText(text="李金雷", x=105, y=169),
+        ],
+        raising=False,
+    )
+
+    result = extract_roster_image(image_path)
+
+    assert result["year"] == 2026
+    assert result["month"] == 5
+    assert result["grid"][0]["name"] == "罗森"
+    assert result["grid"][1]["name"] == "李金雷"
 
 
 def _write_synthetic_roster(path: Path) -> None:

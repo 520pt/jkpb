@@ -9,24 +9,6 @@ from typing import Any
 
 from app.roster import normalize_shift_code
 
-DEFAULT_PEOPLE = [
-    "示例戊",
-    "样例甲",
-    "样例乙",
-    "示例庚",
-    "样例丙",
-    "示例辛",
-    "示例丁",
-    "样例丁",
-    "示例丙",
-    "样例戊",
-    "示例己",
-    "示例甲",
-    "示例乙",
-    "样例己",
-    "示例壬",
-]
-
 
 @dataclass(frozen=True)
 class OcrText:
@@ -74,23 +56,29 @@ def extract_roster_image(image_path: str | Path) -> dict[str, Any]:
     path = Path(image_path)
     template_result = extract_template_roster_image(path)
     if template_result is not None:
+        texts = _read_ocr_texts(path)
+        if texts:
+            _merge_template_ocr_texts(template_result, texts)
         return template_result
 
+    texts = _read_ocr_texts(path)
+    if texts:
+        return build_review_grid(texts, str(path))
+    return fallback_review_grid(str(path))
+
+
+def _read_ocr_texts(path: Path) -> list[OcrText]:
     try:
         from paddleocr import PaddleOCR  # type: ignore
     except Exception:
-        return fallback_review_grid(str(path))
+        return []
 
     try:
         ocr = PaddleOCR(use_angle_cls=True, lang="ch", show_log=False)
         raw_result = ocr.ocr(str(path), cls=True)
-        texts = _paddle_result_to_texts(raw_result)
     except Exception:
-        return fallback_review_grid(str(path))
-
-    if not texts:
-        return fallback_review_grid(str(path))
-    return build_review_grid(texts, str(path))
+        return []
+    return _paddle_result_to_texts(raw_result)
 
 
 def extract_template_roster_image(image_path: str | Path) -> dict[str, Any] | None:
@@ -115,7 +103,6 @@ def extract_template_roster_image(image_path: str | Path) -> dict[str, Any] | No
     today = date.today()
     grid: list[dict[str, Any]] = []
     for row_index in range(15):
-        name = DEFAULT_PEOPLE[row_index] if row_index < len(DEFAULT_PEOPLE) else f"第{row_index + 1}行"
         days: dict[str, str] = {}
         boxes: dict[str, dict[str, int]] = {}
         for day_index in range(31):
@@ -124,7 +111,7 @@ def extract_template_roster_image(image_path: str | Path) -> dict[str, Any] | No
             cell = image[y1 + 2 : y2 - 2, x1 + 2 : x2 - 2]
             days[str(day_index + 1)] = _classify_template_cell(cell)
             boxes[str(day_index + 1)] = {"x": x1, "y": y1, "width": x2 - x1, "height": y2 - y1}
-        grid.append({"name": name, "days": days, "boxes": boxes})
+        grid.append({"name": f"第{row_index + 1}行", "days": days, "boxes": boxes})
 
     return {
         "year": today.year,
@@ -133,6 +120,42 @@ def extract_template_roster_image(image_path: str | Path) -> dict[str, Any] | No
         "grid": grid,
         "ocr_status": "template_ok",
     }
+
+
+def _merge_template_ocr_texts(template_result: dict[str, Any], texts: list[OcrText]) -> None:
+    year, month = _detect_year_month(texts)
+    template_result["year"] = year
+    template_result["month"] = month
+
+    grid = list(template_result.get("grid", []))
+    if not grid:
+        return
+    first_day_box = next((row.get("boxes", {}).get("1") for row in grid if row.get("boxes", {}).get("1")), None)
+    min_day_x = float(first_day_box["x"]) if first_day_box else 160.0
+    row_centers: list[float] = []
+    for row in grid:
+        box = dict(row.get("boxes", {})).get("1")
+        if box:
+            row_centers.append(float(box["y"]) + float(box["height"]) / 2)
+
+    for item in _detect_template_names(texts, min_day_x):
+        row_index = _nearest_index(item.y, row_centers)
+        if row_index is not None and row_index < len(grid):
+            grid[row_index]["name"] = item.text.strip()
+
+
+def _detect_template_names(texts: list[OcrText], min_day_x: float) -> list[OcrText]:
+    ignored = {"姓名", "序号", "时间", "工作", "天数", "排班表"}
+    names: list[OcrText] = []
+    for item in texts:
+        text = item.text.strip()
+        if text in ignored or normalize_shift_code(text) is not None:
+            continue
+        if not re.fullmatch(r"[\u4e00-\u9fff]{2,5}", text):
+            continue
+        if 40 <= item.x < min_day_x:
+            names.append(item)
+    return sorted(names, key=lambda item: item.y)
 
 
 def _find_day_x_lines(dark: Any) -> list[int]:
