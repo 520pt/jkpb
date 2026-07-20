@@ -34,12 +34,14 @@ Windows 本地也可以直接运行：
 
 ## Docker 部署
 
+### 本地构建运行
+
 ```bash
 cp .env.example .env
 docker compose up -d --build
 ```
 
-部署到服务器前请先修改 `.env` 里的 `ADMIN_PASSWORD`。设置后页面和接口会启用 Basic Auth 登录保护，`/health` 保持不鉴权用于健康检查。
+部署前请先修改 `.env` 里的 `ADMIN_PASSWORD`。设置后页面和接口会启用 Basic Auth 登录保护，`/health` 保持不鉴权用于健康检查。
 
 GitHub Actions 会自动构建镜像并推送到 GitHub Container Registry：
 
@@ -47,22 +49,82 @@ GitHub Actions 会自动构建镜像并推送到 GitHub Container Registry：
 ghcr.io/520pt/jkpb:latest
 ```
 
-服务器不想本地构建时，可以直接拉取镜像运行：
+### 服务器推荐部署
+
+服务器推荐使用 `docker-compose.prod.yml`，直接拉取 GitHub Actions 打包好的镜像，不需要在服务器本地构建。
+
+1. 复制环境变量模板：
 
 ```bash
-docker pull ghcr.io/520pt/jkpb:latest
-docker run -d --name duty-reminder \
-  -p 8080:8080 \
-  -e TZ=Asia/Shanghai \
-  -e ADMIN_USERNAME=admin \
-  -e ADMIN_PASSWORD=CHANGE_THIS_PASSWORD \
-  -e ENABLE_SCHEDULER=true \
-  -v duty-data:/app/data \
-  -v duty-uploads:/app/uploads \
-  ghcr.io/520pt/jkpb:latest
+cp .env.example .env
 ```
 
-默认 Docker 构建不安装 OCR 大模型依赖，上传图片后仍可在页面快速补录/校对。需要启用 PaddleOCR 时：
+2. 修改 `.env`，至少要把 `ADMIN_PASSWORD` 改成你自己的登录密码。
+
+3. 拉取镜像并启动：
+
+```bash
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+```
+
+4. 查看状态：
+
+```bash
+docker compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml logs -f
+```
+
+5. 更新到最新镜像：
+
+```bash
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+```
+
+完整 `docker-compose.prod.yml`：
+
+```yaml
+services:
+  duty-reminder:
+    image: ghcr.io/520pt/jkpb:latest
+    container_name: duty-reminder
+    restart: unless-stopped
+    environment:
+      TZ: "${TZ:-Asia/Shanghai}"
+      DATA_DIR: "/app/data"
+      UPLOAD_DIR: "/app/uploads"
+      ENABLE_SCHEDULER: "${ENABLE_SCHEDULER:-true}"
+      ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:?请在 .env 中设置 ADMIN_PASSWORD}"
+      MAX_UPLOAD_MB: "${MAX_UPLOAD_MB:-10}"
+      UPLOAD_KEEP_DAYS: "${UPLOAD_KEEP_DAYS:-90}"
+      WECOM_CORP_ID: "${WECOM_CORP_ID:-}"
+      WECOM_CORP_SECRET: "${WECOM_CORP_SECRET:-}"
+      WECOM_AGENT_ID: "${WECOM_AGENT_ID:-}"
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    volumes:
+      - duty-data:/app/data
+      - duty-uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  duty-data:
+  duty-uploads:
+```
+
+默认 Docker 构建不安装 OCR 大模型依赖，上传图片后仍可在页面快速补录/校对。需要启用 PaddleOCR 时，本地构建可以使用：
 
 ```bash
 INSTALL_OCR=true docker compose up -d --build
