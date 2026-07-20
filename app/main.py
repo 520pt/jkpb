@@ -425,7 +425,7 @@ def create_app(
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
         scheduler = AsyncIOScheduler(timezone=TZ)
-        scheduler.add_job(lambda: asyncio.create_task(_send_due_reminders(repo)), "interval", minutes=1, max_instances=1)
+        scheduler.add_job(_send_due_reminders, "interval", minutes=1, args=[repo], max_instances=1)
 
         @app.on_event("startup")
         async def start_jobs():
@@ -917,4 +917,3 @@ def _wecom_client_from_env() -> WeComClient | None:
 
 
 app = create_app(start_scheduler=os.getenv("ENABLE_SCHEDULER", "false").lower() == "true")
-
