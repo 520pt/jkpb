@@ -204,6 +204,7 @@
       gap: 12px;
       align-items: stretch;
       margin-top: 8px;
+      position: relative;
     }
     #reviewPage .review-layout {
       margin-top: 2px;
@@ -238,6 +239,45 @@
       color: white;
       background: #334155;
       border-color: #334155;
+    }
+    .review-busy-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 12;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(248, 250, 252, 0.84);
+      backdrop-filter: blur(2px);
+    }
+    .review-busy-card {
+      display: grid;
+      justify-items: center;
+      gap: 10px;
+      min-width: 220px;
+      padding: 18px 22px;
+      border: 1px solid rgba(37, 99, 235, 0.28);
+      border-radius: 8px;
+      background: white;
+      box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
+      color: #0f172a;
+      font-weight: 700;
+    }
+    .review-busy-spinner {
+      width: 30px;
+      height: 30px;
+      border: 3px solid #dbeafe;
+      border-top-color: #2563eb;
+      border-radius: 999px;
+      animation: spin 0.9s linear infinite;
+    }
+    .review-busy-card small {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
     }
     .image-frame {
       height: calc(100vh - 215px);
@@ -869,6 +909,13 @@
               <table id="grid"></table>
             </div>
           </div>
+          <div id="reviewBusyOverlay" class="review-busy-overlay" hidden>
+            <div class="review-busy-card">
+              <div class="review-busy-spinner"></div>
+              <span id="reviewBusyText">正在识别导入中...</span>
+              <small>请稍候，正在处理原图和识别结果</small>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -1118,6 +1165,18 @@
       $("status").className = `status ${type}`;
     }
 
+    function setReviewBusy(active, text = "正在识别导入中...") {
+      const overlay = $("reviewBusyOverlay");
+      overlay.hidden = !active;
+      $("reviewBusyText").textContent = text;
+      $("reviewPage").setAttribute("aria-busy", active ? "true" : "false");
+      ["file", "uploadBtn", "recheckBtn", "addRowBtn", "confirmBtn", "year", "month"].forEach((id) => {
+        const element = $(id);
+        if (element) element.disabled = active;
+      });
+      $("dropZone").style.pointerEvents = active ? "none" : "";
+    }
+
     function daysInMonth(year, month) {
       return new Date(year, month, 0).getDate();
     }
@@ -1295,31 +1354,46 @@
 
     async function uploadSelectedFile(file) {
       if (!file) return setStatus("请选择图片", "error");
+      setReviewBusy(true);
       setStatus("正在上传识别...");
-      const form = new FormData();
-      form.append("file", file);
-      const response = await fetch("/api/rosters/upload", { method: "POST", body: form });
-      const body = await response.json();
-      if (!response.ok) return setStatus(body.detail || "上传失败", "error");
-      state.year = body.year;
-      state.month = body.month;
-      state.sourceImagePath = body.source_image_path;
-      state.sourceImageUrl = body.source_image_url || "";
-      state.imageZoom = 140;
-      state.grid = body.grid || [];
-      state.activeCell = null;
-      state.filter = "全部";
-      state.pendingImport = null;
-      hideConflictPanel();
-      setRecheckIssues([]);
-      setFilterButtons();
-      renderGrid();
-      if (body.ocr_status === "template_ok" && hasPlaceholderNames(state.grid)) {
-        setStatus(`班次识别完成：${state.grid.length} 行 × ${daysInMonth(Number(state.year), Number(state.month))} 天，请先补全姓名再确认导入`, "error");
-      } else if (body.ocr_status === "ok" || body.ocr_status === "template_ok") {
-        setStatus(`识别完成：${state.grid.length} 人 × ${daysInMonth(Number(state.year), Number(state.month))} 天，请校对后确认导入`, "ok");
-      } else {
-        setStatus("识别失败，请检查图片格式或手动补全表格", "error");
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        const response = await fetch("/api/rosters/upload", { method: "POST", body: form });
+        const text = await response.text();
+        let body = {};
+        if (text) {
+          try {
+            body = JSON.parse(text);
+          } catch {
+            body = {};
+          }
+        }
+        if (!response.ok) return setStatus(body.detail || "上传失败", "error");
+        state.year = body.year;
+        state.month = body.month;
+        state.sourceImagePath = body.source_image_path;
+        state.sourceImageUrl = body.source_image_url || "";
+        state.imageZoom = 140;
+        state.grid = body.grid || [];
+        state.activeCell = null;
+        state.filter = "全部";
+        state.pendingImport = null;
+        hideConflictPanel();
+        setRecheckIssues([]);
+        setFilterButtons();
+        renderGrid();
+        if (body.ocr_status === "template_ok" && hasPlaceholderNames(state.grid)) {
+          setStatus(`班次识别完成：${state.grid.length} 行 × ${daysInMonth(Number(state.year), Number(state.month))} 天，请先补全姓名再确认导入`, "error");
+        } else if (body.ocr_status === "ok" || body.ocr_status === "template_ok") {
+          setStatus(`识别完成：${state.grid.length} 人 × ${daysInMonth(Number(state.year), Number(state.month))} 天，请校对后确认导入`, "ok");
+        } else {
+          setStatus("识别失败，请检查图片格式或手动补全表格", "error");
+        }
+      } catch (error) {
+        setStatus(`上传识别失败：${error.message || error}`, "error");
+      } finally {
+        setReviewBusy(false);
       }
     }
 
@@ -2369,5 +2443,3 @@
   </script>
 </body>
 </html>
-
-
