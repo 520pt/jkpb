@@ -3,7 +3,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from app.ocr import OcrText, extract_roster_image
+from app.ocr import extract_roster_image
 
 
 def test_template_parser_reads_fixed_roster_grid(tmp_path: Path):
@@ -46,25 +46,43 @@ def test_template_parser_does_not_show_sample_names_when_ocr_is_unavailable(tmp_
     assert result["grid"][1]["name"] == "第2行"
 
 
-def test_template_parser_merges_ocr_names_and_month(tmp_path: Path, monkeypatch):
+def test_template_parser_does_not_call_ocr_for_template_image(tmp_path: Path, monkeypatch):
     image_path = tmp_path / "roster.png"
     _write_synthetic_roster(image_path)
+
+    def fail_if_called(path: Path):
+        raise AssertionError("template import must not call OCR")
+
     monkeypatch.setattr(
         "app.ocr._read_ocr_texts",
-        lambda path: [
-            OcrText(text="2026年5月", x=60, y=705),
-            OcrText(text="罗森", x=105, y=136),
-            OcrText(text="李金雷", x=105, y=169),
-        ],
+        fail_if_called,
         raising=False,
     )
 
     result = extract_roster_image(image_path)
 
-    assert result["year"] == 2026
-    assert result["month"] == 5
-    assert result["grid"][0]["name"] == "罗森"
-    assert result["grid"][1]["name"] == "李金雷"
+    assert result["ocr_status"] == "template_ok"
+    assert len(result["grid"]) == 15
+
+
+def test_non_template_image_does_not_fall_back_to_ocr(tmp_path: Path, monkeypatch):
+    image_path = tmp_path / "blank.png"
+    image = np.full((120, 200, 3), 255, dtype=np.uint8)
+    cv2.imwrite(str(image_path), image)
+
+    def fail_if_called(path: Path):
+        raise AssertionError("non-template import must not call OCR")
+
+    monkeypatch.setattr(
+        "app.ocr._read_ocr_texts",
+        fail_if_called,
+        raising=False,
+    )
+
+    result = extract_roster_image(image_path)
+
+    assert result["ocr_status"] == "unavailable"
+    assert result["grid"] == []
 
 
 def _write_synthetic_roster(path: Path, row_count: int = 15) -> None:

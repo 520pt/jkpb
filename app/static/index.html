@@ -945,6 +945,7 @@
           <select id="savedRosterSelect"></select>
           <button id="refreshSavedBtn">刷新</button>
           <button id="editSavedBtn">编辑</button>
+          <button class="hidden" id="addSavedRowBtn">新增人员</button>
           <button class="green hidden" id="saveSavedBtn">保存修改</button>
           <button class="hidden" id="cancelSavedEditBtn">取消</button>
           <span id="savedSummary" class="saved-summary"></span>
@@ -1654,6 +1655,7 @@
       const table = $("savedGrid");
       const roster = state.savedRosters.find((item) => savedRosterKey(item) === state.selectedSavedRoster);
       $("editSavedBtn").classList.toggle("hidden", !roster || state.savedEditMode);
+      $("addSavedRowBtn").classList.toggle("hidden", !roster || !state.savedEditMode);
       $("saveSavedBtn").classList.toggle("hidden", !roster || !state.savedEditMode);
       $("cancelSavedEditBtn").classList.toggle("hidden", !roster || !state.savedEditMode);
       table.innerHTML = "";
@@ -1675,7 +1677,7 @@
       head.innerHTML = `<th class="name">姓名</th>${Array.from({ length: dayCount }, (_, i) => {
         const day = String(i + 1);
         return `<th data-saved-day="${day}">${day}</th>`;
-      }).join("")}`;
+      }).join("")}${state.savedEditMode ? "<th>操作</th>" : ""}`;
       table.appendChild(head);
       grid.forEach((row, rowIndex) => {
         const tr = document.createElement("tr");
@@ -1712,6 +1714,11 @@
             td.textContent = value || "-";
           }
           tr.appendChild(td);
+        }
+        if (state.savedEditMode) {
+          const action = document.createElement("td");
+          action.innerHTML = `<button class="danger" data-saved-remove="${rowIndex}">删除</button>`;
+          tr.appendChild(action);
         }
         table.appendChild(tr);
       });
@@ -1767,12 +1774,25 @@
       state.savedEditMode = true;
       renderSavedRoster();
     });
+    $("addSavedRowBtn").addEventListener("click", () => {
+      if (!state.savedDraft) return;
+      state.savedDraft.grid.push({ name: "", days: {} });
+      state.savedActiveCell = null;
+      renderSavedRoster();
+    });
     $("cancelSavedEditBtn").addEventListener("click", () => {
       state.savedDraft = null;
       state.savedEditMode = false;
       renderSavedRoster();
     });
     $("savedGrid").addEventListener("click", (event) => {
+      const removeButton = event.target.closest("button[data-saved-remove]");
+      if (removeButton && state.savedDraft) {
+        state.savedDraft.grid.splice(Number(removeButton.dataset.savedRemove), 1);
+        state.savedActiveCell = null;
+        renderSavedRoster();
+        return;
+      }
       const cell = event.target.closest("td.shift-cell");
       if (!cell || !cell.dataset.savedRow || !cell.dataset.savedDay) return;
       setSavedActiveCell(cell.dataset.savedRow, cell.dataset.savedDay);

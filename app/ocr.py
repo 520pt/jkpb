@@ -56,14 +56,7 @@ def extract_roster_image(image_path: str | Path) -> dict[str, Any]:
     path = Path(image_path)
     template_result = extract_template_roster_image(path)
     if template_result is not None:
-        texts = _read_ocr_texts(path)
-        if texts:
-            _merge_template_ocr_texts(template_result, texts)
         return template_result
-
-    texts = _read_ocr_texts(path)
-    if texts:
-        return build_review_grid(texts, str(path))
     return fallback_review_grid(str(path))
 
 
