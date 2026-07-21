@@ -1,5 +1,6 @@
 import asyncio
 from datetime import date, datetime
+from urllib.parse import quote
 
 from fastapi.testclient import TestClient
 
@@ -20,6 +21,8 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'id="personName" list="personnelNameOptions" placeholder="选择或输入姓名"' in html
     assert 'id="customReminderName" list="personnelNameOptions" placeholder="选择或输入姓名"' in html
     assert 'id="driverNameInput" list="personnelNameOptions" placeholder="选择或输入姓名"' in html
+    assert 'data-edit-person="${escapeHtml(person.name)}"' in html
+    assert 'data-delete-person="${escapeHtml(person.name)}"' in html
     assert 'id="testMobile" placeholder="10000000000"' in html
     assert 'id="mentionMobile" placeholder="10000000000"' in html
 
@@ -260,6 +263,42 @@ def test_notification_config_and_people_mobile_are_saved(tmp_path):
 
     repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
     assert repo.get_notification_config()["webhook_url"].endswith("unit-test")
+
+
+def test_monitored_person_can_be_updated_and_deleted(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    create_response = client.post(
+        "/api/people",
+        json={
+            "name": "示例甲",
+            "mention_mobile": "10000000000",
+            "daily_time": "07:50",
+            "before_shift_minutes": 10,
+            "enabled": True,
+        },
+    )
+    update_response = client.post(
+        "/api/people",
+        json={
+            "original_name": "示例甲",
+            "name": "示例乙",
+            "mention_mobile": "13900139000",
+            "daily_time": "08:10",
+            "before_shift_minutes": 20,
+            "enabled": True,
+        },
+    )
+    delete_response = client.delete(f"/api/people/{quote('示例乙')}")
+
+    assert create_response.status_code == 200
+    assert update_response.status_code == 200
+    assert [person["name"] for person in update_response.json()["people"]] == ["示例乙"]
+    assert update_response.json()["people"][0]["mention_mobile"] == "13900139000"
+    assert update_response.json()["people"][0]["daily_time"] == "08:10"
+    assert delete_response.status_code == 200
+    assert delete_response.json()["people"] == []
 
 
 def test_saving_notification_config_with_blank_webhook_preserves_existing_value(tmp_path):

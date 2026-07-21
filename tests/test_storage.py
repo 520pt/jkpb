@@ -78,6 +78,25 @@ def test_saving_monitored_people_replaces_existing_name(tmp_path: Path):
     ]
 
 
+def test_monitored_person_can_be_renamed_and_deleted(tmp_path: Path):
+    repo = DutyRepository(tmp_path / "duty.db")
+    repo.save_monitored_person(name="示例甲", mention_mobile="10000000000")
+
+    repo.save_monitored_person(
+        original_name="示例甲",
+        name="示例乙",
+        mention_mobile="13900139000",
+        daily_time="08:10",
+        before_shift_minutes=20,
+    )
+
+    assert [person["name"] for person in repo.list_monitored_people()] == ["示例乙"]
+    assert repo.list_monitored_people()[0]["mention_mobile"] == "13900139000"
+    assert repo.delete_monitored_person("示例乙") is True
+    assert repo.delete_monitored_person("示例乙") is False
+    assert repo.list_monitored_people() == []
+
+
 def test_roster_import_syncs_personnel_names(tmp_path: Path):
     repo = DutyRepository(tmp_path / "duty.db")
 

@@ -60,3 +60,19 @@
 - API tests cover custom reminder CRUD, personnel mobile autofill, preview generation, and due sending.
 - Frontend script syntax passes.
 - Full pytest passes.
+
+## 2026-07-22 Monitored Reminder CRUD
+
+### Goals
+- The configured monitored reminder list must support edit and delete, not only overwrite-by-name saves.
+- Editing should allow changing the person's name without leaving the old monitored reminder behind.
+
+### Behavior
+- `POST /api/people` accepts optional `original_name`; when it differs from `name`, the old monitored reminder row is removed after saving the new row.
+- `DELETE /api/people/{name}` removes one monitored reminder configuration by exact name.
+- The UI list for configured monitored reminders provides edit and delete actions.
+
+### Verification
+- Storage tests cover monitored reminder rename and delete.
+- API tests cover monitored reminder update and delete.
+- Frontend script syntax passes.

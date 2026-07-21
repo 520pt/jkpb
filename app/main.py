@@ -57,6 +57,7 @@ class RosterRecheckRequest(BaseModel):
 
 class MonitoredPersonRequest(BaseModel):
     name: str
+    original_name: str = ""
     wecom_userid: str = ""
     mention_text: str = ""
     mention_mobile: str = ""
@@ -71,6 +72,14 @@ class MonitoredPersonRequest(BaseModel):
     @classmethod
     def validate_time(cls, value: str) -> str:
         return _validate_hhmm(value)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("姓名不能为空")
+        return text
 
 
 class NotificationConfigRequest(BaseModel):
@@ -351,6 +360,12 @@ def create_app(
     @app.post("/api/people")
     def save_person(request: MonitoredPersonRequest):
         repo.save_monitored_person(**request.model_dump())
+        return {"success": True, "people": repo.list_monitored_people()}
+
+    @app.delete("/api/people/{name}")
+    def delete_person(name: str):
+        if not repo.delete_monitored_person(name):
+            raise HTTPException(status_code=404, detail="监控班提醒人员不存在")
         return {"success": True, "people": repo.list_monitored_people()}
 
     @app.get("/api/personnel")

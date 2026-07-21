@@ -1032,7 +1032,9 @@
                 </div>
                 <div class="settings-actions">
                   <button class="primary" id="savePersonBtn">保存监控班提醒</button>
+                  <button class="hidden" id="cancelPersonEditBtn" type="button">取消编辑</button>
                 </div>
+                <p id="monitorStatus" class="status"></p>
               </div>
             </div>
 
@@ -1208,6 +1210,8 @@
       savedDraft: null,
       pendingImport: null,
       rosterVersions: [],
+      monitoredPeople: [],
+      editingPersonName: null,
       personnelPeople: [],
       customReminders: [],
       editingCustomReminderId: null,
@@ -1956,8 +1960,41 @@
     $("restReminderEnabled").addEventListener("change", updateRestReminderFields);
     updateRestReminderFields();
 
+    function resetMonitorPersonForm() {
+      state.editingPersonName = null;
+      $("personName").value = "";
+      $("mentionMobile").value = "";
+      $("dailyTime").value = "07:50";
+      $("beforeMinutes").value = "10";
+      $("restReminderEnabled").checked = false;
+      $("restReminderTime").value = "08:30";
+      $("restMessageTemplate").value = "{name} {rest_status}";
+      $("savePersonBtn").textContent = "保存监控班提醒";
+      $("cancelPersonEditBtn").classList.add("hidden");
+      $("monitorStatus").textContent = "";
+      $("monitorStatus").className = "status";
+      updateRestReminderFields();
+    }
+
+    function fillMonitorPersonForm(person) {
+      state.editingPersonName = person.name;
+      $("personName").value = person.name || "";
+      $("mentionMobile").value = person.mention_mobile || "";
+      $("dailyTime").value = person.daily_time || "07:50";
+      $("beforeMinutes").value = String(person.before_shift_minutes || 10);
+      $("restReminderEnabled").checked = Boolean(person.rest_reminder_enabled);
+      $("restReminderTime").value = person.rest_reminder_time || "08:30";
+      $("restMessageTemplate").value = person.rest_message_template || "{name} {rest_status}";
+      $("savePersonBtn").textContent = "保存修改";
+      $("cancelPersonEditBtn").classList.remove("hidden");
+      updateRestReminderFields();
+    }
+
+    $("cancelPersonEditBtn").addEventListener("click", resetMonitorPersonForm);
+
     $("savePersonBtn").addEventListener("click", async () => {
       const payload = {
+        original_name: state.editingPersonName || "",
         name: $("personName").value.trim(),
         mention_mobile: $("mentionMobile").value.trim(),
         daily_time: $("dailyTime").value || "07:50",
@@ -1969,7 +2006,11 @@
       };
       if (!payload.name) return;
       await saveNotificationConfig(false);
-      await fetch("/api/people", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const response = await fetch("/api/people", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const body = await response.json();
+      if (response.ok && body.success) resetMonitorPersonForm();
+      $("monitorStatus").textContent = response.ok && body.success ? "已保存监控班提醒" : body.detail || "保存失败";
+      $("monitorStatus").className = `status ${response.ok && body.success ? "ok" : "error"}`;
       await loadPeople();
       await loadPersonnel();
     });
@@ -1977,14 +2018,38 @@
     async function loadPeople() {
       const response = await fetch("/api/people");
       const body = await response.json();
-      $("peopleList").innerHTML = (body.people || []).map((person) => `
+      state.monitoredPeople = body.people || [];
+      $("peopleList").innerHTML = state.monitoredPeople.map((person) => `
         <div class="item">
           <strong>${escapeHtml(person.name)}</strong>
           <small>@手机号 ${escapeHtml(person.mention_mobile || "未填写")} · 每日提醒时间 ${escapeHtml(person.daily_time)} · 班次提前提醒 ${person.before_shift_minutes} 分钟 · 休息提醒 ${person.rest_reminder_enabled ? escapeHtml(person.rest_reminder_time) : "未启用"}</small>
           ${person.rest_reminder_enabled ? `<small>休息文案 ${escapeHtml(person.rest_message_template || "{name} {rest_status}")}</small>` : ""}
+          <div class="settings-actions">
+            <button type="button" data-edit-person="${escapeHtml(person.name)}">编辑</button>
+            <button class="danger" type="button" data-delete-person="${escapeHtml(person.name)}">删除</button>
+          </div>
         </div>
       `).join("") || `<div class="item"><small>暂无人员</small></div>`;
     }
+
+    $("peopleList").addEventListener("click", async (event) => {
+      const editButton = event.target.closest("[data-edit-person]");
+      if (editButton) {
+        const person = state.monitoredPeople.find((item) => item.name === editButton.dataset.editPerson);
+        if (person) fillMonitorPersonForm(person);
+        return;
+      }
+      const deleteButton = event.target.closest("[data-delete-person]");
+      if (!deleteButton) return;
+      if (!confirm(`确认删除 ${deleteButton.dataset.deletePerson} 的监控班提醒？`)) return;
+      deleteButton.disabled = true;
+      const response = await fetch(`/api/people/${encodeURIComponent(deleteButton.dataset.deletePerson)}`, { method: "DELETE" });
+      const body = await response.json();
+      if (response.ok && body.success && state.editingPersonName === deleteButton.dataset.deletePerson) resetMonitorPersonForm();
+      $("monitorStatus").textContent = response.ok && body.success ? "已删除监控班提醒" : body.detail || "删除失败";
+      $("monitorStatus").className = `status ${response.ok && body.success ? "ok" : "error"}`;
+      await loadPeople();
+    });
 
     function customReminderShiftLabel(shiftCode) {
       return ({ early: "早班", middle: "中班", night: "晚班" })[shiftCode] || shiftCode;

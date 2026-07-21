@@ -326,6 +326,7 @@ class DutyRepository:
         self,
         *,
         name: str,
+        original_name: str = "",
         wecom_userid: str = "",
         mention_text: str = "",
         mention_mobile: str = "",
@@ -336,6 +337,8 @@ class DutyRepository:
         rest_message_template: str = DEFAULT_REST_MESSAGE_TEMPLATE,
         enabled: bool = True,
     ) -> None:
+        clean_name = name.strip()
+        clean_original_name = original_name.strip()
         with self._connect() as conn:
             conn.execute(
                 """
@@ -357,7 +360,7 @@ class DutyRepository:
                     enabled = excluded.enabled
                 """,
                 (
-                    name,
+                    clean_name,
                     wecom_userid,
                     mention_text,
                     mention_mobile,
@@ -369,7 +372,17 @@ class DutyRepository:
                     int(enabled),
                 ),
             )
-        self.upsert_personnel_contacts([{"name": name, "mention_mobile": mention_mobile}])
+            if clean_original_name and clean_original_name != clean_name:
+                conn.execute("DELETE FROM monitored_people WHERE name = ?", (clean_original_name,))
+        self.upsert_personnel_contacts([{"name": clean_name, "mention_mobile": mention_mobile}])
+
+    def delete_monitored_person(self, name: str) -> bool:
+        clean_name = name.strip()
+        if not clean_name:
+            return False
+        with self._connect() as conn:
+            cursor = conn.execute("DELETE FROM monitored_people WHERE name = ?", (clean_name,))
+        return cursor.rowcount > 0
 
     def list_monitored_people(self, enabled_only: bool = False) -> list[dict[str, Any]]:
         query = "SELECT * FROM monitored_people"
