@@ -84,7 +84,7 @@ docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-图片导入默认只使用固定排班表模板解析：检测表格线并按单元格颜色/像素特征识别班次，不再对整张图片运行 OCR。姓名、年份和月份需要在导入校对页面确认或手动修正。
+图片导入默认使用固定排班表模板解析：检测表格线并按单元格颜色/像素特征识别班次，不再对整张图片运行 OCR。姓名列会做局部 OCR，识别不到的姓名需要在导入校对页面手动修正。
 
 RapidOCR 依赖保留用于兼容旧代码路径。需要额外安装 PaddleOCR 大模型依赖做本地实验时，可以使用：
 

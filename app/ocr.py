@@ -56,6 +56,9 @@ def extract_roster_image(image_path: str | Path) -> dict[str, Any]:
     path = Path(image_path)
     template_result = extract_template_roster_image(path)
     if template_result is not None:
+        texts = _read_template_ocr_texts(path, template_result)
+        if texts:
+            _merge_template_ocr_texts(template_result, texts)
         return template_result
     return fallback_review_grid(str(path))
 
@@ -93,6 +96,68 @@ def _read_paddleocr_texts(path: Path) -> list[OcrText]:
     except Exception:
         return []
     return _paddle_result_to_texts(raw_result)
+
+
+def _read_template_ocr_texts(path: Path, template_result: dict[str, Any]) -> list[OcrText]:
+    try:
+        import cv2
+    except Exception:
+        return []
+
+    image = cv2.imread(str(path))
+    if image is None:
+        return []
+
+    grid = list(template_result.get("grid", []))
+    if not grid:
+        return []
+
+    first_day_box = next((row.get("boxes", {}).get("1") for row in grid if row.get("boxes", {}).get("1")), None)
+    row_boxes = [row.get("boxes", {}).get("1") for row in grid if row.get("boxes", {}).get("1")]
+    if not first_day_box or not row_boxes:
+        return []
+
+    min_day_x = int(first_day_box["x"])
+    y_min = min(int(box["y"]) for box in row_boxes)
+    y_max = max(int(box["y"]) + int(box["height"]) for box in row_boxes)
+    x_min = max(0, min_day_x - 180)
+    x_max = min(image.shape[1], min_day_x)
+    y_min = max(0, y_min)
+    y_max = min(image.shape[0], y_max)
+    if x_max <= x_min or y_max <= y_min:
+        return []
+
+    crop = image[y_min:y_max, x_min:x_max]
+    return _read_rapidocr_crop_texts(crop, x_offset=x_min, y_offset=y_min, scale=2.0)
+
+
+def _read_rapidocr_crop_texts(crop: Any, *, x_offset: int, y_offset: int, scale: float) -> list[OcrText]:
+    try:
+        import cv2
+    except Exception:
+        return []
+
+    if crop is None or getattr(crop, "size", 0) == 0:
+        return []
+
+    resized = cv2.resize(crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        crop_path = Path(temp_dir) / "template-name-column.png"
+        if not cv2.imwrite(str(crop_path), resized):
+            return []
+        texts = _read_rapidocr_texts(crop_path)
+
+    return [
+        OcrText(
+            text=item.text,
+            x=x_offset + item.x / scale,
+            y=y_offset + item.y / scale,
+            confidence=item.confidence,
+        )
+        for item in texts
+    ]
 
 
 def extract_template_roster_image(image_path: str | Path) -> dict[str, Any] | None:
