@@ -81,6 +81,19 @@ class DutyRepository:
 
                 CREATE TABLE IF NOT EXISTS personnel_names (
                     name TEXT PRIMARY KEY,
+                    mention_mobile TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS custom_reminders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    mention_mobile TEXT NOT NULL DEFAULT '',
+                    shift_code TEXT NOT NULL,
+                    reminder_time TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -123,6 +136,9 @@ class DutyRepository:
             config_columns = {row["name"] for row in conn.execute("PRAGMA table_info(notification_config)").fetchall()}
             if "message_template" not in config_columns:
                 conn.execute("ALTER TABLE notification_config ADD COLUMN message_template TEXT NOT NULL DEFAULT ''")
+            personnel_columns = {row["name"] for row in conn.execute("PRAGMA table_info(personnel_names)").fetchall()}
+            if "mention_mobile" not in personnel_columns:
+                conn.execute("ALTER TABLE personnel_names ADD COLUMN mention_mobile TEXT NOT NULL DEFAULT ''")
 
     def table_names(self) -> set[str]:
         with self._connect() as conn:
@@ -255,17 +271,56 @@ class DutyRepository:
                     (name,),
                 )
 
+    def upsert_personnel_contacts(self, contacts: list[dict[str, str]]) -> None:
+        clean_contacts: dict[str, str] = {}
+        for contact in contacts:
+            name = str(contact.get("name") or "").strip()
+            if not name:
+                continue
+            mobile = str(contact.get("mention_mobile") or "").strip()
+            if name not in clean_contacts or mobile:
+                clean_contacts[name] = mobile
+        with self._connect() as conn:
+            for name, mobile in sorted(clean_contacts.items()):
+                conn.execute(
+                    """
+                    INSERT INTO personnel_names (name, mention_mobile) VALUES (?, ?)
+                    ON CONFLICT(name) DO UPDATE SET
+                        mention_mobile = CASE
+                            WHEN excluded.mention_mobile != '' THEN excluded.mention_mobile
+                            ELSE personnel_names.mention_mobile
+                        END,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (name, mobile),
+                )
+
     def save_personnel_names(self, names: list[str]) -> None:
         clean_names = sorted({name.strip() for name in names if name and name.strip()})
         with self._connect() as conn:
-            conn.execute("DELETE FROM personnel_names")
+            if clean_names:
+                placeholders = ",".join("?" for _ in clean_names)
+                conn.execute(f"DELETE FROM personnel_names WHERE name NOT IN ({placeholders})", clean_names)
+            else:
+                conn.execute("DELETE FROM personnel_names")
             for name in clean_names:
-                conn.execute("INSERT INTO personnel_names (name) VALUES (?)", (name,))
+                conn.execute(
+                    """
+                    INSERT INTO personnel_names (name) VALUES (?)
+                    ON CONFLICT(name) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (name,),
+                )
 
     def list_personnel_names(self) -> list[str]:
         with self._connect() as conn:
             rows = conn.execute("SELECT name FROM personnel_names ORDER BY name").fetchall()
         return [row["name"] for row in rows]
+
+    def list_personnel(self) -> list[dict[str, str]]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT name, mention_mobile FROM personnel_names ORDER BY name").fetchall()
+        return [{"name": row["name"], "mention_mobile": row["mention_mobile"]} for row in rows]
 
     def save_monitored_person(
         self,
@@ -314,6 +369,7 @@ class DutyRepository:
                     int(enabled),
                 ),
             )
+        self.upsert_personnel_contacts([{"name": name, "mention_mobile": mention_mobile}])
 
     def list_monitored_people(self, enabled_only: bool = False) -> list[dict[str, Any]]:
         query = "SELECT * FROM monitored_people"
@@ -334,6 +390,87 @@ class DutyRepository:
                 "rest_reminder_time": row["rest_reminder_time"],
                 "rest_message_template": _normalize_rest_message_template(row["rest_message_template"]),
                 "enabled": bool(row["enabled"]),
+            }
+            for row in rows
+        ]
+
+    def save_custom_reminder(
+        self,
+        *,
+        name: str,
+        shift_code: str,
+        reminder_time: str,
+        message: str,
+        mention_mobile: str = "",
+        enabled: bool = True,
+        id: int | None = None,
+    ) -> int:
+        clean_name = name.strip()
+        clean_mobile = mention_mobile.strip()
+        with self._connect() as conn:
+            if id is not None:
+                cursor = conn.execute(
+                    """
+                    UPDATE custom_reminders
+                    SET name = ?,
+                        mention_mobile = ?,
+                        shift_code = ?,
+                        reminder_time = ?,
+                        message = ?,
+                        enabled = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (clean_name, clean_mobile, shift_code, reminder_time, message, int(enabled), int(id)),
+                )
+                if cursor.rowcount > 0:
+                    reminder_id = int(id)
+                else:
+                    cursor = conn.execute(
+                        """
+                        INSERT INTO custom_reminders
+                            (name, mention_mobile, shift_code, reminder_time, message, enabled)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (clean_name, clean_mobile, shift_code, reminder_time, message, int(enabled)),
+                    )
+                    reminder_id = int(cursor.lastrowid)
+            else:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO custom_reminders
+                        (name, mention_mobile, shift_code, reminder_time, message, enabled)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (clean_name, clean_mobile, shift_code, reminder_time, message, int(enabled)),
+                )
+                reminder_id = int(cursor.lastrowid)
+        self.upsert_personnel_contacts([{"name": clean_name, "mention_mobile": clean_mobile}])
+        return reminder_id
+
+    def delete_custom_reminder(self, reminder_id: int) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute("DELETE FROM custom_reminders WHERE id = ?", (int(reminder_id),))
+        return cursor.rowcount > 0
+
+    def list_custom_reminders(self, enabled_only: bool = False) -> list[dict[str, Any]]:
+        query = "SELECT * FROM custom_reminders"
+        if enabled_only:
+            query += " WHERE enabled = 1"
+        query += " ORDER BY name, shift_code, reminder_time, id"
+        with self._connect() as conn:
+            rows = conn.execute(query).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "mention_mobile": row["mention_mobile"],
+                "shift_code": row["shift_code"],
+                "reminder_time": row["reminder_time"],
+                "message": row["message"],
+                "enabled": bool(row["enabled"]),
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
             }
             for row in rows
         ]

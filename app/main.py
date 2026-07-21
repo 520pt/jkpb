@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.daily_duty_image import has_cjk_font, render_daily_duty_image
 from app.ocr import extract_roster_image, extract_template_roster_image
 from app.reminders import DEFAULT_MESSAGE_TEMPLATE, ReminderEvent, ReminderSettings, plan_reminders_for_day
-from app.roster import ShiftAssignment, normalize_shift_code
+from app.roster import Shift, ShiftAssignment, normalize_shift_code
 from app.storage import DEFAULT_DAILY_DUTY_TEMPLATE, DEFAULT_REST_MESSAGE_TEMPLATE, DutyRepository
 from app.wecom import WeComClient, WeComError, WeComWebhookClient
 
@@ -86,8 +86,46 @@ class PreviewRequest(BaseModel):
     target_date: date | None = None
 
 
+class PersonnelContactRequest(BaseModel):
+    name: str
+    mention_mobile: str = ""
+
+
 class PersonnelRequest(BaseModel):
-    names: list[str]
+    names: list[str] = Field(default_factory=list)
+    people: list[PersonnelContactRequest] = Field(default_factory=list)
+
+
+class CustomReminderRequest(BaseModel):
+    id: int | None = None
+    name: str
+    mention_mobile: str = ""
+    shift_code: str
+    reminder_time: str
+    message: str
+    enabled: bool = True
+
+    @field_validator("name", "message")
+    @classmethod
+    def validate_required_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("不能为空")
+        return text
+
+    @field_validator("shift_code")
+    @classmethod
+    def validate_shift_code(cls, value: str) -> str:
+        text = value.strip()
+        allowed = {shift.value for shift in Shift}
+        if text not in allowed:
+            raise ValueError("班次必须是 early、middle 或 night")
+        return text
+
+    @field_validator("reminder_time")
+    @classmethod
+    def validate_reminder_time(cls, value: str) -> str:
+        return _validate_hhmm(value)
 
 
 class DailyDutyConfigRequest(BaseModel):
@@ -317,12 +355,29 @@ def create_app(
 
     @app.get("/api/personnel")
     def list_personnel():
-        return {"names": repo.list_personnel_names()}
+        return {"names": repo.list_personnel_names(), "people": repo.list_personnel()}
 
     @app.post("/api/personnel")
     def save_personnel(request: PersonnelRequest):
         repo.save_personnel_names(request.names)
-        return {"success": True, "names": repo.list_personnel_names()}
+        if request.people:
+            repo.upsert_personnel_contacts([person.model_dump() for person in request.people])
+        return {"success": True, "names": repo.list_personnel_names(), "people": repo.list_personnel()}
+
+    @app.get("/api/custom-reminders")
+    def list_custom_reminders():
+        return {"reminders": repo.list_custom_reminders()}
+
+    @app.post("/api/custom-reminders")
+    def save_custom_reminder(request: CustomReminderRequest):
+        reminder_id = repo.save_custom_reminder(**request.model_dump())
+        return {"success": True, "id": reminder_id, "reminders": repo.list_custom_reminders()}
+
+    @app.delete("/api/custom-reminders/{reminder_id}")
+    def delete_custom_reminder(reminder_id: int):
+        if not repo.delete_custom_reminder(reminder_id):
+            raise HTTPException(status_code=404, detail="自定义提醒不存在")
+        return {"success": True, "reminders": repo.list_custom_reminders()}
 
     @app.get("/api/daily-duty-config")
     def get_daily_duty_config():
@@ -800,6 +855,42 @@ def _diff_roster_grids(existing_grid: list[dict[str, Any]], incoming_grid: list[
     return diffs
 
 
+def _plan_custom_reminder_events(repo: DutyRepository, assignments: list[ShiftAssignment], target: date) -> list[ReminderEvent]:
+    events: list[ReminderEvent] = []
+    for reminder in repo.list_custom_reminders(enabled_only=True):
+        name = str(reminder.get("name") or "").strip()
+        shift_code = str(reminder.get("shift_code") or "").strip()
+        reminder_time = _coerce_hhmm(str(reminder.get("reminder_time") or ""), "07:50")
+        if not name or not shift_code:
+            continue
+        try:
+            shift = Shift(shift_code)
+        except ValueError:
+            continue
+        for assignment in assignments:
+            if assignment.work_date != target or assignment.person_name != name or assignment.shift is not shift:
+                continue
+            values = {
+                "name": assignment.person_name,
+                "date": f"{assignment.work_date:%Y-%m-%d}",
+                "time_range": assignment.time_range_text,
+                "shift_label": assignment.shift.label,
+                "reminder_time": reminder_time,
+            }
+            content = _render_simple_template(str(reminder.get("message") or ""), values)
+            events.append(
+                ReminderEvent(
+                    kind="custom",
+                    person_name=name,
+                    send_at=datetime.combine(target, _parse_hhmm(reminder_time), tzinfo=TZ),
+                    content=content,
+                    mention_mobile=str(reminder.get("mention_mobile") or "").strip(),
+                    key_suffix=str(reminder.get("id") or ""),
+                )
+            )
+    return events
+
+
 def _plan_all_events(repo: DutyRepository, target: date):
     assignments: list[ShiftAssignment] = []
     for roster_month in repo.list_roster_months():
@@ -847,6 +938,7 @@ def _plan_all_events(repo: DutyRepository, target: date):
                 content=daily_duty["content"],
             )
         )
+    events.extend(_plan_custom_reminder_events(repo, assignments, target))
     return sorted(events, key=lambda event: event.send_at)
 
 
@@ -889,6 +981,23 @@ def _next_events(repo: DutyRepository, now: datetime, *, days: int = 7, limit: i
     ]
 
 
+def _person_mobile_lookup(repo: DutyRepository) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+    for person in repo.list_monitored_people():
+        mobile = str(person.get("mention_mobile") or "").strip()
+        if mobile:
+            lookup[str(person.get("name") or "").strip()] = mobile
+    for person in repo.list_personnel():
+        mobile = str(person.get("mention_mobile") or "").strip()
+        if mobile:
+            lookup[str(person.get("name") or "").strip()] = mobile
+    return {name: mobile for name, mobile in lookup.items() if name}
+
+
+def _mobile_for_event(event: ReminderEvent, mobile_lookup: dict[str, str]) -> str:
+    return event.mention_mobile.strip() or mobile_lookup.get(event.person_name, "")
+
+
 async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> dict[str, Any]:
     webhook_url = str(repo.get_notification_config().get("webhook_url", "")).strip()
     if not webhook_url:
@@ -905,8 +1014,7 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
             preview_date = _date_from_record(record) or _today_in_tz()
             await client.send_image(render_daily_duty_image(_build_daily_duty_preview(repo, preview_date)))
         else:
-            person = next((person for person in repo.list_monitored_people() if person["name"] == target), None)
-            mobile = person.get("mention_mobile", "") if person else (target if target != "测试消息" else "")
+            mobile = _person_mobile_lookup(repo).get(target, target if target != "测试消息" else "")
             await client.send_text(content, [mobile])
         repo.save_send_record(
             kind=resend_kind,
@@ -958,18 +1066,24 @@ async def _send_due_reminders(repo: DutyRepository) -> None:
         return
 
     people = {person["name"]: person for person in repo.list_monitored_people(enabled_only=True)}
+    mobile_lookup = _person_mobile_lookup(repo)
     for event in events:
         if not (now - REMINDER_SEND_GRACE <= event.send_at <= now):
             continue
-        reminder_key = f"{event.person_name}:{event.kind}:{event.send_at.isoformat()}"
+        person = people.get(event.person_name)
+        can_send = event.kind == "daily_duty" and webhook_client
+        can_send = bool(can_send or webhook_client or (person and app_client))
+        if not can_send:
+            continue
+        content_hash = hashlib.sha256(event.content.encode("utf-8")).hexdigest()[:12]
+        reminder_key = f"{event.person_name}:{event.kind}:{event.send_at.isoformat()}:{event.key_suffix}:{content_hash}"
         if not repo.mark_sent_once(reminder_key):
             continue
-        person = people.get(event.person_name)
         try:
             if event.kind == "daily_duty" and webhook_client:
                 await webhook_client.send_image(render_daily_duty_image(_build_daily_duty_preview(repo, now.date())))
-            elif person and webhook_client:
-                await webhook_client.send_text(event.content, [person.get("mention_mobile", "")])
+            elif webhook_client:
+                await webhook_client.send_text(event.content, [_mobile_for_event(event, mobile_lookup)])
             elif person and app_client:
                 await app_client.send_text(person["wecom_userid"], event.content)
             else:

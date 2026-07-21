@@ -17,7 +17,9 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
 
     assert response.status_code == 200
     html = response.text
-    assert 'id="personName" placeholder="示例甲"' in html
+    assert 'id="personName" list="personnelNameOptions" placeholder="选择或输入姓名"' in html
+    assert 'id="customReminderName" list="personnelNameOptions" placeholder="选择或输入姓名"' in html
+    assert 'id="driverNameInput" list="personnelNameOptions" placeholder="选择或输入姓名"' in html
     assert 'id="testMobile" placeholder="10000000000"' in html
     assert 'id="mentionMobile" placeholder="10000000000"' in html
 
@@ -158,6 +160,53 @@ def test_confirm_roster_and_preview_reminders(tmp_path):
     events = preview_response.json()["events"]
     assert any(event["kind"] == "before_shift" for event in events)
     assert any(event["send_at"] == "2025-09-15T23:50:00+08:00" for event in events)
+
+
+def test_custom_reminder_crud_personnel_contact_and_preview(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    confirm_response = client.post(
+        "/api/rosters/confirm",
+        json={
+            "year": 2025,
+            "month": 9,
+            "source_image_path": "uploads/month.png",
+            "grid": [{"name": "商邱宏", "days": {"16": "晚"}}],
+        },
+    )
+    reminder_response = client.post(
+        "/api/custom-reminders",
+        json={
+            "name": "商邱宏",
+            "mention_mobile": "10000000000",
+            "shift_code": "night",
+            "reminder_time": "21:00",
+            "message": "{name} 需要关闭隧道灯",
+            "enabled": True,
+        },
+    )
+    personnel_response = client.get("/api/personnel")
+    preview_response = client.post("/api/reminders/preview", json={"target_date": "2025-09-16"})
+
+    assert confirm_response.status_code == 200
+    assert reminder_response.status_code == 200
+    assert reminder_response.json()["reminders"][0]["message"] == "{name} 需要关闭隧道灯"
+    assert personnel_response.json()["people"] == [{"name": "商邱宏", "mention_mobile": "10000000000"}]
+    events = preview_response.json()["events"]
+    assert any(
+        event["kind"] == "custom"
+        and event["person_name"] == "商邱宏"
+        and event["send_at"] == "2025-09-16T21:00:00+08:00"
+        and event["content"] == "商邱宏 需要关闭隧道灯"
+        for event in events
+    )
+
+    reminder_id = reminder_response.json()["id"]
+    delete_response = client.delete(f"/api/custom-reminders/{reminder_id}")
+
+    assert delete_response.status_code == 200
+    assert delete_response.json()["reminders"] == []
 
 
 def test_confirm_roster_rejects_placeholder_names(tmp_path):
@@ -613,6 +662,51 @@ def test_due_reminder_sends_recently_overdue_daily_duty_event(tmp_path, monkeypa
     assert records[0]["status"] == "success"
 
 
+def test_due_custom_reminder_sends_with_saved_personnel_mobile(tmp_path, monkeypatch):
+    sent: dict[str, object] = {}
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2025, 9, 16, 21, 0, 25, tzinfo=tz)
+
+    class FakeWebhookClient:
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            sent["content"] = content
+            sent["mobiles"] = mentioned_mobile_list
+
+        async def send_image(self, image_bytes: bytes):
+            raise AssertionError("自定义提醒不应该发送图片")
+
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(webhook_url="https://example.test/cgi-bin/webhook/send?key=unit-test")
+    repo.save_roster_month(
+        2025,
+        9,
+        [{"name": "商邱宏", "days": {"16": "晚"}}],
+        "uploads/month.png",
+    )
+    repo.save_custom_reminder(
+        name="商邱宏",
+        mention_mobile="10000000000",
+        shift_code="night",
+        reminder_time="21:00",
+        message="需要关闭隧道灯",
+        enabled=True,
+    )
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(main_module, "_wecom_webhook_client_from_repo", lambda repo: FakeWebhookClient())
+
+    asyncio.run(main_module._send_due_reminders(repo))
+
+    assert sent["content"] == "需要关闭隧道灯"
+    assert sent["mobiles"] == ["10000000000"]
+    records = repo.list_send_records()
+    assert records[0]["kind"] == "custom"
+    assert records[0]["target"] == "商邱宏"
+    assert records[0]["status"] == "success"
+
+
 def test_list_confirmed_rosters_after_import(tmp_path):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
@@ -829,4 +923,3 @@ def test_recheck_roster_corrects_mismatched_cells_from_source_image(tmp_path):
             "box": {"x": 257, "y": 120, "width": 24, "height": 33},
         }
     ]
-

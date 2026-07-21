@@ -22,6 +22,8 @@ class ReminderEvent:
     person_name: str
     send_at: datetime
     content: str
+    mention_mobile: str = ""
+    key_suffix: str = ""
 
 
 def _parse_hhmm(value: str) -> time:

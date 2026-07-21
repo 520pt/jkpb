@@ -13,6 +13,7 @@ def test_initializes_sqlite_schema(tmp_path: Path):
         "monitored_people",
         "notification_config",
         "personnel_names",
+        "custom_reminders",
         "daily_duty_config",
         "sent_reminders",
         "send_records",
@@ -88,6 +89,46 @@ def test_roster_import_syncs_personnel_names(tmp_path: Path):
     )
 
     assert repo.list_personnel_names() == sorted(["示例甲", "示例丁"])
+
+
+def test_personnel_names_preserve_saved_mobile_numbers(tmp_path: Path):
+    repo = DutyRepository(tmp_path / "duty.db")
+
+    repo.upsert_personnel_contacts([{"name": "商邱宏", "mention_mobile": "10000000000"}])
+    repo.save_personnel_names(["商邱宏", "示例乙"])
+
+    assert repo.list_personnel() == [
+        {"name": "商邱宏", "mention_mobile": "10000000000"},
+        {"name": "示例乙", "mention_mobile": ""},
+    ]
+
+
+def test_custom_reminder_roundtrip_updates_personnel_contact(tmp_path: Path):
+    repo = DutyRepository(tmp_path / "duty.db")
+
+    reminder_id = repo.save_custom_reminder(
+        name="商邱宏",
+        mention_mobile="10000000000",
+        shift_code="night",
+        reminder_time="21:00",
+        message="需要关闭隧道灯",
+        enabled=True,
+    )
+
+    assert repo.list_custom_reminders() == [
+        {
+            "id": reminder_id,
+            "name": "商邱宏",
+            "mention_mobile": "10000000000",
+            "shift_code": "night",
+            "reminder_time": "21:00",
+            "message": "需要关闭隧道灯",
+            "enabled": True,
+            "created_at": repo.list_custom_reminders()[0]["created_at"],
+            "updated_at": repo.list_custom_reminders()[0]["updated_at"],
+        }
+    ]
+    assert repo.list_personnel() == [{"name": "商邱宏", "mention_mobile": "10000000000"}]
 
 
 def test_daily_duty_config_roundtrip(tmp_path: Path):

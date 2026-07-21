@@ -711,7 +711,7 @@
       align-items: center;
     }
     .driver-picker-row {
-      grid-template-columns: minmax(160px, 240px) minmax(180px, 1fr);
+      grid-template-columns: minmax(180px, 1fr);
     }
     .name-tag {
       display: inline-flex;
@@ -852,6 +852,8 @@
     </div>
   </header>
 
+  <datalist id="personnelNameOptions"></datalist>
+
   <nav class="tabs">
     <button class="tab-button active" data-tab="review">排班核对</button>
     <button class="tab-button" data-tab="saved">已导入排班</button>
@@ -984,6 +986,7 @@
           <h3>配置目录</h3>
           <button class="active" data-settings-target="wecomSettings">企业微信通知</button>
           <button data-settings-target="monitorSettings">监控班提醒</button>
+          <button data-settings-target="customReminderSettings">自定义提醒</button>
           <button data-settings-target="personnelSettings">人员名单</button>
           <button data-settings-target="driverSettings">今日在岗提醒</button>
           <button data-settings-target="previewSettings">提醒预览</button>
@@ -1012,7 +1015,7 @@
               <h3>监控班提醒</h3>
               <div class="stack">
                 <div class="field-grid">
-                  <label>姓名 <input id="personName" placeholder="示例甲" /></label>
+                  <label>姓名 <input id="personName" list="personnelNameOptions" placeholder="选择或输入姓名" /></label>
                   <label>@ 手机号 <input id="mentionMobile" placeholder="10000000000" /></label>
                 </div>
                 <div class="field-grid">
@@ -1039,6 +1042,39 @@
             </div>
           </section>
 
+          <section class="settings-panel" id="customReminderSettings">
+            <div class="side-block">
+              <h3>自定义提醒</h3>
+              <div class="stack">
+                <div class="field-grid">
+                  <label>姓名 <input id="customReminderName" list="personnelNameOptions" placeholder="选择或输入姓名" /></label>
+                  <label>@ 手机号 <input id="customReminderMobile" placeholder="10000000000" /></label>
+                </div>
+                <div class="field-grid">
+                  <label>匹配班次
+                    <select id="customReminderShift">
+                      <option value="early">早班</option>
+                      <option value="middle">中班</option>
+                      <option value="night">晚班</option>
+                    </select>
+                  </label>
+                  <label>提醒时间 <input id="customReminderTime" type="time" value="21:00" /></label>
+                </div>
+                <label>提醒文案 <textarea id="customReminderMessage" placeholder="需要关闭隧道灯"></textarea></label>
+                <label class="checkbox-label"><input id="customReminderEnabled" type="checkbox" checked /> 启用这条提醒</label>
+                <div class="settings-actions">
+                  <button class="primary" id="saveCustomReminderBtn" type="button">保存自定义提醒</button>
+                </div>
+                <p id="customReminderStatus" class="status"></p>
+              </div>
+            </div>
+
+            <div class="side-block">
+              <h3>已配置自定义提醒</h3>
+              <div id="customReminderList" class="people-list"></div>
+            </div>
+          </section>
+
           <section class="settings-panel single" id="personnelSettings">
             <div class="side-block">
               <h3>人员名单</h3>
@@ -1048,7 +1084,7 @@
                   <textarea id="personnelNames" class="hidden-field"></textarea>
                 </label>
                 <div class="tag-input-row">
-                  <input id="personnelNamesTagInput" placeholder="输入姓名后回车" />
+                  <input id="personnelNamesTagInput" list="personnelNameOptions" placeholder="输入姓名后回车" />
                   <button id="addPersonnelNameBtn" type="button">添加姓名</button>
                 </div>
                 <div class="settings-actions">
@@ -1062,8 +1098,7 @@
               <h3>驾驶员名单</h3>
               <div class="stack">
                 <div class="driver-picker-row">
-                  <select id="driverNameSelect"></select>
-                  <input id="driverManualName" placeholder="手动输入姓名，填写后优先使用" />
+                  <input id="driverNameInput" list="personnelNameOptions" placeholder="选择或输入姓名" />
                 </div>
                 <div class="settings-actions">
                   <button id="addBigDriverBtn" type="button">加入大车</button>
@@ -1173,6 +1208,9 @@
       savedDraft: null,
       pendingImport: null,
       rosterVersions: [],
+      personnelPeople: [],
+      customReminders: [],
+      editingCustomReminderId: null,
     };
     const BEIJING_TIME_ZONE = "Asia/Shanghai";
     const shiftOptions = ["", "早", "中", "晚", "休", "出差"];
@@ -1283,7 +1321,7 @@
         const tr = document.createElement("tr");
         const name = document.createElement("td");
         name.className = "name";
-        name.innerHTML = `<input value="${escapeHtml(row.name || "")}" data-row="${rowIndex}" data-name="1" />`;
+        name.innerHTML = `<input list="personnelNameOptions" value="${escapeHtml(row.name || "")}" data-row="${rowIndex}" data-name="1" />`;
         tr.appendChild(name);
         for (let day = 1; day <= dayCount; day++) {
           const dayText = String(day);
@@ -1685,7 +1723,7 @@
         name.className = "name";
         name.dataset.savedRow = String(rowIndex);
         if (state.savedEditMode) {
-          name.innerHTML = `<input value="${escapeHtml(row.name || "")}" data-saved-row="${rowIndex}" data-saved-name="1" />`;
+          name.innerHTML = `<input list="personnelNameOptions" value="${escapeHtml(row.name || "")}" data-saved-row="${rowIndex}" data-saved-name="1" />`;
         } else {
           name.textContent = row.name || "";
         }
@@ -1827,7 +1865,10 @@
       const body = await response.json();
       $("savedStatus").textContent = body.success ? "已保存修改" : "保存失败";
       $("savedStatus").className = `status ${body.success ? "ok" : "error"}`;
-      if (body.success) await loadSavedRosters();
+      if (body.success) {
+        await loadSavedRosters();
+        await loadPersonnel();
+      }
     });
 
     async function loadRosterVersions(roster) {
@@ -1867,7 +1908,10 @@
       const body = await response.json();
       $("savedStatus").textContent = response.ok && body.success ? "已回滚到所选版本" : body.detail || "回滚失败";
       $("savedStatus").className = `status ${response.ok && body.success ? "ok" : "error"}`;
-      if (response.ok && body.success) await loadSavedRosters();
+      if (response.ok && body.success) {
+        await loadSavedRosters();
+        await loadPersonnel();
+      }
       button.disabled = false;
     });
 
@@ -1923,10 +1967,11 @@
         rest_message_template: $("restMessageTemplate").value.trim(),
         enabled: true
       };
-      if (!payload.name || !payload.mention_mobile) return;
+      if (!payload.name) return;
       await saveNotificationConfig(false);
       await fetch("/api/people", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       await loadPeople();
+      await loadPersonnel();
     });
 
     async function loadPeople() {
@@ -1941,12 +1986,135 @@
       `).join("") || `<div class="item"><small>暂无人员</small></div>`;
     }
 
+    function customReminderShiftLabel(shiftCode) {
+      return ({ early: "早班", middle: "中班", night: "晚班" })[shiftCode] || shiftCode;
+    }
+
+    function resetCustomReminderForm() {
+      state.editingCustomReminderId = null;
+      $("customReminderName").value = "";
+      $("customReminderMobile").value = "";
+      $("customReminderShift").value = "early";
+      $("customReminderTime").value = "21:00";
+      $("customReminderMessage").value = "";
+      $("customReminderEnabled").checked = true;
+      $("saveCustomReminderBtn").textContent = "保存自定义提醒";
+    }
+
+    function fillCustomReminderForm(reminder) {
+      state.editingCustomReminderId = reminder.id;
+      $("customReminderName").value = reminder.name || "";
+      $("customReminderMobile").value = reminder.mention_mobile || personnelMobileByName(reminder.name);
+      $("customReminderShift").value = reminder.shift_code || "early";
+      $("customReminderTime").value = reminder.reminder_time || "21:00";
+      $("customReminderMessage").value = reminder.message || "";
+      $("customReminderEnabled").checked = reminder.enabled !== false;
+      $("saveCustomReminderBtn").textContent = "保存修改";
+    }
+
+    async function loadCustomReminders() {
+      const response = await fetch("/api/custom-reminders");
+      const body = await response.json();
+      state.customReminders = body.reminders || [];
+      $("customReminderList").innerHTML = state.customReminders.map((reminder) => `
+        <div class="item">
+          <strong>${escapeHtml(reminder.name)} · ${escapeHtml(customReminderShiftLabel(reminder.shift_code))} · ${escapeHtml(reminder.reminder_time)}</strong>
+          <small>@手机号 ${escapeHtml(reminder.mention_mobile || personnelMobileByName(reminder.name) || "未填写")} · ${reminder.enabled ? "已启用" : "已停用"}</small>
+          <div>${escapeHtml(reminder.message || "").replace(/\n/g, "<br>")}</div>
+          <div class="settings-actions">
+            <button type="button" data-edit-custom-reminder="${reminder.id}">编辑</button>
+            <button class="danger" type="button" data-delete-custom-reminder="${reminder.id}">删除</button>
+          </div>
+        </div>
+      `).join("") || `<div class="item"><small>暂无自定义提醒</small></div>`;
+    }
+
+    $("saveCustomReminderBtn").addEventListener("click", async () => {
+      const payload = {
+        id: state.editingCustomReminderId,
+        name: $("customReminderName").value.trim(),
+        mention_mobile: $("customReminderMobile").value.trim(),
+        shift_code: $("customReminderShift").value,
+        reminder_time: $("customReminderTime").value || "21:00",
+        message: $("customReminderMessage").value.trim(),
+        enabled: $("customReminderEnabled").checked
+      };
+      if (!payload.name || !payload.message) {
+        $("customReminderStatus").textContent = "请填写姓名和提醒文案";
+        $("customReminderStatus").className = "status error";
+        return;
+      }
+      const response = await fetch("/api/custom-reminders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const body = await response.json();
+      $("customReminderStatus").textContent = body.success ? "已保存自定义提醒" : body.detail || "保存失败";
+      $("customReminderStatus").className = `status ${body.success ? "ok" : "error"}`;
+      if (body.success) {
+        resetCustomReminderForm();
+        await loadCustomReminders();
+        await loadPersonnel();
+      }
+    });
+
+    $("customReminderList").addEventListener("click", async (event) => {
+      const editButton = event.target.closest("[data-edit-custom-reminder]");
+      if (editButton) {
+        const reminder = state.customReminders.find((item) => String(item.id) === String(editButton.dataset.editCustomReminder));
+        if (reminder) fillCustomReminderForm(reminder);
+        return;
+      }
+      const deleteButton = event.target.closest("[data-delete-custom-reminder]");
+      if (!deleteButton) return;
+      deleteButton.disabled = true;
+      const response = await fetch(`/api/custom-reminders/${deleteButton.dataset.deleteCustomReminder}`, { method: "DELETE" });
+      const body = await response.json();
+      $("customReminderStatus").textContent = body.success ? "已删除自定义提醒" : body.detail || "删除失败";
+      $("customReminderStatus").className = `status ${body.success ? "ok" : "error"}`;
+      await loadCustomReminders();
+    });
+
     function parseNameList(value) {
       return Array.from(new Set(String(value || "").split(/[\n,，、\s]+/).map((item) => item.trim()).filter(Boolean)));
     }
 
     function formatNameList(names) {
       return (names || []).join("\n");
+    }
+
+    function allKnownPersonnelNames() {
+      return Array.from(new Set([
+        ...parseNameList($("personnelNames").value),
+        ...state.personnelPeople.map((person) => person.name).filter(Boolean),
+      ])).sort((a, b) => a.localeCompare(b, "zh-CN"));
+    }
+
+    function personnelMobileByName(name) {
+      const target = String(name || "").trim();
+      const person = state.personnelPeople.find((item) => item.name === target);
+      return person ? String(person.mention_mobile || "").trim() : "";
+    }
+
+    function renderPersonnelNameOptions() {
+      const datalist = $("personnelNameOptions");
+      if (!datalist) return;
+      datalist.innerHTML = allKnownPersonnelNames()
+        .map((name) => `<option value="${escapeHtml(name)}"></option>`)
+        .join("");
+    }
+
+    function bindMobileAutofill(nameInputId, mobileInputId) {
+      const nameInput = $(nameInputId);
+      const mobileInput = $(mobileInputId);
+      if (!nameInput || !mobileInput) return;
+      const fill = () => {
+        const mobile = personnelMobileByName(nameInput.value);
+        if (mobile) mobileInput.value = mobile;
+      };
+      nameInput.addEventListener("change", fill);
+      nameInput.addEventListener("blur", fill);
     }
 
     function setNameListValue(targetId, names) {
@@ -2045,20 +2213,13 @@
       const response = await fetch("/api/personnel");
       const body = await response.json();
       const names = body.names || [];
+      state.personnelPeople = body.people || names.map((name) => ({ name, mention_mobile: "" }));
       setNameListValue("personnelNames", names);
+      renderPersonnelNameOptions();
     }
 
     function updateDriverNameOptions() {
-      const select = $("driverNameSelect");
-      if (!select) return;
-      const previous = select.value;
-      const assigned = new Set([
-        ...parseNameList($("bigDriverNames").value),
-        ...parseNameList($("smallDriverNames").value),
-      ]);
-      const available = parseNameList($("personnelNames").value).filter((name) => !assigned.has(name));
-      select.innerHTML = available.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("") || `<option value="">暂无可选人员</option>`;
-      if (available.includes(previous)) select.value = previous;
+      renderPersonnelNameOptions();
     }
 
     $("savePersonnelBtn").addEventListener("click", async () => {
@@ -2076,11 +2237,11 @@
     $("addPersonnelNameBtn").addEventListener("click", () => addNameTag("personnelNames", $("personnelNamesTagInput").value));
 
     function addDriverName(targetId) {
-      const manualName = $("driverManualName").value.trim();
-      const name = manualName || $("driverNameSelect").value;
+      const input = $("driverNameInput");
+      const name = input.value.trim();
       if (!name) return;
       addNameTag(targetId, name);
-      if (manualName) $("driverManualName").value = "";
+      input.value = "";
     }
 
     $("addBigDriverBtn").addEventListener("click", () => addDriverName("bigDriverNames"));
@@ -2335,6 +2496,8 @@
         before_shift_resend: "班前提醒补发",
         rest: "休息提醒",
         rest_resend: "休息提醒补发",
+        custom: "自定义提醒",
+        custom_resend: "自定义提醒补发",
       })[kind] || kind;
     }
 
@@ -2468,6 +2631,8 @@
     $("previewDate").value = beijingDateInputValue();
     $("dailyDutyPreviewDate").value = beijingDateInputValue();
     $("savedDutyDate").value = beijingDateInputValue();
+    bindMobileAutofill("personName", "mentionMobile");
+    bindMobileAutofill("customReminderName", "customReminderMobile");
     setupNameTagEditor("personnelNames");
     setupNameTagEditor("bigDriverNames");
     setupNameTagEditor("smallDriverNames");
@@ -2475,7 +2640,7 @@
     loadSavedRosters();
     loadSavedDutyChart();
     loadNotificationConfig();
-    loadPersonnel();
+    loadPersonnel().then(loadCustomReminders);
     loadDailyDutyConfig();
     loadPeople();
   </script>
