@@ -24,6 +24,18 @@ def test_template_parser_reads_fixed_roster_grid(tmp_path: Path):
     assert result["grid"][0]["boxes"]["1"] == {"x": 161, "y": 120, "width": 24, "height": 33}
 
 
+def test_template_parser_reads_sixteen_person_roster_grid(tmp_path: Path):
+    image_path = tmp_path / "roster.png"
+    _write_synthetic_roster(image_path, row_count=16)
+
+    result = extract_roster_image(image_path)
+
+    assert result["ocr_status"] == "template_ok"
+    assert len(result["grid"]) == 16
+    assert len(result["grid"][15]["days"]) == 31
+    assert result["grid"][15]["boxes"]["1"] == {"x": 161, "y": 615, "width": 24, "height": 33}
+
+
 def test_template_parser_does_not_show_sample_names_when_ocr_is_unavailable(tmp_path: Path):
     image_path = tmp_path / "roster.png"
     _write_synthetic_roster(image_path)
@@ -55,20 +67,20 @@ def test_template_parser_merges_ocr_names_and_month(tmp_path: Path, monkeypatch)
     assert result["grid"][1]["name"] == "李金雷"
 
 
-def _write_synthetic_roster(path: Path) -> None:
+def _write_synthetic_roster(path: Path, row_count: int = 15) -> None:
     image = np.full((731, 1089, 3), 255, dtype=np.uint8)
     x_lines = list(range(161, 906, 24))
     if x_lines[-1] != 905:
         x_lines.append(905)
-    y_lines = list(range(120, 616, 33))
+    y_lines = list(range(120, 120 + (row_count + 1) * 33, 33))
 
     for x in [28, 67, 161, *x_lines]:
-        cv2.line(image, (x, 43), (x, 615), (0, 0, 0), 1)
+        cv2.line(image, (x, 43), (x, y_lines[-1]), (0, 0, 0), 1)
     for y in [43, 76, *y_lines]:
         cv2.line(image, (0, y), (1080, y), (0, 0, 0), 1)
 
     patterns = ["", "中", "休", "早", "晚", "出差"]
-    for row in range(15):
+    for row in range(row_count):
         for day in range(31):
             pattern = patterns[day] if row == 0 and day < len(patterns) else ""
             x1, x2 = x_lines[day], x_lines[day + 1]

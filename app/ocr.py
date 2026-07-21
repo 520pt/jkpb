@@ -118,12 +118,13 @@ def extract_template_roster_image(image_path: str | Path) -> dict[str, Any] | No
     dark = gray < 80
     x_lines = _find_day_x_lines(dark)
     y_lines = _find_person_y_lines(dark)
-    if len(x_lines) != 32 or len(y_lines) != 16:
+    if len(x_lines) != 32 or len(y_lines) < 16:
         return None
 
     today = date.today()
     grid: list[dict[str, Any]] = []
-    for row_index in range(15):
+    person_row_count = len(y_lines) - 1
+    for row_index in range(person_row_count):
         days: dict[str, str] = {}
         boxes: dict[str, dict[str, int]] = {}
         for day_index in range(31):
@@ -220,7 +221,7 @@ def _find_person_y_lines(dark: Any) -> list[int]:
                 break
         if len(sequence) > len(best):
             best = sequence
-    return best[:16] if len(best) >= 16 else []
+    return best if len(best) >= 16 else []
 
 
 def _classify_template_cell(cell: Any) -> str:
