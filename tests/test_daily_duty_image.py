@@ -3,7 +3,7 @@ from app.daily_duty_image import _font, _text_width, _wrap_text, render_daily_du
 
 def test_daily_duty_image_wraps_names_by_pixel_width():
     font = _font(18, bold=True)
-    max_width = 210
+    max_width = 120
 
     lines = _wrap_text("罗森，罗越，张铭文，刘显坤", max_width, font)
 
