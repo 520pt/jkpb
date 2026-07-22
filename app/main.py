@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 from app.daily_duty_image import has_cjk_font, render_daily_duty_image
-from app.ocr import extract_roster_image, extract_template_roster_image
+from app.ocr import extract_roster_image, extract_template_roster_image, recheck_template_roster_cells
 from app.reminders import DEFAULT_MESSAGE_TEMPLATE, ReminderEvent, ReminderSettings, plan_reminders_for_day
 from app.roster import Shift, ShiftAssignment, normalize_shift_code
 from app.storage import DEFAULT_DAILY_DUTY_TEMPLATE, DEFAULT_REST_MESSAGE_TEMPLATE, DutyRepository
@@ -53,6 +53,8 @@ class RosterConfirmRequest(BaseModel):
 class RosterRecheckRequest(BaseModel):
     source_image_path: str
     grid: list[dict[str, Any]]
+    year: int | None = None
+    month: int | None = None
 
 
 class MonitoredPersonRequest(BaseModel):
@@ -271,49 +273,21 @@ def create_app(
     @app.post("/api/rosters/recheck")
     def recheck_roster(request: RosterRecheckRequest):
         source_path = _resolve_upload_path(request.source_image_path, uploads)
-        parsed = extract_template_roster_image(source_path)
-        if parsed is None:
-            raise HTTPException(status_code=422, detail="无法从原图重新核对")
-
-        corrected_grid: list[dict[str, Any]] = []
-        issues: list[dict[str, Any]] = []
-        parsed_grid = list(parsed.get("grid", []))
-        current_grid = list(request.grid or [])
-
-        for row_index, parsed_row in enumerate(parsed_grid):
-            current_row = current_grid[row_index] if row_index < len(current_grid) else {}
-            parsed_days = dict(parsed_row.get("days", {}))
-            parsed_boxes = dict(parsed_row.get("boxes", {}))
-            current_days = dict(current_row.get("days", {}))
-            for day, parsed_value in parsed_days.items():
-                current_value = str(current_days.get(day, ""))
-                if current_value != str(parsed_value):
-                    issues.append(
-                        {
-                            "row": row_index,
-                            "day": day,
-                            "before": current_value,
-                            "after": parsed_value,
-                            "box": parsed_boxes.get(day),
-                        }
-                    )
-            corrected_grid.append(
-                {
-                    **parsed_row,
-                    "name": str(current_row.get("name") or parsed_row.get("name") or ""),
-                    "days": parsed_days,
-                    "boxes": parsed_boxes,
-                }
-            )
+        checked = recheck_template_roster_cells(source_path, list(request.grid or []))
+        if checked is None:
+            parsed = extract_template_roster_image(source_path)
+            if parsed is None:
+                raise HTTPException(status_code=422, detail="无法从原图重新核对")
+            checked = _diff_rechecked_grid(list(request.grid or []), list(parsed.get("grid", [])))
 
         return {
             "success": True,
-            "year": parsed.get("year"),
-            "month": parsed.get("month"),
+            "year": request.year or _today_in_tz().year,
+            "month": request.month or _today_in_tz().month,
             "source_image_path": str(source_path),
             "source_image_url": f"/api/uploads/{source_path.name}",
-            "grid": corrected_grid,
-            "issues": issues,
+            "grid": checked["grid"],
+            "issues": checked["issues"],
         }
 
     @app.post("/api/rosters/confirm")
@@ -868,6 +842,37 @@ def _diff_roster_grids(existing_grid: list[dict[str, Any]], incoming_grid: list[
             if before != after:
                 diffs.append({"row": row_index, "name": display_name, "day": str(day), "before": before, "after": after})
     return diffs
+
+
+def _diff_rechecked_grid(current_grid: list[dict[str, Any]], parsed_grid: list[dict[str, Any]]) -> dict[str, Any]:
+    corrected_grid: list[dict[str, Any]] = []
+    issues: list[dict[str, Any]] = []
+    for row_index, parsed_row in enumerate(parsed_grid):
+        current_row = current_grid[row_index] if row_index < len(current_grid) else {}
+        parsed_days = dict(parsed_row.get("days", {}))
+        parsed_boxes = dict(parsed_row.get("boxes", {}))
+        current_days = dict(current_row.get("days", {}))
+        for day, parsed_value in parsed_days.items():
+            current_value = str(current_days.get(day, ""))
+            if current_value != str(parsed_value):
+                issues.append(
+                    {
+                        "row": row_index,
+                        "day": day,
+                        "before": current_value,
+                        "after": parsed_value,
+                        "box": parsed_boxes.get(day),
+                    }
+                )
+        corrected_grid.append(
+            {
+                **parsed_row,
+                "name": str(current_row.get("name") or parsed_row.get("name") or ""),
+                "days": parsed_days,
+                "boxes": parsed_boxes,
+            }
+        )
+    return {"grid": corrected_grid, "issues": issues}
 
 
 def _plan_custom_reminder_events(repo: DutyRepository, assignments: list[ShiftAssignment], target: date) -> list[ReminderEvent]:

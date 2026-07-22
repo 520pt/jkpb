@@ -18,6 +18,14 @@ class OcrText:
     confidence: float = 1.0
 
 
+@dataclass(frozen=True)
+class CellMetrics:
+    cell: Any
+    fixed_label: str | None
+    ink_fraction: float
+    ink_height: int
+
+
 def fallback_review_grid(source_image_path: str) -> dict[str, Any]:
     today = date.today()
     return {
@@ -182,6 +190,8 @@ def extract_template_roster_image(image_path: str | Path) -> dict[str, Any] | No
     today = date.today()
     grid: list[dict[str, Any]] = []
     person_row_count = len(y_lines) - 1
+    cell_metrics: list[CellMetrics] = []
+    cell_refs: list[tuple[int, int]] = []
     for row_index in range(person_row_count):
         days: dict[str, str] = {}
         boxes: dict[str, dict[str, int]] = {}
@@ -189,9 +199,15 @@ def extract_template_roster_image(image_path: str | Path) -> dict[str, Any] | No
             x1, x2 = x_lines[day_index], x_lines[day_index + 1]
             y1, y2 = y_lines[row_index], y_lines[row_index + 1]
             cell = image[y1 + 2 : y2 - 2, x1 + 2 : x2 - 2]
-            days[str(day_index + 1)] = _classify_template_cell(cell)
+            cell_metrics.append(_measure_template_cell(cell))
+            cell_refs.append((row_index, day_index + 1))
+            days[str(day_index + 1)] = ""
             boxes[str(day_index + 1)] = {"x": x1, "y": y1, "width": x2 - x1, "height": y2 - y1}
         grid.append({"name": f"第{row_index + 1}行", "days": days, "boxes": boxes})
+
+    labels = _classify_template_cell_metrics(cell_metrics)
+    for (row_index, day), label in zip(cell_refs, labels):
+        grid[row_index]["days"][str(day)] = label
 
     return {
         "year": today.year,
@@ -200,6 +216,71 @@ def extract_template_roster_image(image_path: str | Path) -> dict[str, Any] | No
         "grid": grid,
         "ocr_status": "template_ok",
     }
+
+
+def recheck_template_roster_cells(image_path: str | Path, current_grid: list[dict[str, Any]]) -> dict[str, Any] | None:
+    try:
+        import cv2
+    except Exception:
+        return None
+
+    path = Path(image_path)
+    image = cv2.imread(str(path))
+    if image is None:
+        return None
+
+    cell_metrics: list[CellMetrics] = []
+    cell_refs: list[tuple[int, str]] = []
+    for row_index, row in enumerate(current_grid):
+        boxes = dict(row.get("boxes", {}))
+        for day, raw_box in boxes.items():
+            box = dict(raw_box or {})
+            try:
+                x = int(box["x"])
+                y = int(box["y"])
+                width = int(box["width"])
+                height = int(box["height"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            cell = image[y + 2 : y + height - 2, x + 2 : x + width - 2]
+            if getattr(cell, "size", 0) == 0:
+                continue
+            cell_metrics.append(_measure_template_cell(cell))
+            cell_refs.append((row_index, str(day)))
+
+    if not cell_metrics:
+        return None
+
+    labels = _classify_template_cell_metrics(cell_metrics)
+    corrected_grid = [
+        {
+            **row,
+            "name": str(row.get("name") or ""),
+            "days": dict(row.get("days", {})),
+            "boxes": dict(row.get("boxes", {})),
+        }
+        for row in current_grid
+    ]
+    issues: list[dict[str, Any]] = []
+    for (row_index, day), parsed_value in zip(cell_refs, labels):
+        if row_index >= len(corrected_grid):
+            continue
+        current_days = corrected_grid[row_index]["days"]
+        current_boxes = corrected_grid[row_index]["boxes"]
+        current_value = str(current_days.get(day, ""))
+        if current_value != parsed_value:
+            issues.append(
+                {
+                    "row": row_index,
+                    "day": day,
+                    "before": current_value,
+                    "after": parsed_value,
+                    "box": current_boxes.get(day),
+                }
+            )
+        current_days[day] = parsed_value
+
+    return {"grid": corrected_grid, "issues": issues}
 
 
 def _merge_template_ocr_texts(template_result: dict[str, Any], texts: list[OcrText]) -> None:
@@ -283,24 +364,75 @@ def _find_person_y_lines(dark: Any) -> list[int]:
 
 
 def _classify_template_cell(cell: Any) -> str:
+    return _classify_template_cell_metrics([_measure_template_cell(cell)])[0]
+
+
+def _measure_template_cell(cell: Any) -> CellMetrics:
     import cv2
+    import numpy as np
 
     gray = cv2.cvtColor(cell, cv2.COLOR_BGR2GRAY)
-    black_fraction = float((gray < 80).sum()) / float(gray.size)
+    ink = np.max(cell, axis=2) < 150
+    ink_fraction = float(ink.sum()) / float(ink.size)
+    ys, _ = np.where(ink)
+    ink_height = int(ys.max() - ys.min() + 1) if len(ys) else 0
     mean_bgr = cell.reshape(-1, 3).mean(axis=0)
     blue, green, red = mean_bgr
 
     if red > 180 and green > 180 and blue < 100:
-        return "休"
-    if black_fraction >= 0.145:
-        return "出差"
-    if black_fraction >= 0.108:
-        return "晚"
-    if black_fraction >= 0.088:
-        return "早"
-    if blue > 200 and green > 200 and red > 200 and max(mean_bgr) - min(mean_bgr) < 20:
-        return ""
-    return "中"
+        fixed_label = "休"
+    elif ink_fraction < 0.035 or ink_height <= 4:
+        fixed_label = ""
+    elif blue > 200 and green > 200 and red > 200 and max(mean_bgr) - min(mean_bgr) < 30:
+        fixed_label = "" if ink_height < 22 else "出差"
+    elif ink_fraction >= 0.145 and ink_height >= 22:
+        fixed_label = "出差"
+    else:
+        fixed_label = None
+    return CellMetrics(cell=cell, fixed_label=fixed_label, ink_fraction=ink_fraction, ink_height=ink_height)
+
+
+def _classify_template_cell_metrics(metrics: list[CellMetrics]) -> list[str]:
+    work_fractions = [item.ink_fraction for item in metrics if item.fixed_label is None]
+    thresholds = _work_shift_thresholds(work_fractions)
+    labels: list[str] = []
+    for item in metrics:
+        if item.fixed_label is not None:
+            labels.append(item.fixed_label)
+        elif item.ink_fraction < thresholds[0]:
+            labels.append("中")
+        elif item.ink_fraction < thresholds[1]:
+            labels.append("早")
+        else:
+            labels.append("晚")
+    return labels
+
+
+def _work_shift_thresholds(fractions: list[float]) -> tuple[float, float]:
+    if len(fractions) < 6:
+        return (0.088, 0.108)
+
+    centers = [min(fractions), _percentile(fractions, 0.5), max(fractions)]
+    for _ in range(12):
+        groups: list[list[float]] = [[], [], []]
+        for value in fractions:
+            index = min(range(3), key=lambda item: abs(value - centers[item]))
+            groups[index].append(value)
+        next_centers = [sum(group) / len(group) if group else centers[index] for index, group in enumerate(groups)]
+        if all(abs(next_centers[index] - centers[index]) < 0.0001 for index in range(3)):
+            break
+        centers = next_centers
+
+    centers = sorted(centers)
+    if centers[2] - centers[0] < 0.015:
+        return (0.088, 0.108)
+    return ((centers[0] + centers[1]) / 2, (centers[1] + centers[2]) / 2)
+
+
+def _percentile(values: list[float], fraction: float) -> float:
+    ordered = sorted(values)
+    index = max(0, min(len(ordered) - 1, round((len(ordered) - 1) * fraction)))
+    return ordered[index]
 
 
 def _group_centers(values: Any) -> list[int]:

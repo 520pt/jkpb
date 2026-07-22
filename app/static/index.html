@@ -1925,7 +1925,12 @@
       const response = await fetch("/api/rosters/recheck", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source_image_path: state.sourceImagePath, grid: state.grid })
+        body: JSON.stringify({
+          source_image_path: state.sourceImagePath,
+          year: Number(state.year) || null,
+          month: Number(state.month) || null,
+          grid: state.grid
+        })
       });
       const body = await response.json();
       if (!response.ok) return setStatus(body.detail || "自动核对失败", "error");
@@ -1937,7 +1942,7 @@
       setRecheckIssues(body.issues || []);
       renderGrid();
       renderOverlays();
-      setStatus(`自动核对完成：修正 ${body.issues ? body.issues.length : 0} 个格子，黄框为已修正位置`, "ok");
+      setStatus(`逐格核对完成：修正 ${body.issues ? body.issues.length : 0} 个格子，黄框为已修正位置`, "ok");
     }
 
     $("zoomOutBtn").addEventListener("click", () => {

@@ -3,7 +3,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from app.ocr import OcrText, extract_roster_image
+from app.ocr import OcrText, _classify_template_cell, extract_roster_image, recheck_template_roster_cells
 
 
 def test_template_parser_reads_fixed_roster_grid(tmp_path: Path):
@@ -24,6 +24,20 @@ def test_template_parser_reads_fixed_roster_grid(tmp_path: Path):
     assert result["grid"][0]["boxes"]["1"] == {"x": 161, "y": 120, "width": 24, "height": 33}
 
 
+def test_template_cell_classifier_ignores_white_middle_cell():
+    cell = np.full((29, 20, 3), 255, dtype=np.uint8)
+    _draw_middle_strokes(cell, -2, -2)
+
+    assert _classify_template_cell(cell) == ""
+
+
+def test_template_cell_classifier_reads_green_middle_cell():
+    cell = np.full((29, 20, 3), (80, 170, 0), dtype=np.uint8)
+    _draw_middle_strokes(cell, -2, -2)
+
+    assert _classify_template_cell(cell) == "中"
+
+
 def test_template_parser_reads_sixteen_person_roster_grid(tmp_path: Path):
     image_path = tmp_path / "roster.png"
     _write_synthetic_roster(image_path, row_count=16)
@@ -34,6 +48,32 @@ def test_template_parser_reads_sixteen_person_roster_grid(tmp_path: Path):
     assert len(result["grid"]) == 16
     assert len(result["grid"][15]["days"]) == 31
     assert result["grid"][15]["boxes"]["1"] == {"x": 161, "y": 615, "width": 24, "height": 33}
+
+
+def test_template_recheck_uses_existing_cell_boxes(tmp_path: Path):
+    image_path = tmp_path / "roster.png"
+    _write_synthetic_roster(image_path)
+    current_grid = [
+        {
+            "name": "示例甲",
+            "days": {"5": "中"},
+            "boxes": {"5": {"x": 257, "y": 120, "width": 24, "height": 33}},
+        }
+    ]
+
+    result = recheck_template_roster_cells(image_path, current_grid)
+
+    assert result is not None
+    assert result["grid"][0]["days"]["5"] == "晚"
+    assert result["issues"] == [
+        {
+            "row": 0,
+            "day": "5",
+            "before": "中",
+            "after": "晚",
+            "box": {"x": 257, "y": 120, "width": 24, "height": 33},
+        }
+    ]
 
 
 def test_template_parser_does_not_show_sample_names_when_ocr_is_unavailable(tmp_path: Path):
@@ -121,25 +161,44 @@ def _write_synthetic_roster(path: Path, row_count: int = 15) -> None:
 def _paint_cell(image: np.ndarray, x1: int, y1: int, x2: int, y2: int, value: str) -> None:
     if value == "休":
         image[y1 + 1 : y2, x1 + 1 : x2] = (0, 255, 255)
-        black_pixels = 49
+        _draw_cross_strokes(image, x1, y1)
     elif value in {"早", "晚"}:
         image[y1 + 1 : y2, x1 + 1 : x2] = (80, 170, 0)
-        black_pixels = 55 if value == "早" else 70
+        _draw_early_strokes(image, x1, y1)
+        if value == "晚":
+            _draw_late_extra_strokes(image, x1, y1)
     elif value == "中":
         image[y1 + 1 : y2, x1 + 1 : x2] = (80, 170, 0)
-        black_pixels = 46
+        _draw_middle_strokes(image, x1, y1)
     elif value == "出差":
-        black_pixels = 95
-    else:
-        black_pixels = 46
+        _draw_trip_strokes(image, x1, y1)
 
-    x = x1 + 4
-    y = y1 + 4
-    painted = 0
-    while painted < black_pixels:
-        image[y, x] = (0, 0, 0)
-        painted += 1
-        x += 1
-        if x >= x2 - 4:
-            x = x1 + 4
-            y += 1
+
+def _draw_middle_strokes(image: np.ndarray, x1: int, y1: int) -> None:
+    cv2.rectangle(image, (x1 + 7, y1 + 10), (x1 + 15, y1 + 18), (0, 0, 0), 1)
+    cv2.line(image, (x1 + 11, y1 + 8), (x1 + 11, y1 + 22), (0, 0, 0), 1)
+
+
+def _draw_cross_strokes(image: np.ndarray, x1: int, y1: int) -> None:
+    cv2.line(image, (x1 + 6, y1 + 9), (x1 + 4, y1 + 22), (0, 0, 0), 1)
+    cv2.line(image, (x1 + 10, y1 + 10), (x1 + 17, y1 + 20), (0, 0, 0), 1)
+    cv2.line(image, (x1 + 13, y1 + 8), (x1 + 13, y1 + 23), (0, 0, 0), 1)
+
+
+def _draw_early_strokes(image: np.ndarray, x1: int, y1: int) -> None:
+    cv2.rectangle(image, (x1 + 7, y1 + 8), (x1 + 15, y1 + 15), (0, 0, 0), 1)
+    cv2.line(image, (x1 + 8, y1 + 12), (x1 + 14, y1 + 12), (0, 0, 0), 1)
+    cv2.line(image, (x1 + 5, y1 + 20), (x1 + 17, y1 + 20), (0, 0, 0), 1)
+    cv2.line(image, (x1 + 11, y1 + 15), (x1 + 11, y1 + 23), (0, 0, 0), 1)
+
+
+def _draw_late_extra_strokes(image: np.ndarray, x1: int, y1: int) -> None:
+    cv2.line(image, (x1 + 4, y1 + 9), (x1 + 4, y1 + 22), (0, 0, 0), 1)
+    cv2.line(image, (x1 + 18, y1 + 9), (x1 + 16, y1 + 23), (0, 0, 0), 1)
+    cv2.line(image, (x1 + 15, y1 + 18), (x1 + 19, y1 + 22), (0, 0, 0), 1)
+
+
+def _draw_trip_strokes(image: np.ndarray, x1: int, y1: int) -> None:
+    for offset_y in (4, 17):
+        cv2.rectangle(image, (x1 + 5, y1 + offset_y), (x1 + 16, y1 + offset_y + 8), (0, 0, 0), 1)
+        cv2.line(image, (x1 + 4, y1 + offset_y + 10), (x1 + 18, y1 + offset_y + 10), (0, 0, 0), 1)
