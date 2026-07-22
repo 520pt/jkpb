@@ -198,7 +198,7 @@ def extract_template_roster_image(image_path: str | Path) -> dict[str, Any] | No
         for day_index in range(31):
             x1, x2 = x_lines[day_index], x_lines[day_index + 1]
             y1, y2 = y_lines[row_index], y_lines[row_index + 1]
-            cell = image[y1 + 2 : y2 - 2, x1 + 2 : x2 - 2]
+            cell = _crop_template_cell(image, x1, y1, x2 - x1, y2 - y1)
             cell_metrics.append(_measure_template_cell(cell))
             cell_refs.append((row_index, day_index + 1))
             days[str(day_index + 1)] = ""
@@ -246,7 +246,7 @@ def recheck_template_roster_cells(image_path: str | Path, current_grid: list[dic
                 height = int(box["height"])
             except (KeyError, TypeError, ValueError):
                 continue
-            cell = image[y + 2 : y + height - 2, x + 2 : x + width - 2]
+            cell = _crop_template_cell(image, x, y, width, height)
             if getattr(cell, "size", 0) == 0:
                 continue
             cell_metrics.append(_measure_template_cell(cell))
@@ -318,6 +318,12 @@ def _diff_template_recheck_grid(current_grid: list[dict[str, Any]], parsed_grid:
     return {"grid": corrected_grid, "issues": issues}
 
 
+def _crop_template_cell(image: Any, x: int, y: int, width: int, height: int) -> Any:
+    margin_x = 2
+    margin_y = 2
+    return image[y + margin_y : y + height - margin_y, x + margin_x : x + width - margin_x]
+
+
 def _merge_template_ocr_texts(template_result: dict[str, Any], texts: list[OcrText]) -> None:
     year, month = _detect_year_month(texts)
     template_result["year"] = year
@@ -359,6 +365,10 @@ def _find_day_x_lines(dark: Any, image: Any | None = None) -> list[int]:
 
     counts = dark.sum(axis=0)
     candidates = _group_centers(np.where(counts > dark.shape[0] * 0.18)[0])
+    fitted = _fit_regular_day_x_lines(candidates, counts, image_width=dark.shape[1])
+    if fitted:
+        return fitted
+
     best: list[int] = []
     for start in range(len(candidates)):
         sequence = [candidates[start]]
@@ -382,6 +392,56 @@ def _find_day_x_lines(dark: Any, image: Any | None = None) -> list[int]:
         lines.append(lines[-1] + step)
         return lines
     return []
+
+
+def _fit_regular_day_x_lines(candidates: list[int], counts: Any, *, image_width: int) -> list[int]:
+    if len(candidates) < 32:
+        return []
+
+    import numpy as np
+
+    best_score: tuple[int, int, float, int, int] | None = None
+    best_lines: list[int] = []
+    counts_array = np.asarray(counts)
+    max_count = float(counts_array.max()) if counts_array.size else 0.0
+    if max_count <= 0:
+        return []
+    strong_candidates = [value for value in candidates if counts_array[value] >= max_count * 0.72]
+
+    for start in candidates:
+        for step in range(18, 31):
+            expected = [int(round(start + index * step)) for index in range(32)]
+            if expected[-1] >= image_width:
+                continue
+
+            snapped: list[int] = []
+            matched = 0
+            darkness_score = 0.0
+            for line in expected:
+                left = max(0, line - 2)
+                right = min(len(counts_array), line + 3)
+                if right <= left:
+                    snapped.append(line)
+                    continue
+                local_values = counts_array[left:right]
+                local_offset = int(np.argmax(local_values))
+                local_x = left + local_offset
+                local_strength = float(local_values[local_offset]) / max_count
+                if local_strength >= 0.72:
+                    matched += 1
+                darkness_score += local_strength - abs(local_x - line) * 0.02
+                snapped.append(local_x)
+
+            if matched < 28:
+                continue
+            next_candidates = [value for value in strong_candidates if value > snapped[-1]]
+            right_clearance = min(next_candidates) - snapped[-1] if next_candidates else image_width - snapped[-1]
+            score = (matched, min(right_clearance, step * 2), darkness_score, step, start)
+            if best_score is None or score > best_score:
+                best_score = score
+                best_lines = snapped
+
+    return best_lines
 
 
 def _score_day_line_window(image: Any, lines: list[int]) -> float:

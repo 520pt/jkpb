@@ -3,7 +3,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from app.ocr import OcrText, _classify_template_cell, extract_roster_image, recheck_template_roster_cells
+from app.ocr import OcrText, _classify_template_cell, _find_day_x_lines, extract_roster_image, recheck_template_roster_cells
 
 
 def test_template_parser_reads_fixed_roster_grid(tmp_path: Path):
@@ -76,6 +76,22 @@ def test_template_parser_ignores_spurious_left_grid_line(tmp_path: Path):
 
     assert result["grid"][0]["boxes"]["1"] == {"x": 161, "y": 120, "width": 24, "height": 33}
     assert result["grid"][0]["days"]["3"] == "休"
+
+
+def test_template_parser_fits_day_lines_when_half_cell_noise_is_present(tmp_path: Path):
+    image_path = tmp_path / "roster.png"
+    _write_synthetic_roster(image_path, row_count=16)
+    image = cv2.imread(str(image_path))
+    expected = list(range(161, 906, 24))
+    if expected[-1] != 905:
+        expected.append(905)
+
+    for x in expected[16:-1]:
+        cv2.line(image, (x - 6, 120), (x - 6, 648), (0, 0, 0), 1)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    dark = gray < 80
+
+    assert _find_day_x_lines(dark, image=image) == expected
 
 
 def test_template_recheck_uses_existing_cell_boxes(tmp_path: Path):

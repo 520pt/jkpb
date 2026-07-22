@@ -327,6 +327,7 @@
     }
     .cell-overlay {
       position: absolute;
+      box-sizing: border-box;
       border: 1px solid rgba(37, 99, 235, 0.55);
       background: rgba(37, 99, 235, 0.16);
       opacity: 0;
@@ -1328,20 +1329,21 @@
       state.grid.forEach((row, rowIndex) => {
         const boxes = row.boxes || {};
         Object.entries(boxes).forEach(([day, box]) => {
+          const innerBox = innerCellBox(box);
           const value = (row.days || {})[day] || "";
           const div = document.createElement("div");
           div.className = `cell-overlay ${matchesFilter(value) ? "match" : ""}`;
           if (hasRecheckIssue(rowIndex, day)) div.classList.add("recheck-issue");
           const active = isActiveCell(rowIndex, day);
           if (active) div.classList.add("selected");
-          div.style.left = `${box.x * scale}px`;
-          div.style.top = `${box.y * scale}px`;
-          div.style.width = `${box.width * scale}px`;
-          div.style.height = `${box.height * scale}px`;
+          div.style.left = `${innerBox.x * scale}px`;
+          div.style.top = `${innerBox.y * scale}px`;
+          div.style.width = `${innerBox.width * scale}px`;
+          div.style.height = `${innerBox.height * scale}px`;
           layer.appendChild(div);
           if (active) {
-            const left = box.x * scale;
-            const top = box.y * scale;
+            const left = innerBox.x * scale;
+            const top = innerBox.y * scale;
             const nameLabel = document.createElement("div");
             nameLabel.className = "cell-overlay-label";
             nameLabel.textContent = row.name || `第${rowIndex + 1}行`;
@@ -1355,11 +1357,24 @@
             dayLabel.textContent = `${day}日`;
             dayLabel.style.left = `${left}px`;
             dayLabel.style.top = `${Math.max(0, top - 26)}px`;
-            dayLabel.style.width = `${Math.max(34, box.width * scale)}px`;
+            dayLabel.style.width = `${Math.max(34, innerBox.width * scale)}px`;
             layer.appendChild(dayLabel);
           }
         });
       });
+    }
+
+    function innerCellBox(box) {
+      const width = Number(box.width) || 0;
+      const height = Number(box.height) || 0;
+      const marginX = Math.max(3, Math.min(6, Math.floor(width / 5)));
+      const marginY = Math.max(3, Math.min(5, Math.floor(height / 8)));
+      return {
+        x: Number(box.x) + marginX,
+        y: Number(box.y) + marginY,
+        width: Math.max(1, width - marginX * 2),
+        height: Math.max(1, height - marginY * 2),
+      };
     }
 
     function renderGrid() {
