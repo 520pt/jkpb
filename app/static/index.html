@@ -345,6 +345,32 @@
       border: 2px solid #facc15;
       background: rgba(250, 204, 21, 0.22);
     }
+    .image-context {
+      min-width: 180px;
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .cell-overlay-label {
+      position: absolute;
+      z-index: 4;
+      max-width: 120px;
+      overflow: hidden;
+      padding: 2px 6px;
+      border: 1px solid rgba(220, 38, 38, 0.35);
+      border-radius: 5px;
+      background: rgba(255, 255, 255, 0.92);
+      color: #991b1b;
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 18px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.18);
+    }
+    .cell-overlay-label.day {
+      text-align: center;
+    }
     .table-wrap {
       overflow: auto;
       height: calc(100vh - 215px);
@@ -898,6 +924,7 @@
           <div class="image-panel">
             <div class="panel-head">
               <span>原图</span>
+              <span id="imageContext" class="image-context"></span>
               <div class="toolbar">
                 <button id="zoomOutBtn">-</button>
                 <button id="zoomResetBtn">100%</button>
@@ -1220,6 +1247,7 @@
     const shiftOptions = ["", "早", "中", "晚", "休", "出差"];
     const shiftClass = { "中": "mid", "早": "early", "晚": "night", "休": "rest", "出差": "trip" };
     const $ = (id) => document.getElementById(id);
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
     function setStatus(text, type = "") {
       $("status").textContent = text;
@@ -1251,6 +1279,7 @@
       $("month").value = state.month;
       const dayCount = reviewDayCount();
       $("gridSummary").textContent = state.grid.length && dayCount ? `${state.grid.length} 人 × ${dayCount} 天` : "";
+      updateImageContext();
       renderImage();
     }
 
@@ -1265,6 +1294,7 @@
         empty.hidden = false;
         frame.classList.add("empty");
         $("overlayLayer").innerHTML = "";
+        $("imageContext").textContent = "";
         return;
       }
       $("imageCanvas").hidden = false;
@@ -1302,12 +1332,32 @@
           const div = document.createElement("div");
           div.className = `cell-overlay ${matchesFilter(value) ? "match" : ""}`;
           if (hasRecheckIssue(rowIndex, day)) div.classList.add("recheck-issue");
-          if (isActiveCell(rowIndex, day)) div.classList.add("selected");
+          const active = isActiveCell(rowIndex, day);
+          if (active) div.classList.add("selected");
           div.style.left = `${box.x * scale}px`;
           div.style.top = `${box.y * scale}px`;
           div.style.width = `${box.width * scale}px`;
           div.style.height = `${box.height * scale}px`;
           layer.appendChild(div);
+          if (active) {
+            const left = box.x * scale;
+            const top = box.y * scale;
+            const nameLabel = document.createElement("div");
+            nameLabel.className = "cell-overlay-label";
+            nameLabel.textContent = row.name || `第${rowIndex + 1}行`;
+            nameLabel.style.left = `${Math.max(0, left - 94)}px`;
+            nameLabel.style.top = `${top}px`;
+            nameLabel.style.width = "84px";
+            layer.appendChild(nameLabel);
+
+            const dayLabel = document.createElement("div");
+            dayLabel.className = "cell-overlay-label day";
+            dayLabel.textContent = `${day}日`;
+            dayLabel.style.left = `${left}px`;
+            dayLabel.style.top = `${Math.max(0, top - 26)}px`;
+            dayLabel.style.width = `${Math.max(34, box.width * scale)}px`;
+            layer.appendChild(dayLabel);
+          }
         });
       });
     }
@@ -1378,14 +1428,27 @@
       state.recheckIssues = new Set((issues || []).map((issue) => issueKey(issue.row, issue.day)));
     }
 
+    function activeCellLabel() {
+      if (!state.activeCell) return "";
+      const row = state.grid[state.activeCell.row];
+      if (!row) return "";
+      const value = ((row.days || {})[state.activeCell.day] || "-");
+      return `${row.name || `第${state.activeCell.row + 1}行`} · ${state.activeCell.day}日 · ${value}`;
+    }
+
+    function updateImageContext() {
+      $("imageContext").textContent = activeCellLabel();
+    }
+
     function setActiveCell(rowIndex, day, options = {}) {
       const shouldRender = options.render !== false;
       const shouldScroll = options.scroll !== false;
       state.activeCell = { row: Number(rowIndex), day: String(day) };
+      updateImageContext();
       if (shouldRender) renderGrid();
       else updateSelectionHighlights();
       renderOverlays();
-      if (shouldScroll) scrollImageToCell();
+      if (shouldScroll) scrollImageToCell(options.scrollBehavior || "smooth");
     }
 
     function updateSelectionHighlights() {
@@ -1396,7 +1459,7 @@
       if (cell) cell.classList.add("selected");
     }
 
-    function scrollImageToCell() {
+    function scrollImageToCell(behavior = "smooth") {
       if (!state.activeCell) return;
       const row = state.grid[state.activeCell.row];
       const box = row && row.boxes && row.boxes[state.activeCell.day];
@@ -1406,7 +1469,7 @@
       const frame = $("imageFrame");
       const targetLeft = box.x * scale - frame.clientWidth / 2 + box.width * scale / 2;
       const targetTop = box.y * scale - frame.clientHeight / 2 + box.height * scale / 2;
-      frame.scrollTo({ left: Math.max(0, targetLeft), top: Math.max(0, targetTop), behavior: "smooth" });
+      frame.scrollTo({ left: Math.max(0, targetLeft), top: Math.max(0, targetTop), behavior });
     }
 
     function escapeHtml(value) {
@@ -1919,30 +1982,67 @@
       button.disabled = false;
     });
 
+    function reviewCells(grid = state.grid) {
+      const cells = [];
+      const dayCount = reviewDayCount() || 31;
+      (grid || []).forEach((row, rowIndex) => {
+        for (let day = 1; day <= dayCount; day++) {
+          const dayText = String(day);
+          if (row.boxes && row.boxes[dayText]) cells.push({ rowIndex, day: dayText, row });
+        }
+      });
+      return cells;
+    }
+
+    async function playRecheckProgress(cells, correctedGrid, issues) {
+      const issueMap = new Map((issues || []).map((issue) => [issueKey(issue.row, issue.day), issue]));
+      const total = cells.length;
+      for (let index = 0; index < total; index++) {
+        const cell = cells[index];
+        const issue = issueMap.get(issueKey(cell.rowIndex, cell.day));
+        setActiveCell(cell.rowIndex, cell.day, { render: false, scroll: true, scrollBehavior: "auto" });
+        const currentValue = ((cell.row.days || {})[cell.day] || "-");
+        const nextRow = correctedGrid && correctedGrid[cell.rowIndex];
+        const nextValue = ((nextRow && nextRow.days && nextRow.days[cell.day]) || "-");
+        setStatus(`逐格核对中：${cell.row.name || `第${cell.rowIndex + 1}行`} ${cell.day}日 ${currentValue} → ${nextValue}（${index + 1}/${total}）`, issue ? "error" : "");
+        await sleep(issue ? 90 : 8);
+      }
+    }
+
     async function autoRecheck() {
       if (!state.sourceImagePath || !state.grid.length) return setStatus("请先上传排班图片", "error");
-      setStatus("正在自动核对...");
-      const response = await fetch("/api/rosters/recheck", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          source_image_path: state.sourceImagePath,
-          year: Number(state.year) || null,
-          month: Number(state.month) || null,
-          grid: state.grid
-        })
-      });
-      const body = await response.json();
-      if (!response.ok) return setStatus(body.detail || "自动核对失败", "error");
-      state.year = body.year || state.year;
-      state.month = body.month || state.month;
-      state.sourceImagePath = body.source_image_path || state.sourceImagePath;
-      state.sourceImageUrl = body.source_image_url || state.sourceImageUrl;
-      state.grid = body.grid || [];
-      setRecheckIssues(body.issues || []);
-      renderGrid();
-      renderOverlays();
-      setStatus(`逐格核对完成：修正 ${body.issues ? body.issues.length : 0} 个格子，黄框为已修正位置`, "ok");
+      const button = $("recheckBtn");
+      const cells = reviewCells();
+      button.disabled = true;
+      setStatus(`正在逐格核对：0/${cells.length || state.grid.length * reviewDayCount()}`);
+      try {
+        const response = await fetch("/api/rosters/recheck", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            source_image_path: state.sourceImagePath,
+            year: Number(state.year) || null,
+            month: Number(state.month) || null,
+            grid: state.grid
+          })
+        });
+        const body = await response.json();
+        if (!response.ok) return setStatus(body.detail || "自动核对失败", "error");
+        await playRecheckProgress(cells, body.grid || [], body.issues || []);
+        state.year = body.year || state.year;
+        state.month = body.month || state.month;
+        state.sourceImagePath = body.source_image_path || state.sourceImagePath;
+        state.sourceImageUrl = body.source_image_url || state.sourceImageUrl;
+        state.grid = body.grid || [];
+        setRecheckIssues(body.issues || []);
+        renderGrid();
+        renderOverlays();
+        setStatus(`逐格核对完成：检查 ${cells.length} 个格子，修正 ${body.issues ? body.issues.length : 0} 个格子，黄框为已修正位置`, "ok");
+      } catch (error) {
+        setStatus(`自动核对失败：${error.message || error}`, "error");
+      } finally {
+        button.disabled = false;
+      }
     }
 
     $("zoomOutBtn").addEventListener("click", () => {

@@ -94,3 +94,24 @@
 - Template parser tests cover white `中` ignored as empty and colored `中` recognized as `中`.
 - Recheck tests cover correcting one current cell by its existing source-image box.
 - Full pytest and frontend script syntax pass.
+
+## 2026-07-22 Local OCR Feasibility Fix
+
+### Behavior
+- Daily duty images wrap names by rendered pixel width, not character count, so long names and multi-name standby/rest lines stay inside cards.
+- Template day-column detection scores 32-line windows and prefers the real shift grid when a stray left-side vertical line would otherwise shift all days by one.
+- `出差` is only classified from a white cell with two stacked text groups; colored shift cells no longer fall back to `出差` just because they have many dark pixels.
+
+### Local Verification
+- Full pytest passes without Docker.
+- Local Uvicorn upload smoke tests pass for the existing roster image and a generated spurious-left-line roster image.
+
+## 2026-07-22 Recheck Visibility Fix
+
+### Behavior
+- Automatic recheck reparses the fixed template grid before comparing cells, so stale or shifted boxes from an earlier import can be corrected.
+- The review UI animates through each detected cell during automatic recheck and reports checked cell count plus corrected cell count.
+- The source-image panel shows the active review cell in the header and adds name/day labels next to the highlighted image cell.
+
+### Verification
+- Frontend local smoke test changed one cell to the wrong value, clicked automatic recheck, and verified it scanned 496 cells and corrected the one changed cell.

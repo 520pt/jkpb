@@ -31,6 +31,14 @@ def test_template_cell_classifier_ignores_white_middle_cell():
     assert _classify_template_cell(cell) == ""
 
 
+def test_template_cell_classifier_does_not_treat_tall_single_white_text_as_trip():
+    cell = np.full((29, 20, 3), 255, dtype=np.uint8)
+    cv2.line(cell, (10, 1), (10, 27), (0, 0, 0), 1)
+    cv2.line(cell, (6, 14), (14, 14), (0, 0, 0), 1)
+
+    assert _classify_template_cell(cell) == ""
+
+
 def test_template_cell_classifier_reads_green_middle_cell():
     cell = np.full((29, 20, 3), (80, 170, 0), dtype=np.uint8)
     _draw_middle_strokes(cell, -2, -2)
@@ -57,6 +65,19 @@ def test_template_parser_reads_sixteen_person_roster_grid(tmp_path: Path):
     assert result["grid"][15]["boxes"]["1"] == {"x": 161, "y": 615, "width": 24, "height": 33}
 
 
+def test_template_parser_ignores_spurious_left_grid_line(tmp_path: Path):
+    image_path = tmp_path / "roster.png"
+    _write_synthetic_roster(image_path, row_count=16)
+    image = cv2.imread(str(image_path))
+    cv2.line(image, (137, 43), (137, 681), (0, 0, 0), 1)
+    cv2.imwrite(str(image_path), image)
+
+    result = extract_roster_image(image_path)
+
+    assert result["grid"][0]["boxes"]["1"] == {"x": 161, "y": 120, "width": 24, "height": 33}
+    assert result["grid"][0]["days"]["3"] == "休"
+
+
 def test_template_recheck_uses_existing_cell_boxes(tmp_path: Path):
     image_path = tmp_path / "roster.png"
     _write_synthetic_roster(image_path)
@@ -72,15 +93,41 @@ def test_template_recheck_uses_existing_cell_boxes(tmp_path: Path):
 
     assert result is not None
     assert result["grid"][0]["days"]["5"] == "晚"
-    assert result["issues"] == [
+    assert {
+        "row": 0,
+        "day": "5",
+        "before": "中",
+        "after": "晚",
+        "box": {"x": 257, "y": 120, "width": 24, "height": 33},
+    } in result["issues"]
+
+
+def test_template_recheck_repairs_stale_shifted_boxes(tmp_path: Path):
+    image_path = tmp_path / "roster.png"
+    _write_synthetic_roster(image_path, row_count=16)
+    image = cv2.imread(str(image_path))
+    cv2.line(image, (137, 43), (137, 681), (0, 0, 0), 1)
+    cv2.imwrite(str(image_path), image)
+    current_grid = [
         {
-            "row": 0,
-            "day": "5",
-            "before": "中",
-            "after": "晚",
-            "box": {"x": 257, "y": 120, "width": 24, "height": 33},
+            "name": "示例甲",
+            "days": {"3": "中"},
+            "boxes": {"3": {"x": 185, "y": 120, "width": 24, "height": 33}},
         }
     ]
+
+    result = recheck_template_roster_cells(image_path, current_grid)
+
+    assert result is not None
+    assert result["grid"][0]["days"]["3"] == "休"
+    assert result["grid"][0]["boxes"]["3"] == {"x": 209, "y": 120, "width": 24, "height": 33}
+    assert {
+        "row": 0,
+        "day": "3",
+        "before": "中",
+        "after": "休",
+        "box": {"x": 209, "y": 120, "width": 24, "height": 33},
+    } in result["issues"]
 
 
 def test_template_parser_does_not_show_sample_names_when_ocr_is_unavailable(tmp_path: Path):

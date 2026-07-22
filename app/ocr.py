@@ -182,7 +182,7 @@ def extract_template_roster_image(image_path: str | Path) -> dict[str, Any] | No
 
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     dark = gray < 80
-    x_lines = _find_day_x_lines(dark)
+    x_lines = _find_day_x_lines(dark, image=image)
     y_lines = _find_person_y_lines(dark)
     if len(x_lines) != 32 or len(y_lines) < 16:
         return None
@@ -219,6 +219,10 @@ def extract_template_roster_image(image_path: str | Path) -> dict[str, Any] | No
 
 
 def recheck_template_roster_cells(image_path: str | Path, current_grid: list[dict[str, Any]]) -> dict[str, Any] | None:
+    fresh = extract_template_roster_image(image_path)
+    if fresh and fresh.get("grid"):
+        return _diff_template_recheck_grid(current_grid, list(fresh.get("grid", [])))
+
     try:
         import cv2
     except Exception:
@@ -283,6 +287,37 @@ def recheck_template_roster_cells(image_path: str | Path, current_grid: list[dic
     return {"grid": corrected_grid, "issues": issues}
 
 
+def _diff_template_recheck_grid(current_grid: list[dict[str, Any]], parsed_grid: list[dict[str, Any]]) -> dict[str, Any]:
+    corrected_grid: list[dict[str, Any]] = []
+    issues: list[dict[str, Any]] = []
+    for row_index, parsed_row in enumerate(parsed_grid):
+        current_row = current_grid[row_index] if row_index < len(current_grid) else {}
+        parsed_days = dict(parsed_row.get("days", {}))
+        parsed_boxes = dict(parsed_row.get("boxes", {}))
+        current_days = dict(current_row.get("days", {}))
+        for day, parsed_value in parsed_days.items():
+            current_value = str(current_days.get(day, ""))
+            if current_value != str(parsed_value):
+                issues.append(
+                    {
+                        "row": row_index,
+                        "day": day,
+                        "before": current_value,
+                        "after": parsed_value,
+                        "box": parsed_boxes.get(day),
+                    }
+                )
+        corrected_grid.append(
+            {
+                **parsed_row,
+                "name": str(current_row.get("name") or parsed_row.get("name") or ""),
+                "days": parsed_days,
+                "boxes": parsed_boxes,
+            }
+        )
+    return {"grid": corrected_grid, "issues": issues}
+
+
 def _merge_template_ocr_texts(template_result: dict[str, Any], texts: list[OcrText]) -> None:
     year, month = _detect_year_month(texts)
     template_result["year"] = year
@@ -319,7 +354,7 @@ def _detect_template_names(texts: list[OcrText], min_day_x: float) -> list[OcrTe
     return sorted(names, key=lambda item: item.y)
 
 
-def _find_day_x_lines(dark: Any) -> list[int]:
+def _find_day_x_lines(dark: Any, image: Any | None = None) -> list[int]:
     import numpy as np
 
     counts = dark.sum(axis=0)
@@ -336,12 +371,35 @@ def _find_day_x_lines(dark: Any) -> list[int]:
         if len(sequence) > len(best):
             best = sequence
 
+    if len(best) >= 32:
+        windows = [best[index : index + 32] for index in range(len(best) - 31)]
+        if image is not None:
+            return max(windows, key=lambda window: (_score_day_line_window(image, window), window[0]))
+        return windows[0]
     if len(best) >= 31:
         step = round(_median_gap(best))
         lines = best[:31]
         lines.append(lines[-1] + step)
         return lines
     return []
+
+
+def _score_day_line_window(image: Any, lines: list[int]) -> float:
+    import numpy as np
+
+    if len(lines) < 32:
+        return 0.0
+    height = image.shape[0]
+    y1 = max(0, int(height * 0.16))
+    y2 = min(height, int(height * 0.85))
+
+    def column_std(left: int, right: int) -> float:
+        crop = image[y1:y2, left + 2 : right - 2]
+        if getattr(crop, "size", 0) == 0:
+            return 0.0
+        return float(np.mean(crop.reshape(-1, 3).std(axis=0)))
+
+    return min(column_std(lines[0], lines[1]), column_std(lines[-2], lines[-1]))
 
 
 def _find_person_y_lines(dark: Any) -> list[int]:
@@ -387,12 +445,30 @@ def _measure_template_cell(cell: Any) -> CellMetrics:
     elif ink_fraction < 0.035 or ink_height <= 4:
         fixed_label = ""
     elif blue > 200 and green > 200 and red > 200 and max(mean_bgr) - min(mean_bgr) < 30:
-        fixed_label = "" if ink_height < 22 else "出差"
-    elif ink_fraction >= 0.145 and ink_height >= 22:
-        fixed_label = "出差"
+        fixed_label = "出差" if _looks_like_stacked_trip(ink) else ""
     else:
         fixed_label = None
     return CellMetrics(cell=cell, fixed_label=fixed_label, ink_fraction=ink_fraction, ink_height=ink_height)
+
+
+def _looks_like_stacked_trip(ink: Any) -> bool:
+    projection = ink.sum(axis=1)
+    groups: list[tuple[int, int, int]] = []
+    start: int | None = None
+    for index, count in enumerate(projection):
+        if count >= 1 and start is None:
+            start = index
+        elif count < 1 and start is not None:
+            groups.append((start, index - 1, int(projection[start:index].sum())))
+            start = None
+    if start is not None:
+        groups.append((start, len(projection) - 1, int(projection[start:].sum())))
+
+    strong_groups = [(top, bottom, total) for top, bottom, total in groups if bottom - top >= 5 and total >= 20]
+    if len(strong_groups) < 2:
+        return False
+    first, second = strong_groups[0], strong_groups[1]
+    return first[1] < second[0] and second[0] - first[1] >= 2
 
 
 def _classify_template_cell_metrics(metrics: list[CellMetrics]) -> list[str]:

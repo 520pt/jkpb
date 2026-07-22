@@ -19,6 +19,16 @@ def render_daily_duty_image(preview: dict[str, Any]) -> bytes:
     date_text = str(preview.get("send_at") or "")[:10]
     inner_width = WIDTH - LEFT * 2
     column_width = (inner_width - GAP * 2) // 3
+    rest_card_width = (inner_width - 36 - GAP * 2) // 3
+    fonts = {
+        "title": _font(22, bold=True),
+        "header": _font(19, bold=True),
+        "label": _font(15, bold=True),
+        "body": _font(18, bold=True),
+        "body_small": _font(17, bold=True),
+        "muted": _font(18),
+        "date": _font(15),
+    }
 
     top_sections = [
         ("监控班", "#2563eb", [("早班", details.get("early") or "无"), ("中班", details.get("middle") or "无"), ("晚班", details.get("night") or "无")]),
@@ -35,14 +45,14 @@ def render_daily_duty_image(preview: dict[str, Any]) -> bytes:
     for title, accent, items in top_sections:
         item_meta = []
         for label, value in items:
-            lines = _wrap_text(str(value), 16)
+            lines = _wrap_text(str(value), column_width - 60, fonts["body"])
             item_meta.append({"label": label, "lines": lines, "height": max(76, 50 + len(lines) * 24)})
         top_meta.append({"title": title, "accent": accent, "items": item_meta, "height": 60 + sum(item["height"] for item in item_meta) + BLOCK_BOTTOM_PADDING})
     top_height = max(meta["height"] for meta in top_meta)
 
     rest_meta = []
     for label, value in rest_items:
-        lines = _wrap_text(str(value), 13)
+        lines = _wrap_text(str(value), rest_card_width - 28, fonts["body_small"])
         rest_meta.append({"label": label, "lines": lines, "height": max(86, 55 + len(lines) * 24)})
     rest_card_height = max(item["height"] for item in rest_meta)
     rest_height = 60 + rest_card_height + BLOCK_BOTTOM_PADDING
@@ -50,15 +60,6 @@ def render_daily_duty_image(preview: dict[str, Any]) -> bytes:
 
     image = Image.new("RGB", (WIDTH, height), "#f3f6fb")
     draw = ImageDraw.Draw(image)
-    fonts = {
-        "title": _font(22, bold=True),
-        "header": _font(19, bold=True),
-        "label": _font(15, bold=True),
-        "body": _font(18, bold=True),
-        "body_small": _font(17, bold=True),
-        "muted": _font(18),
-        "date": _font(15),
-    }
 
     _rounded(draw, (LEFT, 18, WIDTH - LEFT, 64), 8, "#172033")
     draw.text((LEFT + 18, 32), "今日在岗人员", font=fonts["title"], fill="#ffffff")
@@ -84,7 +85,6 @@ def render_daily_duty_image(preview: dict[str, Any]) -> bytes:
     _rounded(draw, (LEFT, rest_y, LEFT + inner_width, rest_y + 46), 8, "#c2410c")
     draw.rectangle((LEFT, rest_y + 36, LEFT + inner_width, rest_y + 46), fill="#c2410c")
     draw.text((LEFT + 18, rest_y + 13), "休息状态", font=fonts["header"], fill="#ffffff")
-    rest_card_width = (inner_width - 36 - GAP * 2) // 3
     for index, item in enumerate(rest_meta):
         x = LEFT + 18 + index * (rest_card_width + GAP)
         y = rest_y + 60
@@ -97,20 +97,45 @@ def render_daily_duty_image(preview: dict[str, Any]) -> bytes:
     return output.getvalue()
 
 
-def _wrap_text(value: str, max_chars: int) -> list[str]:
+def _wrap_text(value: str, max_width: int, font: ImageFont.FreeTypeFont | ImageFont.ImageFont) -> list[str]:
     parts = [part for part in value.split("，") if part]
     lines: list[str] = []
     line = ""
     for part in parts:
-        candidate = f"{line}，{part}" if line else part
-        if len(candidate) > max_chars and line:
-            lines.append(line)
-            line = part
-        else:
-            line = candidate
+        for segment in _split_oversized_text(part, max_width, font):
+            candidate = f"{line}，{segment}" if line else segment
+            if _text_width(candidate, font) > max_width and line:
+                lines.append(line)
+                line = segment
+            else:
+                line = candidate
     if line:
         lines.append(line)
     return lines or ["无"]
+
+
+def _split_oversized_text(value: str, max_width: int, font: ImageFont.FreeTypeFont | ImageFont.ImageFont) -> list[str]:
+    if _text_width(value, font) <= max_width:
+        return [value]
+    parts: list[str] = []
+    line = ""
+    for char in value:
+        candidate = f"{line}{char}"
+        if line and _text_width(candidate, font) > max_width:
+            parts.append(line)
+            line = char
+        else:
+            line = candidate
+    if line:
+        parts.append(line)
+    return parts or [value]
+
+
+def _text_width(value: str, font: ImageFont.FreeTypeFont | ImageFont.ImageFont) -> float:
+    if hasattr(font, "getlength"):
+        return float(font.getlength(value))
+    left, _, right, _ = font.getbbox(value)
+    return float(right - left)
 
 
 def _font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
