@@ -372,7 +372,10 @@ def _measure_template_cell(cell: Any) -> CellMetrics:
     import numpy as np
 
     gray = cv2.cvtColor(cell, cv2.COLOR_BGR2GRAY)
-    ink = np.max(cell, axis=2) < 150
+    channel_max = np.max(cell, axis=2)
+    channel_min = np.min(cell, axis=2)
+    channel_range = channel_max - channel_min
+    ink = (gray < 120) & (channel_max < 150) & (channel_range < 45)
     ink_fraction = float(ink.sum()) / float(ink.size)
     ys, _ = np.where(ink)
     ink_height = int(ys.max() - ys.min() + 1) if len(ys) else 0

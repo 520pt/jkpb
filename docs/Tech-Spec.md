@@ -80,17 +80,17 @@
 ## 2026-07-22 Template Cell Recheck
 
 ### Goals
-- Improve fixed-template shift recognition accuracy for green shift cells.
+- Improve fixed-template shift recognition accuracy for colored shift cells.
 - Keep white or near-white single `中` cells as empty values so the review grid continues to display `-`.
 - Make automatic recheck verify the current review grid one cell at a time using each cell's stored source-image box.
 
 ### Behavior
 - Yellow cells are classified as `休`.
 - White or near-white single-character cells are classified as empty; white tall two-line cells can still be `出差`.
-- Green cells are classified as `中`, `早`, or `晚` by adaptive ink-density thresholds learned from the current image.
+- Colored shift cells are classified as `中`, `早`, or `晚` by adaptive ink-density thresholds learned from the current image. The ink detector ignores saturated/dark backgrounds so non-green fills do not get counted as text strokes.
 - `/api/rosters/recheck` first uses current grid `boxes` to crop and reclassify each visible cell; whole-template parsing is only a fallback when boxes are unavailable.
 
 ### Verification
-- Template parser tests cover white `中` ignored as empty and green `中` recognized as `中`.
+- Template parser tests cover white `中` ignored as empty and colored `中` recognized as `中`.
 - Recheck tests cover correcting one current cell by its existing source-image box.
 - Full pytest and frontend script syntax pass.

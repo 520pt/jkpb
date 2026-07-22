@@ -38,6 +38,13 @@ def test_template_cell_classifier_reads_green_middle_cell():
     assert _classify_template_cell(cell) == "中"
 
 
+def test_template_cell_classifier_reads_non_green_colored_middle_cell():
+    cell = np.full((29, 20, 3), (96, 32, 140), dtype=np.uint8)
+    _draw_middle_strokes(cell, -2, -2)
+
+    assert _classify_template_cell(cell) == "中"
+
+
 def test_template_parser_reads_sixteen_person_roster_grid(tmp_path: Path):
     image_path = tmp_path / "roster.png"
     _write_synthetic_roster(image_path, row_count=16)
