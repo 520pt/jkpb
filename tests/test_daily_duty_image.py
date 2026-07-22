@@ -5,7 +5,7 @@ def test_daily_duty_image_wraps_names_by_pixel_width():
     font = _font(18, bold=True)
     max_width = 120
 
-    lines = _wrap_text("罗森，罗越，张铭文，刘显坤", max_width, font)
+    lines = _wrap_text("LongNameOne，LongNameTwo，LongNameThree", max_width, font)
 
     assert len(lines) >= 2
     assert all(_text_width(line, font) <= max_width for line in lines)
