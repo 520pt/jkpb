@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import calendar
 import hashlib
 import hmac
 import html as html_lib
@@ -23,9 +24,27 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.daily_duty_image import has_cjk_font, render_daily_duty_image
 from app.ocr import extract_roster_image, extract_template_roster_image, recheck_template_roster_cells
+from app.patrol_warning import (
+    PatrolWarningError,
+    build_end_reminder_message,
+    build_start_message,
+    due_end_reminder_slot,
+    fetch_latest_warning,
+    fetch_latest_warning_result,
+    failure_backoff_until,
+    next_poll_time,
+    warning_from_dict,
+)
+from app.patrol_warning_image import render_patrol_warning_image
 from app.reminders import DEFAULT_MESSAGE_TEMPLATE, ReminderEvent, ReminderSettings, plan_reminders_for_day
 from app.roster import Shift, ShiftAssignment, normalize_shift_code
-from app.storage import DEFAULT_DAILY_DUTY_TEMPLATE, DEFAULT_REST_MESSAGE_TEMPLATE, DutyRepository
+from app.storage import (
+    DEFAULT_DAILY_DUTY_TEMPLATE,
+    DEFAULT_PATROL_WARNING_END_TEMPLATE,
+    DEFAULT_PATROL_WARNING_START_TEMPLATE,
+    DEFAULT_REST_MESSAGE_TEMPLATE,
+    DutyRepository,
+)
 from app.wecom import WeComClient, WeComError, WeComWebhookClient
 
 
@@ -152,6 +171,35 @@ class DailyDutyConfigRequest(BaseModel):
         return _validate_hhmm(value)
 
 
+class PatrolWarningConfigRequest(BaseModel):
+    enabled: bool = False
+    login_url: str = ""
+    warning_url: str = ""
+    username: str = ""
+    password: str = ""
+    project_id: str = ""
+    platform: str = "2"
+    route_code: str = ""
+    poll_interval_minutes: int = Field(default=10, ge=1, le=1440)
+    rows: int = Field(default=5000, ge=1, le=10000)
+    end_reminder_interval_hours: int = Field(default=6, ge=1, le=168)
+    end_reminder_window_hours: int = Field(default=48, ge=1, le=720)
+    mention_all: bool = True
+    mention_mobiles: str = ""
+    send_content_mode: str = "both"
+    start_message_template: str = DEFAULT_PATROL_WARNING_START_TEMPLATE
+    end_message_template: str = DEFAULT_PATROL_WARNING_END_TEMPLATE
+
+
+class PatrolWarningSendRequest(BaseModel):
+    mode: str = "start"
+
+
+class PatrolWarningImagePreviewRequest(BaseModel):
+    warning: dict[str, Any]
+    window_hours: int = Field(default=48, ge=1, le=720)
+
+
 def create_app(
     *,
     data_dir: str | Path | None = None,
@@ -273,17 +321,24 @@ def create_app(
     @app.post("/api/rosters/recheck")
     def recheck_roster(request: RosterRecheckRequest):
         source_path = _resolve_upload_path(request.source_image_path, uploads)
-        checked = recheck_template_roster_cells(source_path, list(request.grid or []))
+        checked = recheck_template_roster_cells(source_path, list(request.grid or []), year=request.year, month=request.month)
         if checked is None:
             parsed = extract_template_roster_image(source_path)
             if parsed is None:
                 raise HTTPException(status_code=422, detail="无法从原图重新核对")
+            if request.year and request.month:
+                parsed["grid"] = _sanitize_roster_grid_for_month(list(parsed.get("grid", [])), request.year, request.month)
             checked = _diff_rechecked_grid(list(request.grid or []), list(parsed.get("grid", [])))
 
+        year = request.year or _today_in_tz().year
+        month = request.month or _today_in_tz().month
+        checked["grid"] = _sanitize_roster_grid_for_month(list(checked.get("grid", [])), year, month)
+        max_day = calendar.monthrange(year, month)[1]
+        checked["issues"] = [issue for issue in list(checked.get("issues", [])) if _is_valid_roster_day(str(issue.get("day") or ""), max_day)]
         return {
             "success": True,
-            "year": request.year or _today_in_tz().year,
-            "month": request.month or _today_in_tz().month,
+            "year": year,
+            "month": month,
             "source_image_path": str(source_path),
             "source_image_url": f"/api/uploads/{source_path.name}",
             "grid": checked["grid"],
@@ -292,11 +347,12 @@ def create_app(
 
     @app.post("/api/rosters/confirm")
     def confirm_roster(request: RosterConfirmRequest):
-        if _has_unconfirmed_roster_names(request.grid):
+        grid = _sanitize_roster_grid_for_month(request.grid, request.year, request.month)
+        if _has_unconfirmed_roster_names(grid):
             raise HTTPException(status_code=422, detail="请先补全所有人员姓名，再确认导入")
         existing = repo.get_roster_month(request.year, request.month)
         if existing and not request.overwrite:
-            diffs = _diff_roster_grids(existing.get("grid", []), request.grid)
+            diffs = _diff_roster_grids(existing.get("grid", []), grid)
             return JSONResponse(
                 status_code=409,
                 content={
@@ -304,11 +360,11 @@ def create_app(
                     "conflict": True,
                     "message": f"{request.year}年{request.month}月排班表已存在",
                     "existing": existing,
-                    "incoming": request.model_dump(),
+                    "incoming": {**request.model_dump(), "grid": grid},
                     "diffs": diffs,
                 },
             )
-        repo.save_roster_month(request.year, request.month, request.grid, request.source_image_path)
+        repo.save_roster_month(request.year, request.month, grid, request.source_image_path)
         return {"success": True}
 
     @app.get("/api/rosters")
@@ -425,6 +481,114 @@ def create_app(
             raise HTTPException(status_code=502, detail=f"测试发送失败：{exc}") from exc
         return {"success": True, "content": preview["content"], "send_at": preview["send_at"], "details": preview["details"]}
 
+    @app.get("/api/patrol-warning-config")
+    def get_patrol_warning_config():
+        return {
+            "config": _public_patrol_warning_config(repo.get_patrol_warning_config()),
+            "state": _public_patrol_warning_state(repo.get_patrol_warning_state()),
+        }
+
+    @app.post("/api/patrol-warning-config")
+    def save_patrol_warning_config(request: PatrolWarningConfigRequest):
+        existing = repo.get_patrol_warning_config()
+        password = request.password if request.password else str(existing.get("password", ""))
+        should_reset_state = any(
+            str(existing.get(key) or "").strip() != str(getattr(request, key) or "").strip()
+            for key in ("login_url", "warning_url", "project_id", "platform", "route_code")
+        )
+        repo.save_patrol_warning_config(**{**request.model_dump(), "password": password})
+        if should_reset_state:
+            repo.save_patrol_warning_state(
+                warning_key="",
+                warning={},
+                last_checked_at="",
+                last_start_sent_key="",
+                last_end_reminder_slot="",
+                token="",
+                token_expires_at="",
+                next_check_at="",
+                failure_count=0,
+                backoff_until="",
+                last_error="",
+            )
+        return {
+            "success": True,
+            "config": _public_patrol_warning_config(repo.get_patrol_warning_config()),
+            "state": _public_patrol_warning_state(repo.get_patrol_warning_state()),
+        }
+
+    @app.post("/api/patrol-warning-config/test")
+    async def test_patrol_warning_config(request: PatrolWarningConfigRequest):
+        existing = repo.get_patrol_warning_config()
+        config = {**request.model_dump(), "password": request.password or str(existing.get("password", ""))}
+        try:
+            latest, stats = await fetch_latest_warning(config, TZ)
+        except PatrolWarningError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        if latest is not None:
+            repo.save_patrol_warning_state(warning=latest.as_dict())
+        return {
+            "success": True,
+            "stats": stats,
+            "latest": latest.as_dict() if latest else None,
+        }
+
+    @app.get("/api/patrol-warning-image")
+    def patrol_warning_image(mode: str = "auto"):
+        warning = warning_from_dict(dict(repo.get_patrol_warning_state().get("warning") or {}), TZ)
+        if warning is None:
+            raise HTTPException(status_code=404, detail="暂无已监测到的公路巡查预警")
+        image = render_patrol_warning_image(
+            warning,
+            now=datetime.now(TZ),
+            window_hours=int(repo.get_patrol_warning_config().get("end_reminder_window_hours") or 48),
+            mode=mode,
+        )
+        return Response(content=image, media_type="image/png")
+
+    @app.post("/api/patrol-warning-image-preview")
+    def patrol_warning_image_preview(request: PatrolWarningImagePreviewRequest):
+        warning = warning_from_dict(dict(request.warning or {}), TZ)
+        if warning is None:
+            raise HTTPException(status_code=400, detail="预警数据不完整，无法生成图片预览")
+        image = render_patrol_warning_image(
+            warning,
+            now=datetime.now(TZ),
+            window_hours=request.window_hours,
+            mode="auto",
+        )
+        return Response(content=image, media_type="image/png")
+
+    @app.post("/api/patrol-warning-config/send-test")
+    async def send_patrol_warning_test(request: PatrolWarningSendRequest):
+        config = repo.get_patrol_warning_config()
+        webhook_client = _wecom_webhook_client_from_repo(repo)
+        if webhook_client is None:
+            raise HTTPException(status_code=400, detail="请先配置企业微信群机器人地址")
+        warning = warning_from_dict(dict(repo.get_patrol_warning_state().get("warning") or {}), TZ)
+        if warning is None:
+            raise HTTPException(status_code=400, detail="暂无已监测到的预警，请等待后台监测到预警后再发送")
+        now = datetime.now(TZ)
+        mode = "end" if request.mode == "end" else "start"
+        content = _build_patrol_warning_content(warning, config, now=now, mode=mode)
+        try:
+            await _send_patrol_warning_message(
+                repo,
+                webhook_client,
+                kind=f"patrol_warning_{mode}_test",
+                target=str(config.get("route_code") or warning.route_code or "公路巡查预警"),
+                scheduled_at=now.isoformat(),
+                content=content,
+                mentioned_mobile_list=_patrol_warning_mentions(config),
+                warning=warning,
+                window_hours=int(config.get("end_reminder_window_hours") or 48),
+                now=now,
+                image_mode=mode,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"发送预警提醒失败：{exc}") from exc
+        return {"success": True, "content": content}
+
     @app.get("/api/notification-config")
     def get_notification_config():
         return {"config": _public_notification_config(repo.get_notification_config())}
@@ -497,27 +661,22 @@ def create_app(
     def system_status():
         return _build_system_status(repo, bool(app.state.scheduler_enabled), bool(app.state.cjk_font_ready))
 
+    @app.get("/api/reminders/today")
+    def today_reminders():
+        today = _today_in_tz()
+        return _reminder_events_response(repo, today, now=datetime.now(TZ))
+
     @app.post("/api/reminders/preview")
     def preview_reminders(request: PreviewRequest):
         target = request.target_date or _today_in_tz()
-        events = _plan_all_events(repo, target)
-        return {
-            "events": [
-                {
-                    "kind": event.kind,
-                    "person_name": event.person_name,
-                    "send_at": event.send_at.isoformat(),
-                    "content": event.content,
-                }
-                for event in events
-            ]
-        }
+        return _reminder_events_response(repo, target, now=datetime.now(TZ))
 
     if start_scheduler:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
         scheduler = AsyncIOScheduler(timezone=TZ)
         scheduler.add_job(_send_due_reminders, "interval", minutes=1, args=[repo], max_instances=1)
+        scheduler.add_job(_check_patrol_warning_monitor, "interval", minutes=1, args=[repo], max_instances=1)
 
         @app.on_event("startup")
         async def start_jobs():
@@ -556,6 +715,27 @@ def _has_unconfirmed_roster_names(grid: list[dict[str, Any]]) -> bool:
         not str(row.get("name") or "").strip() or re.fullmatch(r"第\d+行", str(row.get("name") or "").strip())
         for row in grid
     )
+
+
+def _sanitize_roster_grid_for_month(grid: list[dict[str, Any]], year: int, month: int) -> list[dict[str, Any]]:
+    max_day = calendar.monthrange(int(year), int(month))[1]
+    sanitized: list[dict[str, Any]] = []
+    for row in grid:
+        days = dict(row.get("days", {}))
+        boxes = dict(row.get("boxes", {}))
+        next_row = {**row}
+        next_row["days"] = {str(day): value for day, value in days.items() if _is_valid_roster_day(str(day), max_day)}
+        if boxes:
+            next_row["boxes"] = {str(day): value for day, value in boxes.items() if _is_valid_roster_day(str(day), max_day)}
+        sanitized.append(next_row)
+    return sanitized
+
+
+def _is_valid_roster_day(day: str, max_day: int) -> bool:
+    if not day.isdigit():
+        return False
+    value = int(day)
+    return 1 <= value <= max_day
 
 
 def _parse_hhmm(value: str):
@@ -663,6 +843,155 @@ def _public_notification_config(config: dict[str, Any]) -> dict[str, Any]:
         "webhook_display": "已配置" if webhook_url else "未配置",
         "message_template": config.get("message_template") or DEFAULT_MESSAGE_TEMPLATE,
     }
+
+
+def _public_patrol_warning_config(config: dict[str, Any]) -> dict[str, Any]:
+    password = str(config.get("password", "")).strip()
+    return {
+        "enabled": bool(config.get("enabled")),
+        "login_url": str(config.get("login_url") or ""),
+        "warning_url": str(config.get("warning_url") or ""),
+        "username": str(config.get("username") or ""),
+        "password": "",
+        "password_configured": bool(password),
+        "password_display": "已配置" if password else "未配置",
+        "project_id": str(config.get("project_id") or ""),
+        "platform": str(config.get("platform") or "2"),
+        "route_code": str(config.get("route_code") or ""),
+        "poll_interval_minutes": int(config.get("poll_interval_minutes") or 10),
+        "rows": int(config.get("rows") or 5000),
+        "end_reminder_interval_hours": int(config.get("end_reminder_interval_hours") or 6),
+        "end_reminder_window_hours": int(config.get("end_reminder_window_hours") or 48),
+        "mention_all": bool(config.get("mention_all", True)),
+        "mention_mobiles": str(config.get("mention_mobiles") or ""),
+        "send_content_mode": _patrol_send_content_mode(config),
+        "start_message_template": str(config.get("start_message_template") or DEFAULT_PATROL_WARNING_START_TEMPLATE),
+        "end_message_template": str(config.get("end_message_template") or DEFAULT_PATROL_WARNING_END_TEMPLATE),
+    }
+
+
+def _public_patrol_warning_state(state: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "warning_key": str(state.get("warning_key") or ""),
+        "warning": dict(state.get("warning") or {}),
+        "last_checked_at": str(state.get("last_checked_at") or ""),
+        "last_start_sent_key": str(state.get("last_start_sent_key") or ""),
+        "last_end_reminder_slot": str(state.get("last_end_reminder_slot") or ""),
+        "token_configured": bool(str(state.get("token") or "").strip()),
+        "token_expires_at": str(state.get("token_expires_at") or ""),
+        "next_check_at": str(state.get("next_check_at") or ""),
+        "failure_count": int(state.get("failure_count") or 0),
+        "backoff_until": str(state.get("backoff_until") or ""),
+        "last_error": str(state.get("last_error") or ""),
+    }
+
+
+def _reminder_events_response(repo: DutyRepository, target: date, *, now: datetime) -> dict[str, Any]:
+    events = [*_plan_all_events(repo, target), *_plan_patrol_warning_display_events(repo, target, now=now)]
+    events = sorted(events, key=lambda event: event.send_at)
+    return {
+        "target_date": target.isoformat(),
+        "now_beijing": now.isoformat(),
+        "group_statuses": _today_reminder_group_statuses(repo, target, events),
+        "events": [
+            {
+                "kind": event.kind,
+                "person_name": event.person_name,
+                "send_at": event.send_at.isoformat(),
+                "content": event.content,
+                "sent_state": "sent_or_due" if event.send_at <= now else "pending",
+                **_today_reminder_event_media(repo, event, target),
+            }
+            for event in events
+        ],
+    }
+
+
+def _today_reminder_event_media(repo: DutyRepository, event: ReminderEvent, target: date) -> dict[str, str]:
+    if event.kind == "daily_duty":
+        return {
+            "image_url": f"/api/daily-duty-image?target_date={target.isoformat()}",
+            "image_alt": "今日在岗提醒图片",
+        }
+    if event.kind in {"patrol_warning_start", "patrol_warning_end"}:
+        send_content_mode = _patrol_send_content_mode(repo.get_patrol_warning_config())
+        if send_content_mode in {"both", "image"}:
+            mode = "end" if event.kind == "patrol_warning_end" else "start"
+            return {
+                "image_url": f"/api/patrol-warning-image?mode={mode}&t={event.send_at.timestamp()}",
+                "image_alt": "公路巡查预警图片",
+            }
+    return {}
+
+
+def _plan_patrol_warning_display_events(repo: DutyRepository, target: date, *, now: datetime) -> list[ReminderEvent]:
+    config = repo.get_patrol_warning_config()
+    if not config.get("enabled"):
+        return []
+    warning = warning_from_dict(dict(repo.get_patrol_warning_state().get("warning") or {}), TZ)
+    if warning is None:
+        return []
+
+    events: list[ReminderEvent] = []
+    target_name = warning.route_code or warning.route_name or str(config.get("route_code") or "公路巡查预警")
+    start_at = warning.create_time or warning.start_time
+    if start_at and start_at.date() == target:
+        events.append(
+            ReminderEvent(
+                kind="patrol_warning_start",
+                person_name=target_name,
+                send_at=start_at,
+                content=_build_patrol_warning_content(warning, config, now=now, mode="start"),
+            )
+        )
+
+    if warning.end_time:
+        interval_hours = max(1, int(config.get("end_reminder_interval_hours") or 6))
+        window_hours = max(1, int(config.get("end_reminder_window_hours") or 48))
+        deadline = warning.end_time + timedelta(hours=window_hours)
+        slot = warning.end_time
+        while slot <= deadline:
+            if slot.date() == target:
+                events.append(
+                    ReminderEvent(
+                        kind="patrol_warning_end",
+                        person_name=target_name,
+                        send_at=slot,
+                        content=_build_patrol_warning_content(warning, config, now=slot, mode="end"),
+                    )
+                )
+            if slot.date() > target:
+                break
+            slot += timedelta(hours=interval_hours)
+    return events
+
+
+def _today_reminder_group_statuses(repo: DutyRepository, target: date, events: list[ReminderEvent]) -> list[dict[str, str]]:
+    statuses: list[dict[str, str]] = []
+    event_kinds = {event.kind for event in events}
+
+    monitored_count = len(repo.list_monitored_people(enabled_only=True))
+    has_monitor_events = bool(event_kinds & {"daily", "before_shift", "rest"})
+    if monitored_count == 0:
+        statuses.append({"key": "monitor", "message": "未配置监控班提醒人员"})
+    elif not has_monitor_events:
+        statuses.append({"key": "monitor", "message": "今日没有匹配到监控班提醒"})
+
+    patrol_config = repo.get_patrol_warning_config()
+    has_patrol_events = bool(event_kinds & {"patrol_warning_start", "patrol_warning_end"})
+    if not patrol_config.get("enabled"):
+        statuses.append({"key": "patrol_warning", "message": "公路巡查预警监测未启用"})
+    elif not has_patrol_events:
+        warning = warning_from_dict(dict(repo.get_patrol_warning_state().get("warning") or {}), TZ)
+        message = "暂无已监测到的公路巡查预警" if warning is None else f"{target:%Y-%m-%d} 没有公路巡查预警提醒"
+        statuses.append({"key": "patrol_warning", "message": message})
+
+    if not repo.list_custom_reminders(enabled_only=True):
+        statuses.append({"key": "custom", "message": "未配置自定义提醒"})
+    elif "custom" not in event_kinds:
+        statuses.append({"key": "custom", "message": "今日没有匹配到自定义提醒"})
+
+    return statuses
 
 
 def _assignments_from_grid(roster_month: dict[str, Any]) -> list[ShiftAssignment]:
@@ -967,6 +1296,8 @@ def _build_system_status(repo: DutyRepository, scheduler_enabled: bool, cjk_font
     today_start = now.strftime("%Y-%m-%d 00:00:00")
     records_today = repo.list_send_records_since(today_start)
     failed_records = [record for record in records_today if record["status"] != "success"]
+    patrol_config = repo.get_patrol_warning_config()
+    patrol_state = repo.get_patrol_warning_state()
     return {
         "now_beijing": now.isoformat(),
         "timezone": str(TZ),
@@ -979,6 +1310,18 @@ def _build_system_status(repo: DutyRepository, scheduler_enabled: bool, cjk_font
         "today_failed_count": len(failed_records),
         "last_error": failed_records[0]["error"] if failed_records else "",
         "next_events": _next_events(repo, now),
+        "patrol_warning_monitor": {
+            "enabled": bool(patrol_config.get("enabled")),
+            "route_code": str(patrol_config.get("route_code") or ""),
+            "last_checked_at": str(patrol_state.get("last_checked_at") or ""),
+            "next_check_at": str(patrol_state.get("next_check_at") or ""),
+            "backoff_until": str(patrol_state.get("backoff_until") or ""),
+            "failure_count": int(patrol_state.get("failure_count") or 0),
+            "last_error": str(patrol_state.get("last_error") or ""),
+            "token_configured": bool(str(patrol_state.get("token") or "").strip()),
+            "token_expires_at": str(patrol_state.get("token_expires_at") or ""),
+            "last_warning_key": str(patrol_state.get("warning_key") or ""),
+        },
     }
 
 
@@ -999,6 +1342,230 @@ def _next_events(repo: DutyRepository, now: datetime, *, days: int = 7, limit: i
         }
         for event in events
     ]
+
+
+def _state_datetime(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed.astimezone(TZ) if parsed.tzinfo else parsed.replace(tzinfo=TZ)
+
+
+async def _check_patrol_warning_monitor(repo: DutyRepository) -> None:
+    config = repo.get_patrol_warning_config()
+    if not config.get("enabled"):
+        return
+    now = datetime.now(TZ)
+    state = repo.get_patrol_warning_state()
+
+    backoff_until = _state_datetime(str(state.get("backoff_until") or ""))
+    if backoff_until and now < backoff_until:
+        return
+    next_check_at = _state_datetime(str(state.get("next_check_at") or ""))
+    if next_check_at and now < next_check_at:
+        return
+    if not next_check_at:
+        last_checked_at = _state_datetime(str(state.get("last_checked_at") or ""))
+        if last_checked_at and now - last_checked_at < timedelta(minutes=int(config.get("poll_interval_minutes") or 10)):
+            return
+
+    webhook_client = _wecom_webhook_client_from_repo(repo)
+    if webhook_client is None:
+        return
+
+    route_code = str(config.get("route_code") or "").strip()
+    try:
+        result = await fetch_latest_warning_result(
+            config,
+            TZ,
+            token=str(state.get("token") or ""),
+            token_expires_at=str(state.get("token_expires_at") or ""),
+            now=now,
+        )
+    except PatrolWarningError as exc:
+        failure_count = int(state.get("failure_count") or 0) + 1
+        retry_at = failure_backoff_until(now, failure_count)
+        save_kwargs: dict[str, Any] = {
+            "last_checked_at": now.isoformat(),
+            "next_check_at": retry_at.isoformat(),
+            "failure_count": failure_count,
+            "backoff_until": retry_at.isoformat(),
+            "last_error": str(exc),
+        }
+        if exc.is_auth_error:
+            save_kwargs["token"] = ""
+            save_kwargs["token_expires_at"] = ""
+        repo.save_patrol_warning_state(**save_kwargs)
+        LOGGER.warning("公路巡查预警监测失败：%s", exc)
+        repo.save_send_record(
+            kind="patrol_warning_check",
+            target=route_code or "公路巡查预警",
+            status="failed",
+            error=str(exc),
+        )
+        return
+    latest = result.warning
+    stats = result.stats
+    repo.save_patrol_warning_state(
+        last_checked_at=now.isoformat(),
+        token=result.token,
+        token_expires_at=result.token_expires_at,
+        next_check_at=next_poll_time(now, int(config.get("poll_interval_minutes") or 10)).isoformat(),
+        failure_count=0,
+        backoff_until="",
+        last_error="",
+    )
+    if latest is None:
+        LOGGER.info("公路巡查预警未匹配到路线：%s rows=%s", route_code, stats.get("total_rows"))
+        return
+
+    state = repo.get_patrol_warning_state()
+    is_new_warning = latest.key != str(state.get("warning_key") or "")
+    latest_data = latest.as_dict()
+    if is_new_warning:
+        repo.save_patrol_warning_state(
+            warning_key=latest.key,
+            warning=latest_data,
+            last_start_sent_key="",
+            last_end_reminder_slot="",
+        )
+        state = repo.get_patrol_warning_state()
+    elif latest_data != dict(state.get("warning") or {}):
+        repo.save_patrol_warning_state(warning=latest_data)
+        state = repo.get_patrol_warning_state()
+
+    if str(state.get("last_start_sent_key") or "") != latest.key:
+        content = _build_patrol_warning_content(latest, config, now=now, mode="start")
+        try:
+            await _send_patrol_warning_message(
+                repo,
+                webhook_client,
+                kind="patrol_warning_start",
+                target=route_code or latest.route_code or "公路巡查预警",
+                scheduled_at=now.isoformat(),
+                content=content,
+                mentioned_mobile_list=_patrol_warning_mentions(config),
+                warning=latest,
+                window_hours=int(config.get("end_reminder_window_hours") or 48),
+                now=now,
+                image_mode="start",
+            )
+            repo.save_patrol_warning_state(last_start_sent_key=latest.key)
+        except Exception as exc:
+            LOGGER.exception("公路巡查预警开始提醒发送失败：%s", exc)
+            return
+
+    slot = due_end_reminder_slot(
+        latest,
+        now=now,
+        interval_hours=int(config.get("end_reminder_interval_hours") or 6),
+        window_hours=int(config.get("end_reminder_window_hours") or 48),
+    )
+    if slot is None:
+        return
+    slot_text = slot.isoformat()
+    if slot_text == str(repo.get_patrol_warning_state().get("last_end_reminder_slot") or ""):
+        return
+    content = _build_patrol_warning_content(latest, config, now=now, mode="end")
+    try:
+        await _send_patrol_warning_message(
+            repo,
+            webhook_client,
+            kind="patrol_warning_end",
+            target=route_code or latest.route_code or "公路巡查预警",
+            scheduled_at=slot_text,
+            content=content,
+            mentioned_mobile_list=_patrol_warning_mentions(config),
+            warning=latest,
+            window_hours=int(config.get("end_reminder_window_hours") or 48),
+            now=now,
+            image_mode="end",
+        )
+        repo.save_patrol_warning_state(last_end_reminder_slot=slot_text)
+    except Exception as exc:
+        LOGGER.exception("公路巡查预警结束后提醒发送失败：%s", exc)
+
+
+async def _send_patrol_warning_message(
+    repo: DutyRepository,
+    webhook_client: WeComWebhookClient,
+    *,
+    kind: str,
+    target: str,
+    scheduled_at: str,
+    content: str,
+    mentioned_mobile_list: list[str],
+    warning: Any | None = None,
+    window_hours: int = 48,
+    now: datetime | None = None,
+    image_mode: str = "auto",
+) -> None:
+    try:
+        send_content_mode = _normalize_patrol_send_content_mode(str(repo.get_patrol_warning_config().get("send_content_mode") or "both"))
+        if send_content_mode in {"both", "text"}:
+            await webhook_client.send_text(content, mentioned_mobile_list)
+        if send_content_mode in {"both", "image"} and warning is not None:
+            await webhook_client.send_image(
+                render_patrol_warning_image(
+                    warning,
+                    now=now or datetime.now(TZ),
+                    window_hours=window_hours,
+                    mode=image_mode,
+                )
+            )
+        repo.save_send_record(
+            kind=kind,
+            target=target,
+            scheduled_at=scheduled_at,
+            status="success",
+            content=content,
+        )
+    except Exception as exc:
+        repo.save_send_record(
+            kind=kind,
+            target=target,
+            scheduled_at=scheduled_at,
+            status="failed",
+            content=content,
+            error=str(exc),
+        )
+        raise
+
+
+def _build_patrol_warning_content(warning: Any, config: dict[str, Any], *, now: datetime, mode: str) -> str:
+    mention_all = bool(config.get("mention_all", True))
+    if mode == "end":
+        return build_end_reminder_message(
+            warning,
+            now=now,
+            window_hours=int(config.get("end_reminder_window_hours") or 48),
+            mention_all=mention_all,
+            template=str(config.get("end_message_template") or DEFAULT_PATROL_WARNING_END_TEMPLATE),
+        )
+    return build_start_message(
+        warning,
+        mention_all=mention_all,
+        template=str(config.get("start_message_template") or DEFAULT_PATROL_WARNING_START_TEMPLATE),
+    )
+
+
+def _normalize_patrol_send_content_mode(value: str) -> str:
+    normalized = str(value or "both").strip().lower()
+    return normalized if normalized in {"both", "text", "image"} else "both"
+
+
+def _patrol_send_content_mode(config: dict[str, Any]) -> str:
+    return _normalize_patrol_send_content_mode(str(config.get("send_content_mode") or "both"))
+
+
+def _patrol_warning_mentions(config: dict[str, Any]) -> list[str]:
+    if bool(config.get("mention_all", True)):
+        return ["@all"]
+    text = str(config.get("mention_mobiles") or "")
+    return [part for part in re.split(r"[\s,，;；]+", text) if part]
 
 
 def _person_mobile_lookup(repo: DutyRepository) -> dict[str, str]:
@@ -1033,6 +1600,8 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
         if kind in {"daily_duty", "daily_duty_test", "daily_duty_resend"}:
             preview_date = _date_from_record(record) or _today_in_tz()
             await client.send_image(render_daily_duty_image(_build_daily_duty_preview(repo, preview_date)))
+        elif kind.startswith("patrol_warning_"):
+            await client.send_text(content, ["@all"] if "@所有人" in content else [])
         else:
             mobile = _person_mobile_lookup(repo).get(target, target if target != "测试消息" else "")
             await client.send_text(content, [mobile])

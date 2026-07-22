@@ -136,6 +136,26 @@
     }
     input[type="number"] { width: 82px; }
     input[type="time"] { width: 112px; }
+    .warning-image-preview {
+      width: 100%;
+      max-width: 520px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fafc;
+      display: block;
+    }
+    .warning-image-meta {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .patrol-delivery-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 150px;
+      gap: 8px;
+      align-items: end;
+    }
     input[type="checkbox"], input[type="radio"] {
       width: auto;
       height: auto;
@@ -777,6 +797,147 @@
       max-height: 380px;
       overflow: auto;
     }
+    .today-reminders {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+    }
+    .today-reminder-group {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      overflow: hidden;
+    }
+    .today-reminder-group.left-column {
+      grid-column: 1;
+    }
+    .today-reminder-group.right-column {
+      grid-column: 2;
+    }
+    .today-reminder-group.daily-duty-column {
+      grid-row: 1;
+    }
+    .today-reminder-group.patrol-warning-column {
+      grid-row: 1;
+    }
+    .today-reminder-group.monitor-column {
+      grid-row: 2;
+    }
+    .today-reminder-group.custom-column,
+    .today-reminder-group.other-column {
+      grid-row: 2;
+    }
+    .today-reminder-group h3 {
+      min-height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      background: #f8fafc;
+    }
+    .today-reminder-group h3 small {
+      color: var(--muted);
+      font-weight: 500;
+    }
+    .today-reminder-list {
+      display: grid;
+      gap: 8px;
+      padding: 10px;
+    }
+    .today-reminder-item {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+      align-items: start;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 10px;
+      background: #fbfcff;
+      font-size: 13px;
+    }
+    .today-reminder-item.has-image {
+      grid-template-columns: minmax(0, 1fr) minmax(170px, 240px);
+    }
+    .today-reminder-item.due {
+      border-color: #d9c2b8;
+      background: #fffaf7;
+    }
+    .today-reminder-item strong {
+      display: block;
+      margin-bottom: 3px;
+    }
+    .today-reminder-item small {
+      display: block;
+      color: var(--muted);
+    }
+    .today-reminder-main {
+      min-width: 0;
+    }
+    .today-reminder-meta {
+      display: grid;
+      grid-template-columns: minmax(120px, max-content) minmax(120px, 1fr);
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+    .today-reminder-content {
+      line-height: 1.55;
+      overflow-wrap: anywhere;
+    }
+    .today-reminder-side {
+      display: grid;
+      gap: 8px;
+      justify-items: stretch;
+    }
+    .today-reminder-image-card {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #ffffff;
+      overflow: hidden;
+    }
+    .today-reminder-image-card img {
+      display: block;
+      width: 100%;
+      max-height: 220px;
+      object-fit: contain;
+      background: #f8fafc;
+    }
+    .today-reminder-state {
+      min-height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid #cbd5e1;
+      border-radius: 7px;
+      background: #ffffff;
+      color: var(--muted);
+      font-weight: 700;
+    }
+    .today-reminder-state.sent {
+      border-color: #b8d6c7;
+      background: #f1fbf5;
+      color: #166534;
+    }
+    .today-reminder-collapsed,
+    .event-collapsed {
+      border: 1px dashed #cbd5e1;
+      border-radius: 7px;
+      background: #f8fafc;
+      padding: 8px;
+      font-size: 13px;
+    }
+    .today-reminder-collapsed summary,
+    .event-collapsed summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-weight: 650;
+    }
+    .today-reminder-collapsed .today-reminder-list,
+    .event-collapsed .events {
+      padding: 8px 0 0;
+    }
     .item {
       border: 1px solid var(--line);
       border-radius: 7px;
@@ -851,6 +1012,60 @@
       border-radius: 8px;
       background: white;
     }
+    body img:not(.image-viewer-image) {
+      cursor: zoom-in;
+    }
+    body.image-viewer-open {
+      overflow: hidden;
+    }
+    .image-viewer {
+      position: fixed;
+      inset: 0;
+      z-index: 2000;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      gap: 10px;
+      padding: 16px;
+      background: rgba(15, 23, 42, 0.82);
+    }
+    .image-viewer[hidden] {
+      display: none;
+    }
+    .image-viewer-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      color: white;
+      font-size: 13px;
+    }
+    .image-viewer-title {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .image-viewer-close {
+      min-width: 64px;
+      border-color: rgba(255, 255, 255, 0.38);
+      background: rgba(255, 255, 255, 0.1);
+      color: white;
+    }
+    .image-viewer-stage {
+      min-height: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: auto;
+    }
+    .image-viewer-image {
+      display: block;
+      max-width: 100%;
+      max-height: 100%;
+      border-radius: 8px;
+      background: white;
+      cursor: zoom-out;
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+    }
     @media (max-width: 960px) {
       .review-layout { grid-template-columns: 1fr; }
       .settings-shell { grid-template-columns: 1fr; }
@@ -867,6 +1082,18 @@
       .settings-panel.single { grid-template-columns: 1fr; }
       .side-block.wide { grid-column: auto; }
       .field-grid { grid-template-columns: 1fr; }
+      .today-reminders { grid-template-columns: 1fr; }
+      .today-reminder-group.left-column,
+      .today-reminder-group.right-column { grid-column: 1; }
+      .today-reminder-group.daily-duty-column,
+      .today-reminder-group.patrol-warning-column,
+      .today-reminder-group.monitor-column,
+      .today-reminder-group.custom-column,
+      .today-reminder-group.other-column { grid-row: auto; }
+      .today-reminder-item,
+      .today-reminder-item.has-image,
+      .today-reminder-meta { grid-template-columns: 1fr; }
+      .patrol-delivery-row { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -881,8 +1108,19 @@
 
   <datalist id="personnelNameOptions"></datalist>
 
+  <div id="imageViewer" class="image-viewer" hidden>
+    <div class="image-viewer-bar">
+      <span id="imageViewerTitle" class="image-viewer-title"></span>
+      <button id="imageViewerClose" class="image-viewer-close" type="button">关闭</button>
+    </div>
+    <div class="image-viewer-stage">
+      <img id="imageViewerImage" class="image-viewer-image" alt="" />
+    </div>
+  </div>
+
   <nav class="tabs">
-    <button class="tab-button active" data-tab="review">排班核对</button>
+    <button class="tab-button active" data-tab="today">今日提醒</button>
+    <button class="tab-button" data-tab="review">排班核对</button>
     <button class="tab-button" data-tab="saved">已导入排班</button>
     <button class="tab-button" data-tab="settings">监测配置</button>
     <button class="tab-button" data-tab="records">发送记录</button>
@@ -890,7 +1128,22 @@
   </nav>
 
   <main>
-    <section id="reviewPage" class="tab-page">
+    <section id="todayPage" class="tab-page">
+      <div class="section-head">
+        <div>
+          <h2>今日提醒</h2>
+          <p id="todayReminderSummary" class="status"></p>
+        </div>
+        <div class="toolbar">
+          <button id="refreshTodayRemindersBtn">刷新</button>
+        </div>
+      </div>
+      <div class="body">
+        <div id="todayRemindersList" class="today-reminders"></div>
+      </div>
+    </section>
+
+    <section id="reviewPage" class="tab-page hidden">
       <div class="section-head">
         <div class="review-title">
           <h2>排班表</h2>
@@ -1014,6 +1267,7 @@
           <h3>配置目录</h3>
           <button class="active" data-settings-target="wecomSettings">企业微信通知</button>
           <button data-settings-target="monitorSettings">监控班提醒</button>
+          <button data-settings-target="patrolWarningSettings">公路巡查预警</button>
           <button data-settings-target="customReminderSettings">自定义提醒</button>
           <button data-settings-target="personnelSettings">人员名单</button>
           <button data-settings-target="driverSettings">今日在岗提醒</button>
@@ -1069,6 +1323,71 @@
             <div class="side-block">
               <h3>已配置监控班提醒</h3>
               <div id="peopleList" class="people-list"></div>
+            </div>
+          </section>
+
+          <section class="settings-panel" id="patrolWarningSettings">
+            <div class="side-block">
+              <h3>公路巡查监测预警</h3>
+              <div class="stack">
+                <label class="checkbox-label"><input id="patrolWarningEnabled" type="checkbox" /> 启用公路巡查预警监测</label>
+                <label>登录接口地址 <input id="patrolLoginUrl" placeholder="例如 http://.../Account/Login" /></label>
+                <label>预警列表接口地址 <input id="patrolWarningUrl" placeholder="例如 http://.../warninginfo/findPage" /></label>
+                <div class="field-grid">
+                  <label>账号 <input id="patrolUsername" autocomplete="username" /></label>
+                  <label>密码 <input id="patrolPassword" type="password" autocomplete="current-password" placeholder="已配置时留空不修改" /></label>
+                </div>
+                <div class="field-grid">
+                  <label>项目 ID <input id="patrolProjectId" /></label>
+                  <label>平台 <input id="patrolPlatform" value="2" /></label>
+                </div>
+                <div class="field-grid">
+                  <label>监测路线编码 <input id="patrolRouteCode" placeholder="S41" /></label>
+                  <label>每次拉取条数 <input id="patrolRows" type="number" min="1" max="10000" value="5000" /></label>
+                </div>
+                <div class="field-grid">
+                  <label>轮询间隔（分钟） <input id="patrolPollInterval" type="number" min="1" max="1440" value="10" /></label>
+                  <label>结束后提醒频率（小时） <input id="patrolEndInterval" type="number" min="1" max="168" value="6" /></label>
+                </div>
+                <div class="field-grid">
+                  <label>结束后巡查窗口（小时） <input id="patrolEndWindow" type="number" min="1" max="720" value="48" /></label>
+                  <div class="patrol-delivery-row">
+                    <label>消息 @ 对象
+                      <input id="patrolMentionTarget" list="patrolMentionOptions" placeholder="@所有人 或手机号" />
+                      <datalist id="patrolMentionOptions">
+                        <option value="@所有人"></option>
+                      </datalist>
+                    </label>
+                    <label>发送内容
+                      <select id="patrolSendContentMode">
+                        <option value="both">文字+图片</option>
+                        <option value="text">仅文字</option>
+                        <option value="image">仅图片</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+                <label>新预警消息模板
+                  <textarea id="patrolStartTemplate" placeholder="{mention_prefix}请注意监测到 {app_name} 发布 {warning_level_label}&#10;路线：{route_text}&#10;预警开始时间：{start_time}&#10;桩号：{stake_range}"></textarea>
+                </label>
+                <label>结束后提醒消息模板
+                  <textarea id="patrolEndTemplate" placeholder="{mention_prefix}最新{warning_level_label}已结束&#10;路线：{route_text}&#10;预警开始时间：{start_time}&#10;桩号：{stake_range}&#10;预警结束时间：{end_time}&#10;预警已结束：{elapsed_hours} 小时&#10;距离预警结束后{window_hours}小时内{patrol_frequency_clause}，倒计时结束还有 {remaining_hours} 小时。"></textarea>
+                </label>
+                <div class="settings-actions">
+                  <button class="primary" id="savePatrolWarningBtn" type="button">保存公路巡查预警配置</button>
+                  <button id="testPatrolWarningBtn" type="button">测试查询</button>
+                  <button class="green" id="sendPatrolWarningBtn" type="button">发送预警提醒</button>
+                </div>
+                <p id="patrolWarningStatus" class="status"></p>
+              </div>
+            </div>
+
+            <div class="side-block">
+              <h3>已监测到的预警</h3>
+              <div id="patrolWarningLatest" class="people-list"></div>
+              <img id="patrolWarningImagePreview" class="warning-image-preview hidden" alt="公路巡查预警图片预览" />
+              <div id="patrolWarningImageMeta" class="warning-image-meta"></div>
+              <div id="patrolWarningRuntime" class="people-list"></div>
             </div>
           </section>
 
@@ -1243,6 +1562,14 @@
       personnelPeople: [],
       customReminders: [],
       editingCustomReminderId: null,
+      todayReminderEvents: [],
+      todayReminderGroupStatuses: [],
+      todayReminderDate: "",
+      todayReminderNow: "",
+      patrolWarningConfig: null,
+      patrolWarningLatest: null,
+      patrolWarningPanelState: null,
+      patrolWarningPanelRefreshInFlight: false,
     };
     const BEIJING_TIME_ZONE = "Asia/Shanghai";
     const shiftOptions = ["", "早", "中", "晚", "休", "出差"];
@@ -1551,11 +1878,13 @@
         document.querySelectorAll(".tab-button").forEach((item) => item.classList.remove("active"));
         button.classList.add("active");
         const tab = button.dataset.tab;
+        $("todayPage").classList.toggle("hidden", tab !== "today");
         $("reviewPage").classList.toggle("hidden", tab !== "review");
         $("savedPage").classList.toggle("hidden", tab !== "saved");
         $("settingsPage").classList.toggle("hidden", tab !== "settings");
         $("recordsPage").classList.toggle("hidden", tab !== "records");
         $("statusPage").classList.toggle("hidden", tab !== "status");
+        if (tab === "today") loadTodayReminders();
         if (tab === "saved") {
           loadSavedRosters();
           loadSavedDutyChart();
@@ -2358,6 +2687,48 @@
       renderNameTagEditor(targetId);
     }
 
+    function openImageViewer(image) {
+      if (!image || image.closest("#imageViewer") || image.hidden) return;
+      const src = image.currentSrc || image.src || image.getAttribute("src") || "";
+      if (!src) return;
+      $("imageViewerImage").src = src;
+      $("imageViewerImage").alt = image.alt || "";
+      $("imageViewerTitle").textContent = image.alt || "图片预览";
+      $("imageViewer").hidden = false;
+      document.body.classList.add("image-viewer-open");
+    }
+
+    function closeImageViewer() {
+      const viewer = $("imageViewer");
+      if (!viewer || viewer.hidden) return;
+      viewer.hidden = true;
+      $("imageViewerImage").removeAttribute("src");
+      $("imageViewerTitle").textContent = "";
+      document.body.classList.remove("image-viewer-open");
+    }
+
+    function setupImageViewer() {
+      document.addEventListener("click", (event) => {
+        const target = event.target instanceof Element ? event.target : null;
+        const image = target ? target.closest("img") : null;
+        if (!image) return;
+        if (image.closest("#imageViewer")) {
+          closeImageViewer();
+          return;
+        }
+        openImageViewer(image);
+      });
+      $("imageViewer").addEventListener("click", (event) => {
+        if (event.target === $("imageViewer") || event.target.classList.contains("image-viewer-stage")) {
+          closeImageViewer();
+        }
+      });
+      $("imageViewerClose").addEventListener("click", closeImageViewer);
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") closeImageViewer();
+      });
+    }
+
     function formatIsoMinute(value) {
       const text = String(value || "");
       const match = text.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
@@ -2667,6 +3038,319 @@
       $("messageTemplate").value = body.config ? body.config.message_template || "" : "";
     }
 
+    function patrolWarningPayload() {
+      const mentionTarget = $("patrolMentionTarget").value.trim() || "@所有人";
+      const mentionAll = mentionTarget === "@所有人" || mentionTarget.toLowerCase() === "@all";
+      return {
+        enabled: $("patrolWarningEnabled").checked,
+        login_url: $("patrolLoginUrl").value.trim(),
+        warning_url: $("patrolWarningUrl").value.trim(),
+        username: $("patrolUsername").value.trim(),
+        password: $("patrolPassword").value,
+        project_id: $("patrolProjectId").value.trim(),
+        platform: $("patrolPlatform").value.trim() || "2",
+        route_code: $("patrolRouteCode").value.trim(),
+        poll_interval_minutes: Number($("patrolPollInterval").value || 10),
+        rows: Number($("patrolRows").value || 5000),
+        end_reminder_interval_hours: Number($("patrolEndInterval").value || 6),
+        end_reminder_window_hours: Number($("patrolEndWindow").value || 48),
+        mention_all: mentionAll,
+        mention_mobiles: mentionAll ? "" : mentionTarget,
+        send_content_mode: $("patrolSendContentMode").value || "both",
+        start_message_template: $("patrolStartTemplate").value.trim(),
+        end_message_template: $("patrolEndTemplate").value.trim()
+      };
+    }
+
+    function renderPatrolWarningLatest(latest, stats, stateInfo) {
+      state.patrolWarningLatest = latest || null;
+      state.patrolWarningPanelState = stateInfo || null;
+      renderPatrolWarningRuntime(stateInfo);
+      const stateText = stateInfo && stateInfo.last_checked_at ? `最近检查：${formatIsoMinute(stateInfo.last_checked_at)}` : "尚未检查";
+      if (!latest || !latest.key) {
+        $("patrolWarningLatest").innerHTML = `<div class="item"><strong>暂无匹配预警</strong><small>${escapeHtml(stateText)}</small></div>`;
+        renderPatrolWarningImagePreview(false);
+        return;
+      }
+      $("patrolWarningLatest").innerHTML = `
+        <div class="item">
+          <strong>${escapeHtml(latest.route_code || "-")} ${escapeHtml(latest.warning_level_label || "预警")}</strong>
+          <small>${escapeHtml(latest.route_name || "")} · 匹配 ${stats && stats.matched_rows !== undefined ? stats.matched_rows : "-"} 条 · ${escapeHtml(stateText)}</small>
+          <div>开始：${escapeHtml(latest.start_time ? formatIsoMinute(latest.start_time) : "-")} · 结束：${escapeHtml(latest.end_time ? formatIsoMinute(latest.end_time) : "-")}</div>
+          <div>桩号：${escapeHtml(latest.start_stake || "-")} - ${escapeHtml(latest.end_stake || "-")}</div>
+          <div id="patrolWarningNextReminder"></div>
+        </div>
+      `;
+      updatePatrolWarningNextReminder();
+      if (stateInfo) {
+        renderPatrolWarningImagePreviewFromState();
+      } else {
+        renderPatrolWarningImagePreviewFromWarning(latest);
+      }
+    }
+
+    function renderPatrolWarningImagePreview(hasImage) {
+      const image = $("patrolWarningImagePreview");
+      if (!image) return;
+      if (!hasImage) {
+        image.classList.add("hidden");
+        image.removeAttribute("src");
+        updatePatrolWarningQueryCountdown();
+        return;
+      }
+      image.classList.remove("hidden");
+      updatePatrolWarningQueryCountdown();
+    }
+
+    function renderPatrolWarningImagePreviewFromState() {
+      const image = $("patrolWarningImagePreview");
+      if (!image) return;
+      image.src = `/api/patrol-warning-image?t=${Date.now()}`;
+      renderPatrolWarningImagePreview(true);
+    }
+
+    async function renderPatrolWarningImagePreviewFromWarning(warning) {
+      const image = $("patrolWarningImagePreview");
+      if (!image || !warning || !warning.key) {
+        renderPatrolWarningImagePreview(false);
+        return;
+      }
+      try {
+        const response = await fetch("/api/patrol-warning-image-preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            warning,
+            window_hours: Number($("patrolEndWindow").value || 48)
+          })
+        });
+        if (!response.ok) throw new Error("图片预览生成失败");
+        const blob = await response.blob();
+        if (image.dataset.objectUrl) URL.revokeObjectURL(image.dataset.objectUrl);
+        const objectUrl = URL.createObjectURL(blob);
+        image.dataset.objectUrl = objectUrl;
+        image.src = objectUrl;
+        renderPatrolWarningImagePreview(true);
+      } catch (error) {
+        renderPatrolWarningImagePreview(false);
+      }
+    }
+
+    function renderPatrolWarningRuntime(stateInfo) {
+      const target = $("patrolWarningRuntime");
+      if (!target) return;
+      if (!stateInfo) {
+        target.innerHTML = "<div class='item'><strong>后台保护状态</strong><small>测试查询不会更新后台缓存和退避状态</small></div>";
+        return;
+      }
+      const nextText = stateInfo.backoff_until
+        ? `失败退避到 ${formatIsoMinute(stateInfo.backoff_until)}`
+        : (stateInfo.next_check_at ? `下次检查 ${formatIsoMinute(stateInfo.next_check_at)}` : "等待首次检查");
+      const tokenText = stateInfo.token_configured
+        ? `已缓存登录${stateInfo.token_expires_at ? "，有效到 " + formatIsoMinute(stateInfo.token_expires_at) : ""}`
+        : "未缓存登录";
+      const failureText = `连续失败 ${Number(stateInfo.failure_count || 0)} 次`;
+      const errorText = stateInfo.last_error ? `最近错误：${stateInfo.last_error}` : "最近没有接口错误";
+      target.innerHTML = `
+        <div class="item">
+          <strong>后台保护状态</strong>
+          <small>${escapeHtml(nextText)}</small>
+          <div>${escapeHtml(tokenText)}</div>
+          <div>${escapeHtml(failureText)} · ${escapeHtml(errorText)}</div>
+        </div>
+      `;
+    }
+
+    function patrolWarningNextReminder(latest) {
+      if (!latest || !latest.end_time) return null;
+      const endAt = new Date(latest.end_time);
+      if (Number.isNaN(endAt.getTime())) return null;
+      const config = state.patrolWarningConfig || {};
+      const intervalHours = Math.max(1, Number(config.end_reminder_interval_hours || 6));
+      const windowHours = Math.max(1, Number(config.end_reminder_window_hours || 48));
+      const now = new Date();
+      const deadline = new Date(endAt.getTime() + windowHours * 3600 * 1000);
+      if (now > deadline) return { done: true, nextAt: null, countdownMs: 0, text: `结束后 ${windowHours} 小时巡查窗口已结束` };
+      let nextAt = endAt;
+      if (now > endAt) {
+        const elapsedMs = now.getTime() - endAt.getTime();
+        const intervalMs = intervalHours * 3600 * 1000;
+        const nextSlot = Math.floor(elapsedMs / intervalMs) + 1;
+        nextAt = new Date(endAt.getTime() + nextSlot * intervalMs);
+        if (nextAt > deadline) nextAt = deadline;
+      }
+      return {
+        done: false,
+        nextAt,
+        countdownMs: Math.max(0, nextAt.getTime() - now.getTime()),
+        text: now < endAt ? "预警未结束，结束后开始提醒" : "下一次结束后巡查提醒"
+      };
+    }
+
+    function formatCountdown(ms) {
+      const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+      if (hours > 0) return `${hours}小时${String(minutes).padStart(2, "0")}分${String(seconds).padStart(2, "0")}秒`;
+      return `${minutes}分${String(seconds).padStart(2, "0")}秒`;
+    }
+
+    function patrolWarningQueryStatus(stateInfo) {
+      if (!stateInfo) return null;
+      const timeText = stateInfo.backoff_until || stateInfo.next_check_at || "";
+      if (!timeText) return null;
+      const nextAt = new Date(timeText);
+      if (Number.isNaN(nextAt.getTime())) return null;
+      const now = new Date();
+      return {
+        nextAt,
+        countdownMs: Math.max(0, nextAt.getTime() - now.getTime()),
+        label: stateInfo.backoff_until ? "失败退避到" : "下次查询更新时间"
+      };
+    }
+
+    function updatePatrolWarningQueryCountdown() {
+      const target = $("patrolWarningImageMeta");
+      if (!target) return;
+      const query = patrolWarningQueryStatus(state.patrolWarningPanelState);
+      if (!query) {
+        target.textContent = "";
+        return;
+      }
+      target.textContent = `${query.label}：${formatIsoMinute(query.nextAt.toISOString())} · 倒计时：${formatCountdown(query.countdownMs)}`;
+    }
+
+    function updatePatrolWarningNextReminder() {
+      const target = $("patrolWarningNextReminder");
+      if (!target) return;
+      const reminder = patrolWarningNextReminder(state.patrolWarningLatest);
+      if (!reminder) {
+        target.textContent = "下次提醒：暂无结束时间，无法计算";
+        return;
+      }
+      if (reminder.done) {
+        target.textContent = reminder.text;
+        return;
+      }
+      target.textContent = `下次提醒时间：${formatIsoMinute(reminder.nextAt.toISOString())} · 倒计时：${formatCountdown(reminder.countdownMs)} · ${reminder.text}`;
+    }
+
+    async function refreshPatrolWarningPanel() {
+      if (state.patrolWarningPanelRefreshInFlight) return;
+      state.patrolWarningPanelRefreshInFlight = true;
+      try {
+        const response = await fetch("/api/patrol-warning-config");
+        if (!response.ok) return;
+        const body = await response.json();
+        state.patrolWarningConfig = body.config || state.patrolWarningConfig;
+        renderPatrolWarningLatest(body.state && body.state.warning, null, body.state);
+      } catch (error) {
+        // 后台状态刷新失败时保留当前面板，避免打断正在编辑的配置。
+      } finally {
+        state.patrolWarningPanelRefreshInFlight = false;
+      }
+    }
+
+    async function loadPatrolWarningConfig() {
+      const response = await fetch("/api/patrol-warning-config");
+      const body = await response.json();
+      const config = body.config || {};
+      state.patrolWarningConfig = config;
+      $("patrolWarningEnabled").checked = Boolean(config.enabled);
+      $("patrolLoginUrl").value = config.login_url || "";
+      $("patrolWarningUrl").value = config.warning_url || "";
+      $("patrolUsername").value = config.username || "";
+      $("patrolPassword").value = "";
+      $("patrolPassword").placeholder = config.password_configured ? "已配置，如需修改请输入新密码" : "未配置";
+      $("patrolProjectId").value = config.project_id || "";
+      $("patrolPlatform").value = config.platform || "2";
+      $("patrolRouteCode").value = config.route_code || "";
+      $("patrolPollInterval").value = config.poll_interval_minutes || 10;
+      $("patrolRows").value = config.rows || 5000;
+      $("patrolEndInterval").value = config.end_reminder_interval_hours || 6;
+      $("patrolEndWindow").value = config.end_reminder_window_hours || 48;
+      $("patrolMentionTarget").value = config.mention_all === false ? (config.mention_mobiles || "") : "@所有人";
+      $("patrolSendContentMode").value = config.send_content_mode || "both";
+      $("patrolStartTemplate").value = config.start_message_template || "";
+      $("patrolEndTemplate").value = config.end_message_template || "";
+      renderPatrolWarningLatest(body.state && body.state.warning, null, body.state);
+    }
+
+    async function savePatrolWarningConfig(showStatus = true) {
+      if (showStatus) {
+        $("patrolWarningStatus").textContent = "正在保存...";
+        $("patrolWarningStatus").className = "status";
+      }
+      const response = await fetch("/api/patrol-warning-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patrolWarningPayload())
+      });
+      const body = await response.json();
+      if (showStatus) {
+        $("patrolWarningStatus").textContent = response.ok && body.success ? "已保存公路巡查预警配置" : body.detail || "保存失败";
+        $("patrolWarningStatus").className = `status ${response.ok && body.success ? "ok" : "error"}`;
+      }
+      if (response.ok && body.success) {
+        state.patrolWarningConfig = body.config || state.patrolWarningConfig;
+        $("patrolPassword").value = "";
+        if (body.config && body.config.password_configured) $("patrolPassword").placeholder = "已配置，如需修改请输入新密码";
+        renderPatrolWarningLatest(body.state && body.state.warning, null, body.state);
+      }
+      return response.ok && body.success;
+    }
+
+    $("savePatrolWarningBtn").addEventListener("click", () => savePatrolWarningConfig(true));
+
+    $("sendPatrolWarningBtn").addEventListener("click", async () => {
+      const button = $("sendPatrolWarningBtn");
+      button.disabled = true;
+      $("patrolWarningStatus").textContent = "正在发送预警提醒...";
+      $("patrolWarningStatus").className = "status";
+      try {
+        await savePatrolWarningConfig(false);
+        const response = await fetch("/api/patrol-warning-config/send-test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "start" })
+        });
+        const body = await response.json();
+        if (!response.ok || !body.success) throw new Error(body.detail || "发送失败");
+        $("patrolWarningStatus").textContent = "预警提醒已发送";
+        $("patrolWarningStatus").className = "status ok";
+      } catch (error) {
+        $("patrolWarningStatus").textContent = `发送预警提醒失败：${error.message || error}`;
+        $("patrolWarningStatus").className = "status error";
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    $("testPatrolWarningBtn").addEventListener("click", async () => {
+      const button = $("testPatrolWarningBtn");
+      button.disabled = true;
+      $("patrolWarningStatus").textContent = "正在测试查询...";
+      $("patrolWarningStatus").className = "status";
+      try {
+        const response = await fetch("/api/patrol-warning-config/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patrolWarningPayload())
+        });
+        const body = await response.json();
+        if (!response.ok || !body.success) throw new Error(body.detail || "测试查询失败");
+        $("patrolWarningStatus").textContent = body.latest ? `测试成功，匹配 ${body.stats.matched_rows} 条，最新预警 ${body.latest.warning_level_label}` : "测试成功，但未匹配到该路线预警";
+        $("patrolWarningStatus").className = "status ok";
+        renderPatrolWarningLatest(body.latest, body.stats, null);
+      } catch (error) {
+        $("patrolWarningStatus").textContent = `测试查询失败：${error.message || error}`;
+        $("patrolWarningStatus").className = "status error";
+      } finally {
+        button.disabled = false;
+      }
+    });
+
     function sendRecordKindLabel(kind) {
       return ({
         daily_duty: "今日在岗",
@@ -2683,11 +3367,199 @@
         rest_resend: "休息提醒补发",
         custom: "自定义提醒",
         custom_resend: "自定义提醒补发",
+        patrol_warning_start: "公路巡查预警",
+        patrol_warning_start_resend: "公路巡查预警补发",
+        patrol_warning_end: "预警结束巡查提醒",
+        patrol_warning_end_resend: "预警结束巡查提醒补发",
+        patrol_warning_check: "公路巡查预警检查",
       })[kind] || kind;
     }
 
     function sendRecordStatusLabel(status) {
       return status === "success" ? "成功" : "失败";
+    }
+
+    function todayReminderGroupKey(kind) {
+      return ({
+        daily_duty: "daily_duty",
+        daily: "monitor",
+        before_shift: "monitor",
+        rest: "monitor",
+        custom: "custom",
+        patrol_warning_start: "patrol_warning",
+        patrol_warning_end: "patrol_warning",
+      })[kind] || kind || "other";
+    }
+
+    function todayReminderGroupLabel(groupKey) {
+      return ({
+        daily_duty: "今日在岗提醒",
+        monitor: "监控班提醒",
+        custom: "自定义提醒",
+        patrol_warning: "公路巡查预警",
+      })[groupKey] || sendRecordKindLabel(groupKey);
+    }
+
+    function todayReminderGroupOrder(groupKey) {
+      return ({
+        daily_duty: 10,
+        monitor: 20,
+        patrol_warning: 30,
+        custom: 40,
+      })[groupKey] || 90;
+    }
+
+    function todayReminderGroupColumn(groupKey) {
+      return ({
+        daily_duty: "left-column daily-duty-column",
+        monitor: "left-column monitor-column",
+        patrol_warning: "right-column patrol-warning-column",
+        custom: "right-column custom-column",
+      })[groupKey] || "right-column other-column";
+    }
+
+    function todayReminderCountdownText(sendAt) {
+      const at = new Date(sendAt);
+      if (Number.isNaN(at.getTime())) return "-";
+      const diff = at.getTime() - Date.now();
+      return diff > 0 ? `倒计时：${formatCountdown(diff)}` : "已提醒";
+    }
+
+    function updateTodayReminderCountdowns() {
+      document.querySelectorAll("[data-today-send-at]").forEach((node) => {
+        const text = todayReminderCountdownText(node.dataset.todaySendAt);
+        node.textContent = text;
+        const item = node.closest(".today-reminder-item");
+        const stateNode = item ? item.querySelector("[data-today-state-at]") : null;
+        if (text === "已提醒") {
+          item?.classList.add("due");
+          if (stateNode) {
+            stateNode.textContent = "已提醒";
+            stateNode.classList.add("sent");
+          }
+        }
+      });
+    }
+
+    function renderEventItem(event) {
+      return `
+        <div class="item">
+          <strong>${escapeHtml(formatIsoMinute(event.send_at))}</strong>
+          <small>${escapeHtml(sendRecordKindLabel(event.kind))} · ${escapeHtml(event.person_name)}</small>
+          <div>${escapeHtml(event.content || "").replace(/\n/g, "<br>")}</div>
+        </div>
+      `;
+    }
+
+    function renderTodayReminderItem(event, now) {
+      const at = new Date(event.send_at);
+      const due = !Number.isNaN(at.getTime()) && at <= now;
+      const stateText = due ? "已提醒" : "待提醒";
+      const stateClass = due ? "today-reminder-state sent" : "today-reminder-state";
+      const imageUrl = String(event.image_url || "");
+      const sideHtml = imageUrl
+        ? `
+          <div class="today-reminder-image-card">
+            <img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(event.image_alt || "提醒图片")}" loading="lazy" />
+          </div>
+          <div class="${stateClass}" data-today-state-at="${escapeHtml(event.send_at)}">${stateText}</div>
+        `
+        : `<div class="${stateClass}" data-today-state-at="${escapeHtml(event.send_at)}">${stateText}</div>`;
+      return `
+        <div class="today-reminder-item ${due ? "due" : ""} ${imageUrl ? "has-image" : ""}">
+          <div class="today-reminder-main">
+            <div class="today-reminder-meta">
+              <div>
+                <strong>${escapeHtml(event.person_name || "-")}</strong>
+                <small>${escapeHtml(sendRecordKindLabel(event.kind))}</small>
+              </div>
+              <div>
+                <strong>${escapeHtml(formatIsoMinute(event.send_at))}</strong>
+                <small data-today-send-at="${escapeHtml(event.send_at)}">${escapeHtml(todayReminderCountdownText(event.send_at))}</small>
+              </div>
+            </div>
+            <div class="today-reminder-content">${escapeHtml(event.content || "").replace(/\n/g, "<br>")}</div>
+          </div>
+          <div class="today-reminder-side">${sideHtml}</div>
+        </div>
+      `;
+    }
+
+    function renderTodayReminders(events, groupStatuses = []) {
+      state.todayReminderEvents = events || [];
+      state.todayReminderGroupStatuses = groupStatuses || [];
+      const now = new Date();
+      const pendingCount = state.todayReminderEvents.filter((event) => {
+        const sendAt = new Date(event.send_at);
+        return !Number.isNaN(sendAt.getTime()) && sendAt > now;
+      }).length;
+      $("todayReminderSummary").textContent = state.todayReminderEvents.length
+        ? `今日共 ${state.todayReminderEvents.length} 条提醒，待发送 ${pendingCount} 条`
+        : "今日没有计划发送的提醒";
+      $("todayReminderSummary").className = `status ${state.todayReminderEvents.length ? "ok" : ""}`;
+      if (!state.todayReminderEvents.length && !state.todayReminderGroupStatuses.length) {
+        $("todayRemindersList").innerHTML = "<div class='item'>今日没有计划发送的提醒</div>";
+        return;
+      }
+      const grouped = new Map();
+      state.todayReminderEvents.forEach((event) => {
+        const key = todayReminderGroupKey(event.kind);
+        if (!grouped.has(key)) grouped.set(key, []);
+        grouped.get(key).push(event);
+      });
+      state.todayReminderGroupStatuses.forEach((status) => {
+        if (!grouped.has(status.key)) grouped.set(status.key, []);
+      });
+      const statusByGroup = new Map(state.todayReminderGroupStatuses.map((status) => [status.key, status.message]));
+      const groups = [...grouped.entries()].sort(([left], [right]) => todayReminderGroupOrder(left) - todayReminderGroupOrder(right));
+      $("todayRemindersList").innerHTML = groups.map(([groupKey, groupEvents]) => `
+        <div class="today-reminder-group ${todayReminderGroupColumn(groupKey)}">
+          <h3>
+            <span>${escapeHtml(todayReminderGroupLabel(groupKey))}</span>
+            <small>${groupEvents.length} 条</small>
+          </h3>
+          <div class="today-reminder-list">
+            ${groupEvents.length ? (() => {
+              const collapsedEvents = groupKey === "patrol_warning"
+                ? groupEvents.filter((event) => {
+                    const at = new Date(event.send_at);
+                    return event.kind === "patrol_warning_end" && !Number.isNaN(at.getTime()) && at <= now;
+                  })
+                : [];
+              const collapsedKeys = new Set(collapsedEvents.map((event) => `${event.kind}|${event.send_at}|${event.person_name}`));
+              const visibleEvents = groupEvents.filter((event) => !collapsedKeys.has(`${event.kind}|${event.send_at}|${event.person_name}`));
+              const visibleHtml = visibleEvents.map((event) => renderTodayReminderItem(event, now)).join("");
+              const collapsedHtml = collapsedEvents.length ? `
+                <details class="today-reminder-collapsed">
+                  <summary>已过预警结束巡查提醒 ${collapsedEvents.length} 条，点击展开</summary>
+                  <div class="today-reminder-list">
+                    ${collapsedEvents.map((event) => renderTodayReminderItem(event, now)).join("")}
+                  </div>
+                </details>
+              ` : "";
+              return visibleHtml + collapsedHtml;
+            })() : `<div class="item">${escapeHtml(statusByGroup.get(groupKey) || "今日没有计划发送的提醒")}</div>`}
+          </div>
+        </div>
+      `).join("");
+      updateTodayReminderCountdowns();
+    }
+
+    async function loadTodayReminders() {
+      $("todayReminderSummary").textContent = "正在加载今日提醒...";
+      $("todayReminderSummary").className = "status";
+      try {
+        const response = await fetch("/api/reminders/today");
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.detail || "加载失败");
+        state.todayReminderDate = body.target_date || "";
+        state.todayReminderNow = body.now_beijing || "";
+        renderTodayReminders(body.events || [], body.group_statuses || []);
+      } catch (error) {
+        $("todayReminderSummary").textContent = `加载失败：${error.message || error}`;
+        $("todayReminderSummary").className = "status error";
+        $("todayRemindersList").innerHTML = "";
+      }
     }
 
     async function loadSendRecords() {
@@ -2754,6 +3626,10 @@
         $("systemStatusSummary").textContent = `北京时间 ${formatIsoMinute(body.now_beijing)}`;
         $("systemStatusText").textContent = body.today_failed_count ? `今日失败 ${body.today_failed_count} 条：${body.last_error || "请查看发送记录"}` : "系统状态正常";
         $("systemStatusText").className = `status ${body.today_failed_count ? "error" : "ok"}`;
+        const patrol = body.patrol_warning_monitor || {};
+        const patrolScheduleText = patrol.backoff_until
+          ? `退避到 ${formatIsoMinute(patrol.backoff_until)}`
+          : (patrol.next_check_at ? `下次检查 ${formatIsoMinute(patrol.next_check_at)}` : "尚未安排检查");
         const cards = [
           ["北京时间", formatIsoMinute(body.now_beijing), body.timezone || ""],
           ["定时任务", yesNo(body.scheduler_enabled), body.scheduler_enabled ? "会自动发送到期提醒" : "当前不会自动发送"],
@@ -2761,6 +3637,7 @@
           ["中文字体", body.cjk_font_ready ? "正常" : "缺失", body.cjk_font_ready ? "今日在岗图片中文可渲染" : "Docker 需安装中文字体"],
           ["排班表", `${body.roster_month_count || 0} 个月`, "已确认导入"],
           ["监控班提醒人员", `${body.monitored_people_count || 0} 人`, "已配置人员"],
+          ["公路巡查预警", patrol.enabled ? "已启用" : "未启用", `${patrol.route_code || "-"} · ${patrolScheduleText} · 连续失败 ${patrol.failure_count || 0} 次`],
           ["今日发送成功", `${body.today_success_count || 0} 条`, "以发送记录为准"],
           ["今日发送失败", `${body.today_failed_count || 0} 条`, body.last_error || "无"],
         ];
@@ -2772,13 +3649,17 @@
           </div>
         `).join("");
         const events = body.next_events || [];
-        $("nextEventsList").innerHTML = events.length ? events.map((event) => `
-          <div class="item">
-            <strong>${escapeHtml(formatIsoMinute(event.send_at))}</strong>
-            <small>${escapeHtml(sendRecordKindLabel(event.kind))} · ${escapeHtml(event.person_name)}</small>
-            <div>${escapeHtml(event.content || "").replace(/\n/g, "<br>")}</div>
-          </div>
-        `).join("") : "<div class='item'>未来 7 天没有待发送提醒</div>";
+        $("nextEventsList").innerHTML = events.length ? `
+          ${renderEventItem(events[0])}
+          ${events.length > 1 ? `
+            <details class="event-collapsed">
+              <summary>其余待发送提醒 ${events.length - 1} 条，点击展开</summary>
+              <div class="events">
+                ${events.slice(1).map(renderEventItem).join("")}
+              </div>
+            </details>
+          ` : ""}
+        ` : "<div class='item'>未来 7 天没有待发送提醒</div>";
       } catch (error) {
         $("systemStatusText").textContent = `加载失败：${error.message || error}`;
         $("systemStatusText").className = "status error";
@@ -2786,6 +3667,7 @@
     }
 
     $("refreshSystemStatusBtn").addEventListener("click", loadSystemStatus);
+    $("refreshTodayRemindersBtn").addEventListener("click", loadTodayReminders);
 
     $("previewBtn").addEventListener("click", async () => {
       await saveNotificationConfig(false);
@@ -2810,21 +3692,29 @@
 
     function tick() {
       $("clock").textContent = `北京时间 ${formatBeijingClock()}`;
+      updateTodayReminderCountdowns();
+      updatePatrolWarningNextReminder();
+      updatePatrolWarningQueryCountdown();
     }
     setInterval(tick, 1000);
+    setInterval(loadTodayReminders, 60000);
+    setInterval(refreshPatrolWarningPanel, 30000);
     tick();
     $("previewDate").value = beijingDateInputValue();
     $("dailyDutyPreviewDate").value = beijingDateInputValue();
     $("savedDutyDate").value = beijingDateInputValue();
     bindMobileAutofill("personName", "mentionMobile");
     bindMobileAutofill("customReminderName", "customReminderMobile");
+    setupImageViewer();
     setupNameTagEditor("personnelNames");
     setupNameTagEditor("bigDriverNames");
     setupNameTagEditor("smallDriverNames");
+    loadTodayReminders();
     renderGrid();
     loadSavedRosters();
     loadSavedDutyChart();
     loadNotificationConfig();
+    loadPatrolWarningConfig();
     loadPersonnel().then(loadCustomReminders);
     loadDailyDutyConfig();
     loadPeople();

@@ -11,7 +11,8 @@ ENV ENABLE_SCHEDULER=true
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl fonts-noto-cjk libgomp1 libgl1 libglib2.0-0 \
+    && apt-get install -y --no-install-recommends curl fontconfig fonts-noto-cjk libgomp1 libgl1 libglib2.0-0 \
+    && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md ./

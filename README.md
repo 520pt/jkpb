@@ -137,7 +137,7 @@ https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_WEBHOOK_KEY
 - `ADMIN_SESSION_SECRET`：可选，用于固定登录 cookie 签名密钥；不设置时使用 `ADMIN_PASSWORD`。
 - `MAX_UPLOAD_MB`：限制上传图片大小，默认 `10`。
 - `UPLOAD_KEEP_DAYS`：自动清理超过指定天数的旧上传图片，默认 `90`。
-- Docker 镜像已安装 `fonts-noto-cjk`，用于生成中文“今日在岗”图片。
+- Docker 镜像已安装 `fonts-noto-cjk` 并刷新字体缓存，用于生成中文图片；如果图片中文乱码，请重新 build 镜像，不要继续使用旧镜像。也可以通过 `CJK_FONT_PATH=/app/fonts/your-font.ttf` 指定挂载进容器的中文字体。
 - 页面“发送记录”可查看最近发送时间、类型、状态和失败原因。
 
 ## 提醒规则

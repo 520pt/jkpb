@@ -24,6 +24,42 @@ DEFAULT_DAILY_DUTY_TEMPLATE = (
 LEGACY_REST_MESSAGE_TEMPLATE = "{name} {date} 今天休息"
 LEGACY_TOMORROW_REST_MESSAGE_TEMPLATE = "{name} {date} 明天休息"
 DEFAULT_REST_MESSAGE_TEMPLATE = "{name} {rest_status}"
+DEFAULT_PATROL_WARNING_START_TEMPLATE = (
+    "{mention_prefix}请注意监测到 {app_name} 发布 {warning_level_label}\n"
+    "路线：{route_text}\n"
+    "预警开始时间：{start_time}\n"
+    "桩号：{stake_range}"
+)
+LEGACY_PATROL_WARNING_END_TEMPLATE = (
+    "{mention_prefix}请注意监测到 {app_name} 发布 {warning_level_label}\n"
+    "路线：{route_text}\n"
+    "预警开始时间：{start_time}\n"
+    "桩号：{stake_range}\n"
+    "预警结束时间：{end_time}\n"
+    "预警已结束：{elapsed_hours} 小时\n"
+    "距离预警结束后{window_hours}小时内巡查 倒计时结束还有 {remaining_hours} 小时"
+)
+DEFAULT_PATROL_WARNING_END_TEMPLATE = (
+    "{mention_prefix}最新{warning_level_label}已结束\n"
+    "路线：{route_text}\n"
+    "预警开始时间：{start_time}\n"
+    "桩号：{stake_range}\n"
+    "预警结束时间：{end_time}\n"
+    "预警已结束：{elapsed_hours} 小时\n"
+    "距离预警结束后{window_hours}小时内{patrol_frequency_clause}，倒计时结束还有 {remaining_hours} 小时。"
+)
+
+
+def _normalize_patrol_send_content_mode(value: str) -> str:
+    normalized = str(value or "both").strip().lower()
+    return normalized if normalized in {"both", "text", "image"} else "both"
+
+
+def _normalize_patrol_end_template(value: str) -> str:
+    text = str(value or "").strip()
+    if not text or text == LEGACY_PATROL_WARNING_END_TEMPLATE:
+        return DEFAULT_PATROL_WARNING_END_TEMPLATE
+    return text
 
 
 class DutyRepository:
@@ -122,6 +158,44 @@ class DutyRepository:
                     error TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+
+                CREATE TABLE IF NOT EXISTS patrol_warning_config (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    enabled INTEGER NOT NULL DEFAULT 0,
+                    login_url TEXT NOT NULL DEFAULT '',
+                    warning_url TEXT NOT NULL DEFAULT '',
+                    username TEXT NOT NULL DEFAULT '',
+                    password TEXT NOT NULL DEFAULT '',
+                    project_id TEXT NOT NULL DEFAULT '',
+                    platform TEXT NOT NULL DEFAULT '2',
+                    route_code TEXT NOT NULL DEFAULT '',
+                    poll_interval_minutes INTEGER NOT NULL DEFAULT 10,
+                    rows INTEGER NOT NULL DEFAULT 5000,
+                    end_reminder_interval_hours INTEGER NOT NULL DEFAULT 6,
+                    end_reminder_window_hours INTEGER NOT NULL DEFAULT 48,
+                    mention_all INTEGER NOT NULL DEFAULT 1,
+                    mention_mobiles TEXT NOT NULL DEFAULT '',
+                    send_content_mode TEXT NOT NULL DEFAULT 'both',
+                    start_message_template TEXT NOT NULL DEFAULT '',
+                    end_message_template TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS patrol_warning_state (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    warning_key TEXT NOT NULL DEFAULT '',
+                    warning_json TEXT NOT NULL DEFAULT '{}',
+                    last_checked_at TEXT NOT NULL DEFAULT '',
+                    last_start_sent_key TEXT NOT NULL DEFAULT '',
+                    last_end_reminder_slot TEXT NOT NULL DEFAULT '',
+                    token TEXT NOT NULL DEFAULT '',
+                    token_expires_at TEXT NOT NULL DEFAULT '',
+                    next_check_at TEXT NOT NULL DEFAULT '',
+                    failure_count INTEGER NOT NULL DEFAULT 0,
+                    backoff_until TEXT NOT NULL DEFAULT '',
+                    last_error TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
                 """
             )
             columns = {row["name"] for row in conn.execute("PRAGMA table_info(monitored_people)").fetchall()}
@@ -139,6 +213,28 @@ class DutyRepository:
             personnel_columns = {row["name"] for row in conn.execute("PRAGMA table_info(personnel_names)").fetchall()}
             if "mention_mobile" not in personnel_columns:
                 conn.execute("ALTER TABLE personnel_names ADD COLUMN mention_mobile TEXT NOT NULL DEFAULT ''")
+            patrol_state_columns = {row["name"] for row in conn.execute("PRAGMA table_info(patrol_warning_state)").fetchall()}
+            if "token" not in patrol_state_columns:
+                conn.execute("ALTER TABLE patrol_warning_state ADD COLUMN token TEXT NOT NULL DEFAULT ''")
+            if "token_expires_at" not in patrol_state_columns:
+                conn.execute("ALTER TABLE patrol_warning_state ADD COLUMN token_expires_at TEXT NOT NULL DEFAULT ''")
+            if "next_check_at" not in patrol_state_columns:
+                conn.execute("ALTER TABLE patrol_warning_state ADD COLUMN next_check_at TEXT NOT NULL DEFAULT ''")
+            if "failure_count" not in patrol_state_columns:
+                conn.execute("ALTER TABLE patrol_warning_state ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0")
+            if "backoff_until" not in patrol_state_columns:
+                conn.execute("ALTER TABLE patrol_warning_state ADD COLUMN backoff_until TEXT NOT NULL DEFAULT ''")
+            if "last_error" not in patrol_state_columns:
+                conn.execute("ALTER TABLE patrol_warning_state ADD COLUMN last_error TEXT NOT NULL DEFAULT ''")
+            patrol_config_columns = {row["name"] for row in conn.execute("PRAGMA table_info(patrol_warning_config)").fetchall()}
+            if "mention_mobiles" not in patrol_config_columns:
+                conn.execute("ALTER TABLE patrol_warning_config ADD COLUMN mention_mobiles TEXT NOT NULL DEFAULT ''")
+            if "send_content_mode" not in patrol_config_columns:
+                conn.execute("ALTER TABLE patrol_warning_config ADD COLUMN send_content_mode TEXT NOT NULL DEFAULT 'both'")
+            if "start_message_template" not in patrol_config_columns:
+                conn.execute("ALTER TABLE patrol_warning_config ADD COLUMN start_message_template TEXT NOT NULL DEFAULT ''")
+            if "end_message_template" not in patrol_config_columns:
+                conn.execute("ALTER TABLE patrol_warning_config ADD COLUMN end_message_template TEXT NOT NULL DEFAULT ''")
 
     def table_names(self) -> set[str]:
         with self._connect() as conn:
@@ -562,6 +658,225 @@ class DutyRepository:
             "small_driver_names": json.loads(row["small_driver_names_json"] or "[]"),
             "message_template": _normalize_daily_duty_template(row["message_template"]),
         }
+
+    def save_patrol_warning_config(
+        self,
+        *,
+        enabled: bool = False,
+        login_url: str = "",
+        warning_url: str = "",
+        username: str = "",
+        password: str = "",
+        project_id: str = "",
+        platform: str = "2",
+        route_code: str = "",
+        poll_interval_minutes: int = 10,
+        rows: int = 5000,
+        end_reminder_interval_hours: int = 6,
+        end_reminder_window_hours: int = 48,
+        mention_all: bool = True,
+        mention_mobiles: str = "",
+        send_content_mode: str = "both",
+        start_message_template: str = DEFAULT_PATROL_WARNING_START_TEMPLATE,
+        end_message_template: str = DEFAULT_PATROL_WARNING_END_TEMPLATE,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO patrol_warning_config
+                    (
+                        id, enabled, login_url, warning_url, username, password, project_id, platform,
+                        route_code, poll_interval_minutes, rows, end_reminder_interval_hours,
+                        end_reminder_window_hours, mention_all, mention_mobiles,
+                        send_content_mode, start_message_template, end_message_template
+                    )
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    enabled = excluded.enabled,
+                    login_url = excluded.login_url,
+                    warning_url = excluded.warning_url,
+                    username = excluded.username,
+                    password = excluded.password,
+                    project_id = excluded.project_id,
+                    platform = excluded.platform,
+                    route_code = excluded.route_code,
+                    poll_interval_minutes = excluded.poll_interval_minutes,
+                    rows = excluded.rows,
+                    end_reminder_interval_hours = excluded.end_reminder_interval_hours,
+                    end_reminder_window_hours = excluded.end_reminder_window_hours,
+                    mention_all = excluded.mention_all,
+                    mention_mobiles = excluded.mention_mobiles,
+                    send_content_mode = excluded.send_content_mode,
+                    start_message_template = excluded.start_message_template,
+                    end_message_template = excluded.end_message_template,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    int(enabled),
+                    login_url.strip(),
+                    warning_url.strip(),
+                    username.strip(),
+                    password,
+                    project_id.strip(),
+                    str(platform or "2").strip() or "2",
+                    route_code.strip(),
+                    max(1, min(int(poll_interval_minutes), 1440)),
+                    max(1, min(int(rows), 10000)),
+                    max(1, min(int(end_reminder_interval_hours), 168)),
+                    max(1, min(int(end_reminder_window_hours), 720)),
+                    int(mention_all),
+                    mention_mobiles.strip(),
+                    _normalize_patrol_send_content_mode(send_content_mode),
+                    start_message_template.strip() or DEFAULT_PATROL_WARNING_START_TEMPLATE,
+                    _normalize_patrol_end_template(end_message_template),
+                ),
+            )
+
+    def get_patrol_warning_config(self) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM patrol_warning_config WHERE id = 1").fetchone()
+        if row is None:
+            return {
+                "enabled": False,
+                "login_url": "",
+                "warning_url": "",
+                "username": "",
+                "password": "",
+                "project_id": "",
+                "platform": "2",
+                "route_code": "",
+                "poll_interval_minutes": 10,
+                "rows": 5000,
+                "end_reminder_interval_hours": 6,
+                "end_reminder_window_hours": 48,
+                "mention_all": True,
+                "mention_mobiles": "",
+                "send_content_mode": "both",
+                "start_message_template": DEFAULT_PATROL_WARNING_START_TEMPLATE,
+                "end_message_template": DEFAULT_PATROL_WARNING_END_TEMPLATE,
+            }
+        return {
+            "enabled": bool(row["enabled"]),
+            "login_url": row["login_url"],
+            "warning_url": row["warning_url"],
+            "username": row["username"],
+            "password": row["password"],
+            "project_id": row["project_id"],
+            "platform": row["platform"],
+            "route_code": row["route_code"],
+            "poll_interval_minutes": int(row["poll_interval_minutes"]),
+            "rows": int(row["rows"]),
+            "end_reminder_interval_hours": int(row["end_reminder_interval_hours"]),
+            "end_reminder_window_hours": int(row["end_reminder_window_hours"]),
+            "mention_all": bool(row["mention_all"]),
+            "mention_mobiles": row["mention_mobiles"],
+            "send_content_mode": _normalize_patrol_send_content_mode(row["send_content_mode"]),
+            "start_message_template": row["start_message_template"] or DEFAULT_PATROL_WARNING_START_TEMPLATE,
+            "end_message_template": _normalize_patrol_end_template(row["end_message_template"]),
+        }
+
+    def get_patrol_warning_state(self) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM patrol_warning_state WHERE id = 1").fetchone()
+        if row is None:
+            return {
+                "warning_key": "",
+                "warning": {},
+                "last_checked_at": "",
+                "last_start_sent_key": "",
+                "last_end_reminder_slot": "",
+                "token": "",
+                "token_expires_at": "",
+                "next_check_at": "",
+                "failure_count": 0,
+                "backoff_until": "",
+                "last_error": "",
+            }
+        try:
+            warning = json.loads(row["warning_json"] or "{}")
+        except json.JSONDecodeError:
+            warning = {}
+        return {
+            "warning_key": row["warning_key"],
+            "warning": warning,
+            "last_checked_at": row["last_checked_at"],
+            "last_start_sent_key": row["last_start_sent_key"],
+            "last_end_reminder_slot": row["last_end_reminder_slot"],
+            "token": row["token"],
+            "token_expires_at": row["token_expires_at"],
+            "next_check_at": row["next_check_at"],
+            "failure_count": int(row["failure_count"]),
+            "backoff_until": row["backoff_until"],
+            "last_error": row["last_error"],
+        }
+
+    def save_patrol_warning_state(
+        self,
+        *,
+        warning_key: str | None = None,
+        warning: dict[str, Any] | None = None,
+        last_checked_at: str | None = None,
+        last_start_sent_key: str | None = None,
+        last_end_reminder_slot: str | None = None,
+        token: str | None = None,
+        token_expires_at: str | None = None,
+        next_check_at: str | None = None,
+        failure_count: int | None = None,
+        backoff_until: str | None = None,
+        last_error: str | None = None,
+    ) -> None:
+        current = self.get_patrol_warning_state()
+        next_warning_key = current["warning_key"] if warning_key is None else warning_key
+        next_warning = current["warning"] if warning is None else warning
+        next_last_checked_at = current["last_checked_at"] if last_checked_at is None else last_checked_at
+        next_last_start_sent_key = current["last_start_sent_key"] if last_start_sent_key is None else last_start_sent_key
+        next_last_end_reminder_slot = (
+            current["last_end_reminder_slot"] if last_end_reminder_slot is None else last_end_reminder_slot
+        )
+        next_token = current["token"] if token is None else token
+        next_token_expires_at = current["token_expires_at"] if token_expires_at is None else token_expires_at
+        next_next_check_at = current["next_check_at"] if next_check_at is None else next_check_at
+        next_failure_count = current["failure_count"] if failure_count is None else int(failure_count)
+        next_backoff_until = current["backoff_until"] if backoff_until is None else backoff_until
+        next_last_error = current["last_error"] if last_error is None else last_error
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO patrol_warning_state
+                    (
+                        id, warning_key, warning_json, last_checked_at, last_start_sent_key,
+                        last_end_reminder_slot, token, token_expires_at, next_check_at,
+                        failure_count, backoff_until, last_error
+                    )
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    warning_key = excluded.warning_key,
+                    warning_json = excluded.warning_json,
+                    last_checked_at = excluded.last_checked_at,
+                    last_start_sent_key = excluded.last_start_sent_key,
+                    last_end_reminder_slot = excluded.last_end_reminder_slot,
+                    token = excluded.token,
+                    token_expires_at = excluded.token_expires_at,
+                    next_check_at = excluded.next_check_at,
+                    failure_count = excluded.failure_count,
+                    backoff_until = excluded.backoff_until,
+                    last_error = excluded.last_error,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    next_warning_key,
+                    json.dumps(next_warning, ensure_ascii=False),
+                    next_last_checked_at,
+                    next_last_start_sent_key,
+                    next_last_end_reminder_slot,
+                    next_token,
+                    next_token_expires_at,
+                    next_next_check_at,
+                    max(0, next_failure_count),
+                    next_backoff_until,
+                    next_last_error,
+                ),
+            )
 
     def mark_sent_once(self, reminder_key: str) -> bool:
         try:

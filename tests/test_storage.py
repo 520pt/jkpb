@@ -15,6 +15,8 @@ def test_initializes_sqlite_schema(tmp_path: Path):
         "personnel_names",
         "custom_reminders",
         "daily_duty_config",
+        "patrol_warning_config",
+        "patrol_warning_state",
         "sent_reminders",
         "send_records",
     } <= tables
@@ -182,6 +184,58 @@ def test_daily_duty_config_upgrades_legacy_default_template(tmp_path: Path):
     repo.save_daily_duty_config(message_template=legacy_template)
 
     assert repo.get_daily_duty_config()["message_template"] == DEFAULT_DAILY_DUTY_TEMPLATE
+
+
+def test_patrol_warning_config_and_state_roundtrip(tmp_path: Path):
+    repo = DutyRepository(tmp_path / "duty.db")
+
+    repo.save_patrol_warning_config(
+        enabled=True,
+        login_url="https://example.test/login",
+        warning_url="https://example.test/warninginfo/findPage",
+        username="station-user",
+        password="secret",
+        project_id="project-1",
+        platform="2",
+        route_code="S41",
+        poll_interval_minutes=5,
+        rows=3000,
+        end_reminder_interval_hours=6,
+        end_reminder_window_hours=48,
+        mention_all=True,
+        mention_mobiles="13800138000,13900139000",
+        send_content_mode="image",
+        start_message_template="start {warning_level_label}",
+        end_message_template="end {remaining_hours}",
+    )
+    repo.save_patrol_warning_state(
+        warning_key="warning-1",
+        warning={"key": "warning-1", "route_code": "S41"},
+        last_checked_at="2026-07-22T14:00:00+08:00",
+        last_start_sent_key="warning-1",
+        last_end_reminder_slot="2026-07-22T20:00:00+08:00",
+        token="cached-token",
+        token_expires_at="2026-07-22T22:00:00+08:00",
+        next_check_at="2026-07-22T14:11:00+08:00",
+        failure_count=2,
+        backoff_until="2026-07-22T14:30:00+08:00",
+        last_error="HTTP 429",
+    )
+
+    assert repo.get_patrol_warning_config()["route_code"] == "S41"
+    assert repo.get_patrol_warning_config()["password"] == "secret"
+    assert repo.get_patrol_warning_config()["mention_mobiles"] == "13800138000,13900139000"
+    assert repo.get_patrol_warning_config()["send_content_mode"] == "image"
+    assert repo.get_patrol_warning_config()["start_message_template"] == "start {warning_level_label}"
+    assert repo.get_patrol_warning_config()["end_message_template"] == "end {remaining_hours}"
+    assert repo.get_patrol_warning_state()["warning"] == {"key": "warning-1", "route_code": "S41"}
+    assert repo.get_patrol_warning_state()["last_start_sent_key"] == "warning-1"
+    assert repo.get_patrol_warning_state()["token"] == "cached-token"
+    assert repo.get_patrol_warning_state()["token_expires_at"] == "2026-07-22T22:00:00+08:00"
+    assert repo.get_patrol_warning_state()["next_check_at"] == "2026-07-22T14:11:00+08:00"
+    assert repo.get_patrol_warning_state()["failure_count"] == 2
+    assert repo.get_patrol_warning_state()["backoff_until"] == "2026-07-22T14:30:00+08:00"
+    assert repo.get_patrol_warning_state()["last_error"] == "HTTP 429"
 
 
 def test_saving_notification_config_replaces_existing_value(tmp_path: Path):

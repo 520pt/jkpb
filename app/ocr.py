@@ -218,9 +218,19 @@ def extract_template_roster_image(image_path: str | Path) -> dict[str, Any] | No
     }
 
 
-def recheck_template_roster_cells(image_path: str | Path, current_grid: list[dict[str, Any]]) -> dict[str, Any] | None:
+def recheck_template_roster_cells(
+    image_path: str | Path,
+    current_grid: list[dict[str, Any]],
+    *,
+    year: int | None = None,
+    month: int | None = None,
+) -> dict[str, Any] | None:
     fresh = extract_template_roster_image(image_path)
     if fresh and fresh.get("grid"):
+        if year and month:
+            fresh["year"] = year
+            fresh["month"] = month
+            _trim_template_grid_to_month(list(fresh.get("grid", [])), year, month)
         return _diff_template_recheck_grid(current_grid, list(fresh.get("grid", [])))
 
     try:
@@ -284,6 +294,11 @@ def recheck_template_roster_cells(image_path: str | Path, current_grid: list[dic
             )
         current_days[day] = parsed_value
 
+    if year and month:
+        _trim_template_grid_to_month(corrected_grid, year, month)
+        max_day = _month_day_count(year, month)
+        issues = [issue for issue in issues if _is_valid_month_day(str(issue.get("day") or ""), max_day)]
+
     return {"grid": corrected_grid, "issues": issues}
 
 
@@ -332,6 +347,7 @@ def _merge_template_ocr_texts(template_result: dict[str, Any], texts: list[OcrTe
     grid = list(template_result.get("grid", []))
     if not grid:
         return
+    _trim_template_grid_to_month(grid, year, month)
     first_day_box = next((row.get("boxes", {}).get("1") for row in grid if row.get("boxes", {}).get("1")), None)
     min_day_x = float(first_day_box["x"]) if first_day_box else 160.0
     row_centers: list[float] = []
@@ -344,6 +360,29 @@ def _merge_template_ocr_texts(template_result: dict[str, Any], texts: list[OcrTe
         row_index = _nearest_index(item.y, row_centers)
         if row_index is not None and row_index < len(grid):
             grid[row_index]["name"] = item.text.strip()
+
+
+def _trim_template_grid_to_month(grid: list[dict[str, Any]], year: int, month: int) -> None:
+    max_day = _month_day_count(year, month)
+    for row in grid:
+        days = dict(row.get("days", {}))
+        boxes = dict(row.get("boxes", {}))
+        row["days"] = {str(day): value for day, value in days.items() if _is_valid_month_day(str(day), max_day)}
+        row["boxes"] = {str(day): value for day, value in boxes.items() if _is_valid_month_day(str(day), max_day)}
+
+
+def _month_day_count(year: int, month: int) -> int:
+    try:
+        return calendar.monthrange(int(year), int(month))[1]
+    except (TypeError, ValueError):
+        return 31
+
+
+def _is_valid_month_day(day: str, max_day: int) -> bool:
+    if not day.isdigit():
+        return False
+    value = int(day)
+    return 1 <= value <= max_day
 
 
 def _detect_template_names(texts: list[OcrText], min_day_x: float) -> list[OcrText]:

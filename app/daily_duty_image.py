@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -141,7 +143,11 @@ def _text_width(value: str, font: ImageFont.FreeTypeFont | ImageFont.ImageFont) 
 def _font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     for path in _candidate_font_paths(bold=bold):
         if path.exists():
-            return ImageFont.truetype(str(path), size)
+            for index in _font_face_indices(path):
+                try:
+                    return ImageFont.truetype(str(path), size, index=index)
+                except OSError:
+                    continue
     return ImageFont.load_default()
 
 
@@ -149,25 +155,63 @@ def has_cjk_font() -> bool:
     return any(path.exists() for path in _candidate_font_paths(bold=False))
 
 
+def _font_face_indices(path: Path) -> tuple[int, ...]:
+    if path.suffix.lower() != ".ttc":
+        return (0,)
+    if path.name.startswith("NotoSansCJK"):
+        return (2, 7, 0, 1, 3, 4, 5, 6, 8, 9)
+    return (0,)
+
+
+@lru_cache(maxsize=4)
 def _candidate_font_paths(*, bold: bool) -> list[Path]:
-    names = [
-        "msyhbd.ttc" if bold else "msyh.ttc",
-        "simhei.ttf",
-        "NotoSansCJK-Regular.ttc",
-        "NotoSansCJK-Bold.ttc" if bold else "NotoSansCJK-Regular.ttc",
-        "NotoSansCJK-Regular.otf",
-        "wqy-microhei.ttc",
-    ]
+    if bold:
+        names = [
+            "NotoSansCJKsc-Bold.otf",
+            "NotoSansSC-Bold.otf",
+            "NotoSansCJK-Bold.ttc",
+            "NotoSansCJK-Bold.otf",
+            "simhei.ttf",
+            "SimHei.ttf",
+            "msyhsb.ttc",
+            "msyh.ttc",
+            "wqy-microhei.ttc",
+            "WenQuanYi Micro Hei.ttf",
+            "msyhbd.ttc",
+        ]
+    else:
+        names = [
+            "NotoSansCJKsc-Regular.otf",
+            "NotoSansSC-Regular.otf",
+            "NotoSansCJK-Regular.ttc",
+            "NotoSansCJK-Regular.otf",
+            "msyh.ttc",
+            "simhei.ttf",
+            "SimHei.ttf",
+            "wqy-microhei.ttc",
+            "WenQuanYi Micro Hei.ttf",
+        ]
     font_dirs = [
+        Path("fonts"),
+        Path("app/static/fonts"),
+        Path("/app/fonts"),
+        Path("/app/app/static/fonts"),
         Path("C:/Windows/Fonts"),
         Path("/usr/share/fonts/opentype/noto"),
         Path("/usr/share/fonts/truetype/noto"),
         Path("/usr/share/fonts/truetype/wqy"),
+        Path("/usr/share/fonts/truetype/arphic"),
     ]
     paths: list[Path] = []
+    env_font = os.getenv("CJK_FONT_PATH", "").strip()
+    if env_font:
+        paths.append(Path(env_font))
     for font_dir in font_dirs:
         for name in names:
             paths.append(font_dir / name)
+        if font_dir.exists():
+            for pattern in ("*CJK*.ttc", "*CJK*.otf", "*SansSC*.otf", "*Noto*SC*.otf", "*wqy*.ttc"):
+                paths.extend(font_dir.rglob(pattern))
     return paths
 
 

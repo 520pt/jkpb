@@ -1,11 +1,13 @@
 import asyncio
 from datetime import date, datetime
+from types import SimpleNamespace
 from urllib.parse import quote
 
 from fastapi.testclient import TestClient
 
 import app.main as main_module
 from app.main import create_app
+from app.patrol_warning import warning_from_dict
 from app.storage import DutyRepository
 from tests.test_template_parser import _write_synthetic_roster
 
@@ -18,6 +20,9 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
 
     assert response.status_code == 200
     html = response.text
+    assert 'data-tab="today">今日提醒' in html
+    assert '<section id="todayPage" class="tab-page">' in html
+    assert '<section id="reviewPage" class="tab-page hidden">' in html
     assert 'id="personName" list="personnelNameOptions" placeholder="选择或输入姓名"' in html
     assert 'id="customReminderName" list="personnelNameOptions" placeholder="选择或输入姓名"' in html
     assert 'id="driverNameInput" list="personnelNameOptions" placeholder="选择或输入姓名"' in html
@@ -25,6 +30,160 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'data-delete-person="${escapeHtml(person.name)}"' in html
     assert 'id="testMobile" placeholder="10000000000"' in html
     assert 'id="mentionMobile" placeholder="10000000000"' in html
+    assert 'id="patrolWarningSettings"' in html
+    assert 'id="patrolLoginUrl"' in html
+    assert 'id="patrolRouteCode" placeholder="S41"' in html
+    assert 'id="patrolWarningImageMeta"' in html
+    assert 'id="patrolSendContentMode"' in html
+    assert '<option value="image">仅图片</option>' in html
+    assert "refreshPatrolWarningPanel" in html
+    assert "loadTodayReminders" in html
+    assert "todayReminderGroupKey" in html
+    assert "todayReminderGroupColumn" in html
+    assert "left-column" in html
+    assert "right-column" in html
+    assert "daily-duty-column" in html
+    assert "patrol-warning-column" in html
+    assert "has-image" in html
+    assert 'id="imageViewer"' in html
+    assert "openImageViewer" in html
+    assert "setupImageViewer" in html
+    assert "image-viewer-image" in html
+    assert "today-reminder-side" in html
+    assert "today-reminder-image-card" in html
+    assert "data-today-state-at" in html
+    assert "已提醒" in html
+    assert "已过预警结束巡查提醒" in html
+    assert "其余待发送提醒" in html
+    assert "event-collapsed" in html
+
+
+def test_today_reminders_endpoint_returns_today_plan(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    response = client.get("/api/reminders/today")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["target_date"]
+    assert body["now_beijing"]
+    assert body["events"]
+    assert body["events"][0]["kind"] == "daily_duty"
+    assert body["events"][0]["sent_state"] in {"pending", "sent_or_due"}
+    assert body["events"][0]["image_url"].startswith("/api/daily-duty-image")
+    assert "group_statuses" in body
+
+
+def test_today_reminders_include_patrol_warning_events(tmp_path, monkeypatch):
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 7, 22, 8, 0, tzinfo=tz)
+
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_patrol_warning_config(
+        enabled=True,
+        login_url="https://example.test/login",
+        warning_url="https://example.test/warninginfo/findPage",
+        username="station-user",
+        password="secret",
+        route_code="S41",
+        end_reminder_interval_hours=6,
+        end_reminder_window_hours=48,
+    )
+    repo.save_patrol_warning_state(
+        warning={
+            "key": "warning-1",
+            "route_code": "S41",
+            "route_name": "Route A",
+            "warning_level": "3",
+            "warning_level_label": "Yellow",
+            "warn_type_name": "Rain",
+            "start_time": "2026-07-22T01:00:00+08:00",
+            "end_time": "2026-07-22T02:00:00+08:00",
+            "create_time": "2026-07-22T01:10:00+08:00",
+            "start_stake": "K107.000",
+            "end_stake": "K137.730",
+        }
+    )
+    client = TestClient(app)
+
+    response = client.get("/api/reminders/today")
+
+    assert response.status_code == 200
+    kinds = [event["kind"] for event in response.json()["events"]]
+    assert "patrol_warning_start" in kinds
+    assert "patrol_warning_end" in kinds
+    patrol_events = [event for event in response.json()["events"] if event["kind"].startswith("patrol_warning_")]
+    assert patrol_events
+    assert all(event["image_url"].startswith("/api/patrol-warning-image") for event in patrol_events)
+    assert any("mode=end" in event["image_url"] for event in patrol_events if event["kind"] == "patrol_warning_end")
+
+
+def test_confirm_roster_prunes_nonexistent_days_for_common_february(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/rosters/confirm",
+        json={
+            "year": 2026,
+            "month": 2,
+            "source_image_path": "uploads/feb.png",
+            "grid": [{"name": "张三", "days": {"28": "中", "29": "晚", "30": "早", "31": "休"}}],
+        },
+    )
+
+    assert response.status_code == 200
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    roster = repo.get_roster_month(2026, 2)
+    assert roster is not None
+    assert roster["grid"][0]["days"] == {"28": "中"}
+
+
+def test_confirm_roster_keeps_february_29_for_leap_year(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/rosters/confirm",
+        json={
+            "year": 2024,
+            "month": 2,
+            "source_image_path": "uploads/feb-leap.png",
+            "grid": [{"name": "张三", "days": {"28": "中", "29": "晚", "30": "早"}}],
+        },
+    )
+
+    assert response.status_code == 200
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    roster = repo.get_roster_month(2024, 2)
+    assert roster is not None
+    assert roster["grid"][0]["days"] == {"28": "中", "29": "晚"}
+
+
+def test_confirm_roster_keeps_day_30_and_prunes_day_31_for_short_month(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/rosters/confirm",
+        json={
+            "year": 2026,
+            "month": 4,
+            "source_image_path": "uploads/apr.png",
+            "grid": [{"name": "张三", "days": {"29": "中", "30": "晚", "31": "早"}}],
+        },
+    )
+
+    assert response.status_code == 200
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    roster = repo.get_roster_month(2026, 4)
+    assert roster is not None
+    assert roster["grid"][0]["days"] == {"29": "中", "30": "晚"}
 
 
 def test_review_busy_overlay_is_hidden_until_import_starts(tmp_path):
@@ -316,6 +475,385 @@ def test_saving_notification_config_with_blank_webhook_preserves_existing_value(
     config = repo.get_notification_config()
     assert config["webhook_url"].endswith("unit-test")
     assert config["message_template"] == "new {name}"
+
+
+def test_patrol_warning_config_preserves_password_and_hides_it(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    create_response = client.post(
+        "/api/patrol-warning-config",
+        json={
+            "enabled": True,
+            "login_url": "https://example.test/login",
+            "warning_url": "https://example.test/warninginfo/findPage",
+            "username": "station-user",
+            "password": "secret",
+            "project_id": "project-1",
+            "platform": "2",
+            "route_code": "S41",
+        },
+    )
+    update_response = client.post(
+        "/api/patrol-warning-config",
+        json={
+            "enabled": True,
+            "login_url": "https://example.test/login2",
+            "warning_url": "https://example.test/warninginfo/findPage",
+            "username": "station-user",
+            "password": "",
+            "project_id": "project-1",
+            "platform": "2",
+            "route_code": "S41",
+        },
+    )
+    get_response = client.get("/api/patrol-warning-config")
+
+    assert create_response.status_code == 200
+    assert update_response.status_code == 200
+    public_config = get_response.json()["config"]
+    assert public_config["password"] == ""
+    assert public_config["password_configured"] is True
+    assert public_config["login_url"] == "https://example.test/login2"
+    assert public_config["send_content_mode"] == "both"
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    assert repo.get_patrol_warning_config()["password"] == "secret"
+
+
+def test_patrol_warning_state_hides_cached_token(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_patrol_warning_state(
+        token="cached-token",
+        token_expires_at="2026-07-22T22:00:00+08:00",
+        next_check_at="2026-07-22T14:11:00+08:00",
+        failure_count=1,
+        backoff_until="2026-07-22T14:05:00+08:00",
+        last_error="HTTP 429",
+    )
+
+    response = client.get("/api/patrol-warning-config")
+
+    assert response.status_code == 200
+    state = response.json()["state"]
+    assert "token" not in state
+    assert state["token_configured"] is True
+    assert state["token_expires_at"] == "2026-07-22T22:00:00+08:00"
+    assert state["next_check_at"] == "2026-07-22T14:11:00+08:00"
+    assert state["failure_count"] == 1
+    assert state["last_error"] == "HTTP 429"
+
+
+def test_patrol_warning_image_preview_endpoint_returns_png(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/patrol-warning-image-preview",
+        json={
+            "window_hours": 48,
+            "warning": {
+                "key": "warning-1",
+                "route_code": "S41",
+                "route_name": "南涧－宁洱",
+                "warning_level": "2",
+                "warning_level_label": "橙色预警",
+                "start_time": "2026-07-22T08:00:00+08:00",
+                "end_time": "2026-07-22T10:00:00+08:00",
+                "start_stake": "K107.000",
+                "end_stake": "K137.730",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content.startswith(b"\x89PNG")
+
+
+def test_patrol_warning_config_test_uses_saved_password(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeWarning:
+        def as_dict(self):
+            return {"key": "warning-1", "route_code": "S41", "warning_level_label": "橙色预警"}
+
+    async def fake_fetch_latest_warning(config, tz):
+        captured["config"] = config
+        return FakeWarning(), {"total_rows": 2, "matched_rows": 1}
+
+    monkeypatch.setattr(main_module, "fetch_latest_warning", fake_fetch_latest_warning)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/patrol-warning-config",
+        json={
+            "login_url": "https://example.test/login",
+            "warning_url": "https://example.test/warninginfo/findPage",
+            "username": "station-user",
+            "password": "secret",
+            "route_code": "S41",
+        },
+    )
+
+    response = client.post(
+        "/api/patrol-warning-config/test",
+        json={
+            "login_url": "https://example.test/login",
+            "warning_url": "https://example.test/warninginfo/findPage",
+            "username": "station-user",
+            "password": "",
+            "route_code": "S41",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["latest"]["warning_level_label"] == "橙色预警"
+    assert captured["config"]["password"] == "secret"
+    state = client.get("/api/patrol-warning-config").json()["state"]
+    assert state["warning"]["key"] == "warning-1"
+    assert state["warning_key"] == ""
+
+
+def test_patrol_warning_monitor_backs_off_after_fetch_failure(tmp_path, monkeypatch):
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 7, 22, 8, 0, tzinfo=tz)
+
+    async def fake_fetch_latest_warning_result(*args, **kwargs):
+        raise main_module.PatrolWarningError("HTTP 429", status_code=429)
+
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(webhook_url="https://example.test/cgi-bin/webhook/send?key=unit-test")
+    repo.save_patrol_warning_config(
+        enabled=True,
+        login_url="https://example.test/login",
+        warning_url="https://example.test/warninginfo/findPage",
+        username="station-user",
+        password="secret",
+        route_code="S41",
+    )
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(main_module, "fetch_latest_warning_result", fake_fetch_latest_warning_result)
+    monkeypatch.setattr(main_module, "_wecom_webhook_client_from_repo", lambda repo: object())
+
+    asyncio.run(main_module._check_patrol_warning_monitor(repo))
+
+    state = repo.get_patrol_warning_state()
+    assert state["last_checked_at"] == "2026-07-22T08:00:00+08:00"
+    assert state["next_check_at"] == "2026-07-22T08:05:00+08:00"
+    assert state["backoff_until"] == "2026-07-22T08:05:00+08:00"
+    assert state["failure_count"] == 1
+    assert state["last_error"] == "HTTP 429"
+    records = repo.list_send_records()
+    assert records[0]["kind"] == "patrol_warning_check"
+    assert records[0]["status"] == "failed"
+
+
+def test_patrol_warning_monitor_refreshes_same_warning_without_resending(tmp_path, monkeypatch):
+    sent: list[object] = []
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 7, 22, 8, 0, tzinfo=tz)
+
+    class FakeWebhookClient:
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            sent.append(("text", content, mentioned_mobile_list))
+
+        async def send_image(self, image_bytes: bytes):
+            sent.append(("image", image_bytes))
+
+    warning = warning_from_dict(
+        {
+            "key": "warning-1",
+            "route_code": "S41",
+            "route_name": "Route A",
+            "warning_level": "2",
+            "warning_level_label": "Orange",
+            "start_time": "2026-07-22T07:00:00+08:00",
+            "end_time": "2026-07-22T10:00:00+08:00",
+            "start_stake": "K107.000",
+            "end_stake": "K137.730",
+        },
+        main_module.TZ,
+    )
+
+    async def fake_fetch_latest_warning_result(*args, **kwargs):
+        return SimpleNamespace(
+            warning=warning,
+            stats={"total_rows": 1, "matched_rows": 1},
+            token="token",
+            token_expires_at="2026-07-22T18:00:00+08:00",
+            token_reused=False,
+        )
+
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(webhook_url="https://example.test/cgi-bin/webhook/send?key=unit-test")
+    repo.save_patrol_warning_config(
+        enabled=True,
+        login_url="https://example.test/login",
+        warning_url="https://example.test/warninginfo/findPage",
+        username="station-user",
+        password="secret",
+        route_code="S41",
+    )
+    repo.save_patrol_warning_state(
+        warning_key="warning-1",
+        warning={
+            "key": "warning-1",
+            "route_code": "S41",
+            "route_name": "Route A",
+            "warning_level": "2",
+            "warning_level_label": "Orange",
+            "start_time": "2026-07-22T07:00:00+08:00",
+            "end_time": "",
+            "start_stake": "K107.000",
+            "end_stake": "",
+        },
+        last_start_sent_key="warning-1",
+    )
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(main_module, "fetch_latest_warning_result", fake_fetch_latest_warning_result)
+    monkeypatch.setattr(main_module, "_wecom_webhook_client_from_repo", lambda repo: FakeWebhookClient())
+
+    asyncio.run(main_module._check_patrol_warning_monitor(repo))
+
+    state = repo.get_patrol_warning_state()
+    assert state["warning"]["end_time"] == "2026-07-22T10:00:00+08:00"
+    assert state["warning"]["end_stake"] == "K137.730"
+    assert state["last_start_sent_key"] == "warning-1"
+    assert sent == []
+
+
+def test_patrol_warning_monitor_uses_specific_mentions_and_template(tmp_path, monkeypatch):
+    sent: dict[str, object] = {}
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 7, 22, 8, 0, tzinfo=tz)
+
+    class FakeWebhookClient:
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            sent["content"] = content
+            sent["mobiles"] = mentioned_mobile_list
+
+        async def send_image(self, image_bytes: bytes):
+            sent["image_bytes"] = image_bytes
+
+    warning = warning_from_dict(
+        {
+            "key": "warning-1",
+            "route_code": "S41",
+            "route_name": "南涧－宁洱",
+            "warning_level": "2",
+            "warning_level_label": "橙色预警",
+            "start_time": "2026-07-22T08:00:00+08:00",
+            "end_time": "2026-07-22T10:00:00+08:00",
+            "start_stake": "K107.000",
+            "end_stake": "K137.730",
+        },
+        main_module.TZ,
+    )
+
+    async def fake_fetch_latest_warning_result(*args, **kwargs):
+        return SimpleNamespace(
+            warning=warning,
+            stats={"total_rows": 1, "matched_rows": 1},
+            token="token",
+            token_expires_at="2026-07-22T18:00:00+08:00",
+            token_reused=False,
+        )
+
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(webhook_url="https://example.test/cgi-bin/webhook/send?key=unit-test")
+    repo.save_patrol_warning_config(
+        enabled=True,
+        login_url="https://example.test/login",
+        warning_url="https://example.test/warninginfo/findPage",
+        username="station-user",
+        password="secret",
+        route_code="S41",
+        mention_all=False,
+        mention_mobiles="13800138000, 13900139000",
+        start_message_template="指定模板：{warning_level_label} {stake_range}",
+    )
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(main_module, "fetch_latest_warning_result", fake_fetch_latest_warning_result)
+    monkeypatch.setattr(main_module, "_wecom_webhook_client_from_repo", lambda repo: FakeWebhookClient())
+    monkeypatch.setattr(main_module, "next_poll_time", lambda now, interval_minutes: now)
+
+    asyncio.run(main_module._check_patrol_warning_monitor(repo))
+
+    assert sent["content"] == "指定模板：橙色预警 K107.000 - K137.730"
+    assert sent["mobiles"] == ["13800138000", "13900139000"]
+    assert sent["image_bytes"].startswith(b"\x89PNG")
+
+
+def test_patrol_warning_send_content_mode_image_only_skips_text(tmp_path, monkeypatch):
+    sent: dict[str, object] = {"text_count": 0, "image_count": 0}
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 7, 22, 8, 0, tzinfo=tz)
+
+    class FakeWebhookClient:
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            sent["text_count"] = int(sent["text_count"]) + 1
+
+        async def send_image(self, image_bytes: bytes):
+            sent["image_count"] = int(sent["image_count"]) + 1
+            sent["image_bytes"] = image_bytes
+
+    warning = warning_from_dict(
+        {
+            "key": "warning-1",
+            "route_code": "S41",
+            "warning_level": "2",
+            "warning_level_label": "橙色预警",
+            "start_time": "2026-07-22T08:00:00+08:00",
+            "end_time": "2026-07-22T10:00:00+08:00",
+            "start_stake": "K107.000",
+            "end_stake": "K137.730",
+        },
+        main_module.TZ,
+    )
+
+    async def fake_fetch_latest_warning_result(*args, **kwargs):
+        return SimpleNamespace(
+            warning=warning,
+            stats={"total_rows": 1, "matched_rows": 1},
+            token="token",
+            token_expires_at="2026-07-22T18:00:00+08:00",
+            token_reused=False,
+        )
+
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(webhook_url="https://example.test/cgi-bin/webhook/send?key=unit-test")
+    repo.save_patrol_warning_config(
+        enabled=True,
+        login_url="https://example.test/login",
+        warning_url="https://example.test/warninginfo/findPage",
+        username="station-user",
+        password="secret",
+        route_code="S41",
+        send_content_mode="image",
+    )
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(main_module, "fetch_latest_warning_result", fake_fetch_latest_warning_result)
+    monkeypatch.setattr(main_module, "_wecom_webhook_client_from_repo", lambda repo: FakeWebhookClient())
+    monkeypatch.setattr(main_module, "next_poll_time", lambda now, interval_minutes: now)
+
+    asyncio.run(main_module._check_patrol_warning_monitor(repo))
+
+    assert sent["text_count"] == 0
+    assert sent["image_count"] == 1
+    assert sent["image_bytes"].startswith(b"\x89PNG")
 
 
 def test_notification_config_test_sends_template_message(tmp_path, monkeypatch):
