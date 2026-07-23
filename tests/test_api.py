@@ -577,6 +577,27 @@ def test_wechat_query_requires_token(tmp_path, monkeypatch):
     assert response.status_code == 401
 
 
+def test_wechat_query_help_returns_numbered_menu(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "查询帮助", "runtime_sender_id": "@member-1"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["query_type"] == "help"
+    assert "监控查询菜单" in body["reply"]
+    assert "1. 查询我的监控" in body["reply"]
+    assert "7. 查询我的绑定" in body["reply"]
+    assert "回复序号即可执行" in body["reply"]
+
+
 def test_wechat_query_returns_bound_person_monitor_plan(tmp_path, monkeypatch):
     monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)

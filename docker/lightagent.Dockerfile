@@ -41,6 +41,7 @@ plugin_dir.joinpath("__init__.py").write_text(r'''
 
 import os
 import re
+import time
 
 import plugins
 import requests
@@ -60,11 +61,35 @@ from plugins import Event, EventAction, EventContext, Plugin
     author="520pt",
 )
 class DutyReminderQuery(Plugin):
+    MENU_QUERIES = {
+        "1": "查询我的监控",
+        "2": "查询今日提醒",
+        "3": "查询明日监控",
+        "4": "查询本周监控",
+        "5": "查询未来7天",
+        "6": "查询下次提醒",
+        "7": "查询我的绑定",
+    }
+    MENU_NUMBER_ALIASES = {
+        "一": "1",
+        "二": "2",
+        "两": "2",
+        "三": "3",
+        "四": "4",
+        "五": "5",
+        "六": "6",
+        "七": "7",
+        "八": "8",
+        "九": "9",
+    }
+
     def __init__(self):
         super().__init__()
         self.endpoint = os.environ.get("DUTY_REMINDER_QUERY_URL", "http://duty-reminder:8080/api/wechat-query").strip()
         self.token = os.environ.get("DUTY_REMINDER_QUERY_TOKEN", "520pt").strip()
         self.timeout = float(os.environ.get("DUTY_REMINDER_QUERY_TIMEOUT", "8") or 8)
+        self.menu_ttl = int(os.environ.get("DUTY_REMINDER_QUERY_MENU_TTL", "180") or 180)
+        self.menu_sessions = {}
         self.handlers[Event.ON_HANDLE_CONTEXT] = self.on_handle_context
         logger.info("[DutyReminderQuery] inited, endpoint=%s", self.endpoint)
 
@@ -75,14 +100,89 @@ class DutyReminderQuery(Plugin):
         if not context.get("isgroup", False):
             return
         msg = context.get("msg")
-        if not msg or getattr(msg, "is_at", False) is not True:
+        if not msg:
             return
         text = self._clean_text(context.get("wechat_group_user_content") or context.content)
-        if not self._looks_like_duty_query(text):
+        if not text:
             return
-        reply_text = self._query_duty_reminder(context, msg, text)
+        is_at = getattr(msg, "is_at", False) is True
+        session_key = self._session_key(context, msg)
+        menu_selection = self._normalize_menu_selection(text)
+
+        if menu_selection and self._has_active_menu_session(session_key):
+            reply_text = self._reply_for_menu_selection(context, msg, session_key, menu_selection)
+            e_context["reply"] = Reply(ReplyType.TEXT, reply_text)
+            e_context.action = EventAction.BREAK_PASS
+            return
+
+        if not is_at:
+            return
+
+        if self._is_help_query(text):
+            self._store_menu_session(session_key)
+            reply_text = self._query_duty_reminder(context, msg, text)
+        elif self._looks_like_duty_query(text):
+            reply_text = self._query_duty_reminder(context, msg, text)
+        else:
+            return
+
         e_context["reply"] = Reply(ReplyType.TEXT, reply_text)
         e_context.action = EventAction.BREAK_PASS
+
+    def _reply_for_menu_selection(self, context, msg, session_key: str, selection: str) -> str:
+        query_text = self.MENU_QUERIES.get(selection)
+        if not query_text:
+            self._store_menu_session(session_key)
+            return self._menu_invalid_reply()
+        return self._query_duty_reminder(context, msg, query_text)
+
+    def _session_key(self, context, msg) -> str:
+        room_id = str(
+            context.get("wechat_group_stable_room_id")
+            or context.get("wechat_group_runtime_room_id")
+            or getattr(msg, "runtime_room_id", "")
+            or getattr(msg, "other_user_id", "")
+            or ""
+        )
+        sender_id = str(
+            context.get("wechat_group_stable_member_id")
+            or context.get("wechat_group_runtime_sender_id")
+            or getattr(msg, "runtime_sender_id", "")
+            or getattr(msg, "actual_user_id", "")
+            or ""
+        )
+        return "{}:{}".format(room_id, sender_id)
+
+    def _cleanup_menu_sessions(self):
+        now = time.time()
+        expired = [key for key, expires_at in self.menu_sessions.items() if expires_at <= now]
+        for key in expired:
+            self.menu_sessions.pop(key, None)
+
+    def _store_menu_session(self, session_key: str):
+        if not session_key or session_key == ":":
+            return
+        self._cleanup_menu_sessions()
+        self.menu_sessions[session_key] = time.time() + max(self.menu_ttl, 30)
+
+    def _has_active_menu_session(self, session_key: str) -> bool:
+        if not session_key or session_key == ":":
+            return False
+        self._cleanup_menu_sessions()
+        expires_at = float(self.menu_sessions.get(session_key) or 0)
+        return expires_at > time.time()
+
+    def _menu_invalid_reply(self) -> str:
+        return (
+            "请输入 1-7：\n"
+            "1. 查询我的监控\n"
+            "2. 查询今日提醒\n"
+            "3. 查询明日监控\n"
+            "4. 查询本周监控\n"
+            "5. 查询未来7天\n"
+            "6. 查询下次提醒\n"
+            "7. 查询我的绑定"
+        )
 
     def _query_duty_reminder(self, context, msg, text: str) -> str:
         if not self.endpoint:
@@ -112,7 +212,21 @@ class DutyReminderQuery(Plugin):
     @staticmethod
     def _clean_text(text: str) -> str:
         value = re.sub(r"@\S+", "", str(text or ""))
-        return re.sub(r"\s+", "", value).strip("，,。.!！?？：:")
+        return re.sub(r"\s+", "", value).strip("，,。.!！?？：:、；;")
+
+    @classmethod
+    def _normalize_menu_selection(cls, text: str) -> str:
+        value = str(text or "").strip()
+        match = re.fullmatch(r"(?:序号|选|选择|回复)?([1-9一二两三四五六七八九])(?:项|号)?", value)
+        if not match:
+            return ""
+        return cls.MENU_NUMBER_ALIASES.get(match.group(1), match.group(1))
+
+    @staticmethod
+    def _is_help_query(text: str) -> bool:
+        if text in {"帮助", "查询帮助", "监控帮助", "提醒帮助"}:
+            return True
+        return "帮助" in text and any(keyword in text for keyword in ("查询", "监控", "提醒", "绑定"))
 
     @staticmethod
     def _looks_like_duty_query(text: str) -> bool:
