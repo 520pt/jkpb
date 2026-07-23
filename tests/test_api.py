@@ -1511,7 +1511,7 @@ def test_wechat_query_tunnel_mechanical_result_sends_image(tmp_path, monkeypatch
     assert today_body["checkTime"] == "2026-07-23"
     assert today_body["image_url"] == "/api/uploads/result-2026-07-23.png"
     assert today_body["image_full_url"] == "/api/uploads/result-2026-07-23.png"
-    assert "图片已发送" in today_body["reply"]
+    assert "图片已生成，正在发送" in today_body["reply"]
     assert date_body["checkTime"] == "2026-07-22"
     assert date_body["image_url"] == "/api/uploads/result-2026-07-22.png"
     assert captured == ["2026-07-23", "2026-07-22"]

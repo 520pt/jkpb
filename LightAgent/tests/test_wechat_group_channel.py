@@ -2759,7 +2759,10 @@ class WechatGroupChannelTest(unittest.TestCase):
 
         channel.handle_text(msg)
 
-        channel.produce.assert_not_called()
+        channel.produce.assert_called_once()
+        context = channel.produce.call_args.args[0]
+        self.assertEqual(ContextType.IMAGE, context.type)
+        self.assertEqual("wechat_group_roster_import_probe", context["wechat_group_trigger_source"])
         channel.free_reply_worker.submit.assert_not_called()
 
     def test_non_at_image_message_queues_free_reply_when_image_switch_enabled(self):
@@ -2802,7 +2805,10 @@ class WechatGroupChannelTest(unittest.TestCase):
             channel.handle_text(msg)
 
         execute.assert_not_called()
-        channel.produce.assert_not_called()
+        channel.produce.assert_called_once()
+        context = channel.produce.call_args.args[0]
+        self.assertEqual(ContextType.IMAGE, context.type)
+        self.assertEqual("wechat_group_roster_import_probe", context["wechat_group_trigger_source"])
         channel._ensure_free_reply_worker_started.assert_called_once()
         channel.free_reply_worker.submit.assert_called_once()
         task = channel.free_reply_worker.submit.call_args.args[0]
@@ -3321,7 +3327,7 @@ class WechatGroupChannelTest(unittest.TestCase):
         )
         response = Mock(status_code=200, content=b"{}")
         response.json.return_value = {
-            "reply": "\u96a7\u9053\u673a\u7535\u5f55\u5165\u5b8c\u6210",
+            "reply": "\u96a7\u9053\u673a\u7535\u5f55\u5165\u5b8c\u6210\uff0c\u56fe\u7247\u5df2\u751f\u6210\uff0c\u6b63\u5728\u53d1\u9001\u3002",
             "image_url": "/api/uploads/result.png",
         }
         image_response = Mock(content=b"png-bytes")
@@ -3343,7 +3349,7 @@ class WechatGroupChannelTest(unittest.TestCase):
         self.assertEqual("wgr_room", payload["stable_room_id"])
         self.assertEqual("send_text", client.commands[0][0])
         self.assertEqual("room@@abc", client.commands[0][1])
-        self.assertEqual("\u96a7\u9053\u673a\u7535\u5f55\u5165\u5b8c\u6210", client.commands[0][2])
+        self.assertEqual("\u96a7\u9053\u673a\u7535\u5f55\u5165\u5b8c\u6210\uff0c\u56fe\u7247\u5df2\u751f\u6210\uff0c\u6b63\u5728\u53d1\u9001\u3002", client.commands[0][2])
         self.assertEqual("send_image", client.commands[1][0])
         self.assertEqual("room@@abc", client.commands[1][1])
         self.assertTrue(client.commands[1][2].endswith(".png"))
@@ -3351,6 +3357,55 @@ class WechatGroupChannelTest(unittest.TestCase):
             b"png-bytes",
             downloaded_bytes,
         )
+
+    def test_visible_empty_at_duty_query_reports_image_download_failure(self):
+        conf()["wechat_group_room_ids"] = ["room@@abc"]
+        conf()["group_name_white_list"] = []
+        client = FakeClient()
+        channel = WechatGroupChannel(client=client)
+        channel.produce = Mock()
+        content = "\u0040\u0040 \u67e5\u8be22026-07-21\u673a\u7535"
+        msg = Mock(
+            ctype=ContextType.TEXT,
+            content=content,
+            text=content,
+            from_user_id="room@@abc",
+            other_user_id="room@@abc",
+            runtime_room_id="room@@abc",
+            other_user_nickname="Test Room",
+            actual_user_id="wxid_alice",
+            runtime_sender_id="wxid_alice",
+            actual_user_nickname="Alice",
+            to_user_id="@bot",
+            to_user_nickname="LightBot",
+            is_at=False,
+            is_quote_self=False,
+            is_group=True,
+            at_list=[],
+            self_display_name="LightBot",
+            wechat_group_stable_room_id="wgr_room",
+            wechat_group_stable_member_id="wgm_alice",
+            create_time=100000,
+            msg_id="msg-visible-duty-image-failed",
+            message_type="text",
+            media_path="",
+        )
+        response = Mock(status_code=200, content=b"{}")
+        response.json.return_value = {
+            "reply": "\u5df2\u67e5\u8be2 2026-07-21 \u96a7\u9053\u673a\u7535\u7ed3\u679c\uff0c\u5171 4 \u6761\uff0c\u56fe\u7247\u5df2\u751f\u6210\uff0c\u6b63\u5728\u53d1\u9001\u3002",
+            "image_url": "/api/uploads/result.png",
+        }
+
+        with patch("channel.wechat_group.wechat_group_channel.requests.post", return_value=response):
+            with patch("channel.wechat_group.wechat_group_channel.requests.get", side_effect=RuntimeError("network down")):
+                channel.handle_text(msg)
+
+        channel.produce.assert_not_called()
+        self.assertEqual(1, len(client.commands))
+        self.assertEqual("send_text", client.commands[0][0])
+        self.assertIn("\u5df2\u67e5\u8be2 2026-07-21", client.commands[0][2])
+        self.assertIn("\u56fe\u7247\u53d1\u9001\u5931\u8d25", client.commands[0][2])
+        self.assertNotIn("\u56fe\u7247\u5df2\u751f\u6210\uff0c\u6b63\u5728\u53d1\u9001", client.commands[0][2])
 
     def test_duty_query_fast_path_accepts_short_mechanical_result_query(self):
         self.assertTrue(WechatGroupChannel._looks_like_duty_reminder_text("查询今日机电"))

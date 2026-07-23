@@ -857,6 +857,7 @@ class WechatGroupChannel(ChatChannel):
             headers["X-Duty-Query-Token"] = token
         receiver = str(getattr(msg, "runtime_room_id", "") or getattr(msg, "other_user_id", "") or "")
         image_path = ""
+        image_error = ""
         try:
             logger.info(
                 '[wechat_group] duty-reminder fast path: room="{}" text="{}"'.format(
@@ -876,10 +877,14 @@ class WechatGroupChannel(ChatChannel):
                         endpoint,
                     )
                 except Exception as exc:
+                    image_error = str(exc)
                     logger.warning("[wechat_group] duty-reminder image download failed: %s", exc)
         except Exception as exc:
             logger.warning("[wechat_group] duty-reminder fast path failed: %s", exc)
             reply_text = "监控查询失败：无法连接 duty-reminder"
+        if image_error:
+            reply_text = re.sub(r"，?图片已生成，正在发送。?", "。", reply_text).strip()
+            reply_text += "\n图片发送失败：LightAgent 无法下载查询结果图，请检查 duty-reminder 与 LightAgent 的网络连通。"
         self.client.send_text(receiver, reply_text)
         logger.info(
             '[wechat_group] duty-reminder fast path text sent: room="{}" chars={}'.format(
@@ -888,13 +893,20 @@ class WechatGroupChannel(ChatChannel):
             )
         )
         if image_path:
-            self.client.send_image(receiver, image_path)
-            logger.info(
-                '[wechat_group] duty-reminder fast path image sent: room="{}" path="{}"'.format(
-                    _wechat_group_log_value(receiver),
-                    _wechat_group_log_value(image_path),
+            try:
+                self.client.send_image(receiver, image_path)
+                logger.info(
+                    '[wechat_group] duty-reminder fast path image sent: room="{}" path="{}"'.format(
+                        _wechat_group_log_value(receiver),
+                        _wechat_group_log_value(image_path),
+                    )
                 )
-            )
+            except Exception as exc:
+                logger.warning("[wechat_group] duty-reminder image send command failed: %s", exc)
+                self.client.send_text(
+                    receiver,
+                    "图片发送失败：LightAgent 无法向微信群下发查询结果图，请检查个人微信群登录状态。",
+                )
         return True
 
     @staticmethod

@@ -1889,7 +1889,7 @@ async def _build_tunnel_mechanical_wechat_result_query_response(
         "checkTime": target_date.isoformat(),
         "count": row_count,
         "reply": (
-            f"已查询 {target_date.isoformat()} 隧道机电结果，共 {row_count} 条，图片已发送。"
+            f"已查询 {target_date.isoformat()} 隧道机电结果，共 {row_count} 条，图片已生成，正在发送。"
             if success
             else f"隧道机电查询失败：{result.get('result_query_error') or '未生成查询结果图片'}"
         ),
