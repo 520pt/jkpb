@@ -15,6 +15,7 @@ import uuid
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -211,6 +212,38 @@ class PatrolWarningImagePreviewRequest(BaseModel):
     window_hours: int = Field(default=48, ge=1, le=720)
 
 
+class TunnelMechanicalAssetRequest(BaseModel):
+    enabled: bool = True
+    assetId: str
+    assetName: str
+    assetCode: str
+    routeCode: str = "S41"
+    routeName: str = "南景高速[普洱]"
+    maintenanceSectionId: str = "南景高速[普洱]"
+    domainId: str = "987"
+    deptName: str = "云南交投普洱分公司"
+    devName: str
+    location: str
+    content: str = "隧道机电日常检查"
+    result: int = 1
+    carLicense: str = "云JJX350"
+    nums: str | None = "1"
+
+
+class TunnelMechanicalSubmitRequest(BaseModel):
+    base_url: str = "https://zhyhpt.yciccloud.com"
+    authorization: str = ""
+    cookie: str = ""
+    checkTime: date
+    weather: str = "晴"
+    checkerId: str
+    checker: str
+    recorderId: str
+    recorder: str
+    rows: list[TunnelMechanicalAssetRequest]
+    dry_run: bool = False
+
+
 class WechatQueryRequest(BaseModel):
     text: str = ""
     room_id: str = ""
@@ -228,6 +261,103 @@ class WechatRosterConfirmRequest(BaseModel):
     source_image_path: str = ""
     grid: list[dict[str, Any]]
     overwrite: bool = False
+
+
+TUNNEL_MECHANICAL_ALLOWED_HOSTS = {"zhyhpt.yciccloud.com"}
+TUNNEL_MECHANICAL_SHORT_DEVICES = (
+    "变压器、高压配电柜、低压配电柜、隧道灯具、车道指示器、交通信号灯、节能装置、"
+    "PLC、EPS、消防设施、主动发光轮廓标、人行横洞、监控设施、隧道光电标志"
+)
+TUNNEL_MECHANICAL_LONG_DEVICES = (
+    "变压器、高压配电柜、低压配电柜、隧道灯具、车道指示器、 交通信号灯、节能装置PLC、"
+    "EPS、消防设施、主动发光轮廓标、 紧急电话、车行横洞、人行横洞、通风设施、监控设施、"
+    "情报板、 一氧化碳检测仪、隧道光电标志"
+)
+TUNNEL_MECHANICAL_PERSONNEL = [
+    {"id": "8363", "name": "景东隧管站"},
+    {"id": "8476", "name": "赵光振"},
+    {"id": "8496", "name": "罗越"},
+    {"id": "8507", "name": "商邱宏"},
+    {"id": "8513", "name": "杞文江"},
+    {"id": "8519", "name": "罗森"},
+    {"id": "8584", "name": "王德刚"},
+    {"id": "8585", "name": "杨伦"},
+    {"id": "8587", "name": "易国兵"},
+    {"id": "8588", "name": "李华兰"},
+    {"id": "8591", "name": "罗熙云"},
+    {"id": "8603", "name": "李金雷"},
+    {"id": "8646", "name": "沐春宇"},
+    {"id": "8647", "name": "罗富耀"},
+    {"id": "8648", "name": "张铭文"},
+    {"id": "8649", "name": "卢景玉"},
+    {"id": "8695", "name": "李文杰"},
+]
+TUNNEL_MECHANICAL_ASSETS = [
+    {
+        "assetId": "723",
+        "assetName": "南景（普洱）-三宝厂隧道(上行)",
+        "assetCode": "S41530823U0050",
+        "routeCode": "S41",
+        "routeName": "南景高速[普洱]",
+        "maintenanceSectionId": "南景高速[普洱]",
+        "domainId": "987",
+        "deptName": "云南交投普洱分公司",
+        "devName": TUNNEL_MECHANICAL_SHORT_DEVICES,
+        "location": "K86+660-K87+351三宝厂隧道",
+        "content": "隧道机电日常检查",
+        "result": 1,
+        "carLicense": "云JJX350",
+        "nums": "1",
+    },
+    {
+        "assetId": "884",
+        "assetName": "南景（普洱）-三宝厂隧道（下行）",
+        "assetCode": "T41530823U9020",
+        "routeCode": "S41",
+        "routeName": "南景高速[普洱]",
+        "maintenanceSectionId": "南景高速[普洱]",
+        "domainId": "987",
+        "deptName": "云南交投普洱分公司",
+        "devName": TUNNEL_MECHANICAL_SHORT_DEVICES,
+        "location": "K87+360-K86+667三宝厂隧道",
+        "content": "隧道机电日常检查",
+        "result": 1,
+        "carLicense": "云JJX350",
+        "nums": "1",
+    },
+    {
+        "assetId": "885",
+        "assetName": "南景（普洱）-景东隧道（下行）",
+        "assetCode": "T41530823U9030",
+        "routeCode": "S41",
+        "routeName": "南景高速[普洱]",
+        "maintenanceSectionId": "南景高速[普洱]",
+        "domainId": "987",
+        "deptName": "云南交投普洱分公司",
+        "devName": TUNNEL_MECHANICAL_LONG_DEVICES,
+        "location": "K88+790-K91+272景东隧道",
+        "content": "隧道机电日常检查",
+        "result": 1,
+        "carLicense": "云JJX350",
+        "nums": "1",
+    },
+    {
+        "assetId": "724",
+        "assetName": "南景（普洱）-景东隧道(上行)",
+        "assetCode": "S41530823U0020",
+        "routeCode": "S41",
+        "routeName": "南景高速[普洱]",
+        "maintenanceSectionId": "南景高速[普洱]",
+        "domainId": "987",
+        "deptName": "云南交投普洱分公司",
+        "devName": TUNNEL_MECHANICAL_LONG_DEVICES,
+        "location": "K88+820-K91+288景东隧道",
+        "content": "隧道机电日常检查",
+        "result": 1,
+        "carLicense": "云JJX350",
+        "nums": "1",
+    },
+]
 
 
 def create_app(
@@ -614,6 +744,29 @@ def create_app(
             raise HTTPException(status_code=502, detail=f"发送预警提醒失败：{exc}") from exc
         return {"success": True, "content": content}
 
+    @app.get("/api/tunnel-mechanical/templates")
+    def get_tunnel_mechanical_templates():
+        return {
+            "base_url": "https://zhyhpt.yciccloud.com",
+            "submit_path": "/prod-api/patrol/deviceCheck/add",
+            "people": TUNNEL_MECHANICAL_PERSONNEL,
+            "assets": TUNNEL_MECHANICAL_ASSETS,
+            "defaults": {
+                "checkerId": "8507",
+                "checker": "商邱宏",
+                "recorderId": "8587",
+                "recorder": "易国兵",
+                "checkTime": _today_in_tz().isoformat(),
+                "weather": "晴",
+                "carLicense": "云JJX350",
+                "nums": "1",
+            },
+        }
+
+    @app.post("/api/tunnel-mechanical/submit")
+    async def submit_tunnel_mechanical(request: TunnelMechanicalSubmitRequest):
+        return await _submit_tunnel_mechanical(request)
+
     @app.get("/api/notification-config")
     def get_notification_config():
         return {"config": _public_notification_config(repo.get_notification_config())}
@@ -713,12 +866,15 @@ def create_app(
         room_text = str(room_id or "").strip()
         if not room_text:
             raise HTTPException(status_code=400, detail="room_id is required")
-        return _lightagent_web_request(
+        data = _lightagent_web_request(
             repo,
             "GET",
             "/api/wechat-group/members",
             params={"stable_room_id": room_text, "limit": "500"},
         )
+        if isinstance(data, dict):
+            data["members"] = _normalize_lightagent_wechat_members(data.get("members") or [])
+        return data
 
     @app.post("/api/wechat-query")
     def wechat_query(http_request: Request, query: WechatQueryRequest):
@@ -1000,7 +1156,7 @@ def _notification_config_with_env_defaults(config: dict[str, Any]) -> dict[str, 
         merged["sender_type"] = sender_type
 
     for key in ("webhook_url", "lightagent_url", "lightagent_token", "lightagent_target"):
-        if not str(merged.get(key, "")).strip() and env_config[key]:
+        if env_config[key] and (env_sender_type or not str(merged.get(key, "")).strip()):
             merged[key] = env_config[key]
     return merged
 
@@ -1055,6 +1211,75 @@ def _lightagent_web_request(
     if isinstance(data, dict) and data.get("status") == "error":
         raise HTTPException(status_code=502, detail=str(data.get("message") or "LightAgent Web 请求失败"))
     return data if isinstance(data, dict) else {"status": "success", "data": data}
+
+
+def _looks_like_wechat_runtime_id(value: str) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    return bool(
+        text.startswith("@")
+        or text.startswith("wxid_")
+        or re.fullmatch(r"[A-Za-z0-9_-]{18,}", text)
+    )
+
+
+def _normalize_lightagent_wechat_members(members: Any) -> list[dict[str, Any]]:
+    if not isinstance(members, list):
+        return []
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    name_fields = (
+        "display_name",
+        "sender_nickname",
+        "wechat_group_member_name",
+        "room_alias",
+        "sender_room_alias",
+        "profile_nickname",
+        "primary_nickname",
+        "remark",
+        "alias",
+        "contact_name",
+        "name",
+        "nickName",
+        "nickname",
+    )
+    id_fields = (
+        "runtime_sender_id",
+        "sender_id",
+        "wechat_group_runtime_sender_id",
+        "id",
+    )
+    for raw in members:
+        if not isinstance(raw, dict):
+            continue
+        item = dict(raw)
+        runtime_id = next(
+            (str(item.get(field) or "").strip() for field in id_fields if str(item.get(field) or "").strip()),
+            "",
+        )
+        if not runtime_id:
+            continue
+        if runtime_id in seen:
+            continue
+        seen.add(runtime_id)
+        display_name = next(
+            (
+                str(item.get(field) or "").strip()
+                for field in name_fields
+                if str(item.get(field) or "").strip()
+            ),
+            "",
+        )
+        if not display_name or _looks_like_wechat_runtime_id(display_name):
+            display_name = runtime_id
+        item["runtime_sender_id"] = runtime_id
+        item.setdefault("sender_id", runtime_id)
+        item["display_name"] = display_name
+        item["sender_nickname"] = display_name
+        item["is_raw_id_name"] = display_name == runtime_id or _looks_like_wechat_runtime_id(display_name)
+        normalized.append(item)
+    return normalized
 
 
 def _wechat_query_token() -> str:
@@ -1594,7 +1819,7 @@ def _public_notification_config(config: dict[str, Any]) -> dict[str, Any]:
         "webhook_url": "",
         "webhook_configured": bool(webhook_url),
         "webhook_display": "已配置" if webhook_url else "未配置",
-        "lightagent_url": "",
+        "lightagent_url": lightagent_url,
         "lightagent_configured": bool(lightagent_url and lightagent_target),
         "lightagent_display": "已配置" if lightagent_url and lightagent_target else "未配置",
         "lightagent_token_configured": bool(lightagent_token),
@@ -1644,6 +1869,101 @@ def _public_patrol_warning_state(state: dict[str, Any]) -> dict[str, Any]:
         "backoff_until": str(state.get("backoff_until") or ""),
         "last_error": str(state.get("last_error") or ""),
     }
+
+
+def _tunnel_mechanical_base_url(base_url: str) -> str:
+    parsed = urlparse((base_url or "https://zhyhpt.yciccloud.com").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise HTTPException(status_code=400, detail="目标地址格式不正确")
+    if parsed.hostname.lower() not in TUNNEL_MECHANICAL_ALLOWED_HOSTS:
+        raise HTTPException(status_code=400, detail="隧道机电录入只允许提交到已配置的智慧养护平台域名")
+    port = f":{parsed.port}" if parsed.port else ""
+    return f"{parsed.scheme}://{parsed.hostname}{port}"
+
+
+def _build_tunnel_mechanical_payload(request: TunnelMechanicalSubmitRequest, row: TunnelMechanicalAssetRequest) -> dict[str, Any]:
+    return {
+        "assetId": str(row.assetId),
+        "assetName": row.assetName,
+        "assetCode": row.assetCode,
+        "routeCode": row.routeCode,
+        "routeName": row.routeName,
+        "checkerId": str(request.checkerId),
+        "checker": request.checker,
+        "centerStake": None,
+        "deptName": row.deptName,
+        "recorder": request.recorder,
+        "recorderId": str(request.recorderId),
+        "recordType": 2,
+        "assetIds": [],
+        "domains": [
+            {
+                "checkId": None,
+                "devName": row.devName,
+                "location": row.location,
+                "content": row.content,
+                "result": row.result,
+                "describe": None,
+                "measures": None,
+                "picPaths": None,
+                "carLicense": row.carLicense,
+                "nums": row.nums,
+            }
+        ],
+        "maintenanceSectionId": row.maintenanceSectionId,
+        "domainId": str(row.domainId),
+        "checkTime": request.checkTime.isoformat(),
+        "weather": request.weather,
+        "faultRecordList": [],
+    }
+
+
+async def _submit_tunnel_mechanical(request: TunnelMechanicalSubmitRequest) -> dict[str, Any]:
+    rows = [row for row in request.rows if row.enabled]
+    if not rows:
+        raise HTTPException(status_code=400, detail="请至少选择一条隧道记录")
+    submissions = [
+        {"assetId": row.assetId, "assetName": row.assetName, "payload": _build_tunnel_mechanical_payload(request, row)}
+        for row in rows
+    ]
+    if request.dry_run:
+        return {"success": True, "dry_run": True, "submissions": submissions}
+
+    base_url = _tunnel_mechanical_base_url(request.base_url)
+    submit_url = f"{base_url}/prod-api/patrol/deviceCheck/add"
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "Content-Type": "application/json;charset=UTF-8",
+        "Origin": base_url,
+        "Referer": f"{base_url}/patrol/deviceCheck/dailyInfo",
+    }
+    if request.authorization.strip():
+        headers["Authorization"] = request.authorization.strip()
+    if request.cookie.strip():
+        headers["Cookie"] = request.cookie.strip()
+
+    results = []
+    try:
+        async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
+            for submission in submissions:
+                response = await client.post(submit_url, headers=headers, json=submission["payload"])
+                try:
+                    body: Any = response.json()
+                except ValueError:
+                    body = response.text[:2000]
+                ok = response.status_code == 200 and (not isinstance(body, dict) or str(body.get("code") or "") == "200")
+                results.append(
+                    {
+                        "assetId": submission["assetId"],
+                        "assetName": submission["assetName"],
+                        "status": response.status_code,
+                        "ok": ok,
+                        "body": body,
+                    }
+                )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"提交到智慧养护平台失败：{exc}") from exc
+    return {"success": all(item["ok"] for item in results), "dry_run": False, "results": results}
 
 
 def _reminder_events_response(repo: DutyRepository, target: date, *, now: datetime) -> dict[str, Any]:

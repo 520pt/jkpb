@@ -1000,6 +1000,86 @@
     .status-grid {
       grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     }
+    .tunnel-mechanical-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.9fr);
+      gap: 12px;
+      align-items: start;
+    }
+    .tunnel-mechanical-form {
+      display: grid;
+      gap: 12px;
+    }
+    .tunnel-auth-grid,
+    .tunnel-meta-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .tunnel-auth-grid label,
+    .tunnel-meta-grid label {
+      display: grid;
+      gap: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .tunnel-auth-grid input,
+    .tunnel-auth-grid textarea,
+    .tunnel-meta-grid input,
+    .tunnel-meta-grid select {
+      width: 100%;
+      color: var(--ink);
+    }
+    .tunnel-auth-grid label.wide,
+    .tunnel-meta-grid label.wide {
+      grid-column: 1 / -1;
+    }
+    .tunnel-auth-grid textarea {
+      min-height: 56px;
+      font-family: Consolas, "Microsoft YaHei", monospace;
+      font-size: 12px;
+    }
+    .tunnel-table-wrap {
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: white;
+    }
+    .tunnel-table {
+      min-width: 980px;
+      width: 100%;
+    }
+    .tunnel-table th,
+    .tunnel-table td {
+      text-align: left;
+      vertical-align: top;
+    }
+    .tunnel-table td.center,
+    .tunnel-table th.center {
+      text-align: center;
+    }
+    .tunnel-table input,
+    .tunnel-table textarea {
+      width: 100%;
+    }
+    .tunnel-table textarea {
+      min-height: 52px;
+      font-size: 12px;
+    }
+    .tunnel-result-box {
+      min-height: 260px;
+      max-height: calc(100vh - 220px);
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      background: #0f172a;
+      color: #e2e8f0;
+      font-family: Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+    }
     .daily-duty-visual {
       display: grid;
       gap: 8px;
@@ -1094,6 +1174,9 @@
       .today-reminder-item.has-image,
       .today-reminder-meta { grid-template-columns: 1fr; }
       .patrol-delivery-row { grid-template-columns: 1fr; }
+      .tunnel-mechanical-layout,
+      .tunnel-auth-grid,
+      .tunnel-meta-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -1122,6 +1205,7 @@
     <button class="tab-button active" data-tab="today">今日提醒</button>
     <button class="tab-button" data-tab="review">排班核对</button>
     <button class="tab-button" data-tab="saved">已导入排班</button>
+    <button class="tab-button" data-tab="tunnelMechanical">隧道机电每日录入</button>
     <button class="tab-button" data-tab="settings">监测配置</button>
     <button class="tab-button" data-tab="records">发送记录</button>
     <button class="tab-button" data-tab="status">系统状态</button>
@@ -1257,6 +1341,97 @@
             </div>
             <div id="rosterVersionsList" class="version-list"></div>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tunnelMechanicalPage" class="tab-page hidden">
+      <div class="section-head">
+        <div>
+          <h2>隧道机电每日录入</h2>
+          <p id="tunnelMechanicalStatus" class="status"></p>
+        </div>
+        <div class="toolbar">
+          <button id="loadTunnelMechanicalBtn" type="button">刷新模板</button>
+          <button id="previewTunnelMechanicalBtn" type="button">预览请求</button>
+          <button class="green" id="submitTunnelMechanicalBtn" type="button">提交选中记录</button>
+        </div>
+      </div>
+      <div class="body">
+        <div class="tunnel-mechanical-layout">
+          <div class="tunnel-mechanical-form">
+            <section>
+              <div class="section-head">
+                <h3>登录会话</h3>
+              </div>
+              <div class="body stack">
+                <div class="tunnel-auth-grid">
+                  <label>平台地址 <input id="tunnelMechanicalBaseUrl" value="https://zhyhpt.yciccloud.com" /></label>
+                  <label>Authorization <input id="tunnelMechanicalAuthorization" autocomplete="off" placeholder="Bearer 或系统返回的 token" /></label>
+                  <label class="wide">Cookie
+                    <textarea id="tunnelMechanicalCookie" autocomplete="off" placeholder="可选；如果 Authorization 足够，可留空"></textarea>
+                  </label>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <div class="section-head">
+                <h3>录入参数</h3>
+              </div>
+              <div class="body stack">
+                <div class="tunnel-meta-grid">
+                  <label>检查日期 <input id="tunnelMechanicalCheckTime" type="date" /></label>
+                  <label>天气 <input id="tunnelMechanicalWeather" value="晴" /></label>
+                  <label>检查人
+                    <select id="tunnelMechanicalChecker"></select>
+                  </label>
+                  <label>记录人
+                    <select id="tunnelMechanicalRecorder"></select>
+                  </label>
+                  <label>车牌 <input id="tunnelMechanicalCarLicense" value="云JJX350" /></label>
+                  <label>数量 <input id="tunnelMechanicalNums" value="1" /></label>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <div class="section-head">
+                <h3>隧道模板</h3>
+                <div class="toolbar">
+                  <button id="selectAllTunnelMechanicalBtn" type="button">全选</button>
+                  <button id="clearTunnelMechanicalBtn" type="button">全不选</button>
+                </div>
+              </div>
+              <div class="body">
+                <div class="tunnel-table-wrap">
+                  <table class="tunnel-table">
+                    <thead>
+                      <tr>
+                        <th class="center">录入</th>
+                        <th>资产</th>
+                        <th>编码</th>
+                        <th>位置</th>
+                        <th>设备名称</th>
+                        <th>车牌</th>
+                        <th>数量</th>
+                      </tr>
+                    </thead>
+                    <tbody id="tunnelMechanicalRows"></tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <aside>
+            <div class="section-head">
+              <h3>请求预览 / 结果</h3>
+            </div>
+            <div class="body">
+              <pre id="tunnelMechanicalResult" class="tunnel-result-box"></pre>
+            </div>
+          </aside>
         </div>
       </div>
     </section>
@@ -1602,6 +1777,7 @@
       editingCustomReminderId: null,
       lightAgentRooms: [],
       lightAgentMembers: [],
+      lightAgentWechatStatusTimer: null,
       todayReminderEvents: [],
       todayReminderGroupStatuses: [],
       todayReminderDate: "",
@@ -1610,6 +1786,7 @@
       patrolWarningLatest: null,
       patrolWarningPanelState: null,
       patrolWarningPanelRefreshInFlight: false,
+      tunnelMechanicalTemplates: null,
     };
     const BEIJING_TIME_ZONE = "Asia/Shanghai";
     const shiftOptions = ["", "早", "中", "晚", "休", "出差"];
@@ -1921,6 +2098,7 @@
         $("todayPage").classList.toggle("hidden", tab !== "today");
         $("reviewPage").classList.toggle("hidden", tab !== "review");
         $("savedPage").classList.toggle("hidden", tab !== "saved");
+        $("tunnelMechanicalPage").classList.toggle("hidden", tab !== "tunnelMechanical");
         $("settingsPage").classList.toggle("hidden", tab !== "settings");
         $("recordsPage").classList.toggle("hidden", tab !== "records");
         $("statusPage").classList.toggle("hidden", tab !== "status");
@@ -1929,6 +2107,7 @@
           loadSavedRosters();
           loadSavedDutyChart();
         }
+        if (tab === "tunnelMechanical") loadTunnelMechanicalTemplates();
         if (tab === "records") loadSendRecords();
         if (tab === "status") loadSystemStatus();
       });
@@ -2834,11 +3013,41 @@
     $("addPersonnelNameBtn").addEventListener("click", () => addNameTag("personnelNames", $("personnelNamesTagInput").value));
 
     function wechatMemberLabel(member) {
-      return String(member.sender_nickname || member.wechat_group_member_name || member.wechat_group_runtime_sender_id || member.runtime_sender_id || member.sender_id || "").trim();
+      const candidates = [
+        member.display_name,
+        member.sender_nickname,
+        member.wechat_group_member_name,
+        member.room_alias,
+        member.sender_room_alias,
+        member.profile_nickname,
+        member.primary_nickname,
+        member.remark,
+        member.alias,
+        member.contact_name,
+        member.name,
+        member.nickName,
+        member.nickname,
+      ];
+      const id = wechatMemberRuntimeId(member);
+      const label = candidates.map((value) => String(value || "").trim()).find((value) => value && value !== id);
+      return label || "";
     }
 
     function wechatMemberRuntimeId(member) {
       return String(member.runtime_sender_id || member.sender_id || member.wechat_group_runtime_sender_id || "").trim();
+    }
+
+    function shortWechatId(id) {
+      const text = String(id || "").trim();
+      if (text.length <= 18) return text;
+      return `${text.slice(0, 8)}...${text.slice(-6)}`;
+    }
+
+    function wechatMemberDisplayText(member) {
+      const id = wechatMemberRuntimeId(member);
+      const label = wechatMemberLabel(member);
+      if (label) return `${label} · ${shortWechatId(id)}`;
+      return `昵称未识别 · ${shortWechatId(id)}`;
     }
 
     function renderLightAgentRooms() {
@@ -2856,15 +3065,17 @@
       const members = state.lightAgentMembers || [];
       const options = `<option value="">不@测试成员</option>` + members.map((member) => {
         const id = wechatMemberRuntimeId(member);
-        const label = wechatMemberLabel(member) || id;
-        return `<option value="${escapeHtml(id)}">${escapeHtml(label)} · ${escapeHtml(id)}</option>`;
+        const label = wechatMemberDisplayText(member);
+        return `<option value="${escapeHtml(id)}">${escapeHtml(label)}</option>`;
       }).join("");
       if ($("testWechatMember")) $("testWechatMember").innerHTML = options;
       if ($("lightAgentMemberList")) {
         $("lightAgentMemberList").innerHTML = members.map((member) => {
           const id = wechatMemberRuntimeId(member);
-          const label = wechatMemberLabel(member) || id;
-          return `<div class="item"><strong>${escapeHtml(label)}</strong><small>${escapeHtml(id)}</small></div>`;
+          const label = wechatMemberLabel(member);
+          const title = label || "昵称未识别";
+          const note = label ? `ID：${id}` : `LightAgent 当前只返回了成员 ID：${id}`;
+          return `<div class="item"><strong>${escapeHtml(title)}</strong><small>${escapeHtml(note)}</small></div>`;
         }).join("") || `<div class="item"><small>登录微信并同步成员后显示群成员</small></div>`;
       }
       renderWechatBindingList();
@@ -2881,7 +3092,7 @@
         const selected = String(saved.wechat_group_runtime_sender_id || "").trim();
         const options = `<option value="">未绑定</option>` + members.map((member) => {
           const id = wechatMemberRuntimeId(member);
-          const label = wechatMemberLabel(member) || id;
+          const label = wechatMemberDisplayText(member);
           const stableId = String(member.stable_member_id || member.wechat_group_member_id || "").trim();
           return `<option value="${escapeHtml(id)}" data-stable-member-id="${escapeHtml(stableId)}" data-member-name="${escapeHtml(label)}" ${id && id === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
         }).join("");
@@ -2894,15 +3105,36 @@
       }).join("") || `<div class="item"><small>先在人员名单或监控班提醒里添加姓名</small></div>`;
     }
 
-    async function refreshLightAgentWechatStatus() {
+    function lightAgentWechatConnected(body) {
+      const loginStatus = String(body && body.login_status || "").toLowerCase();
+      return Boolean((body && body.connected) || loginStatus === "connected" || loginStatus === "logged_in");
+    }
+
+    function stopLightAgentWechatStatusPolling() {
+      if (state.lightAgentWechatStatusTimer) {
+        clearInterval(state.lightAgentWechatStatusTimer);
+        state.lightAgentWechatStatusTimer = null;
+      }
+    }
+
+    function startLightAgentWechatStatusPolling() {
+      if (state.lightAgentWechatStatusTimer) return;
+      state.lightAgentWechatStatusTimer = setInterval(() => {
+        refreshLightAgentWechatStatus({ silent: true }).catch(() => null);
+      }, 2500);
+    }
+
+    async function refreshLightAgentWechatStatus(options = {}) {
       const status = $("lightAgentWechatStatus");
-      status.textContent = "正在读取微信登录状态...";
-      status.className = "status";
+      if (!options.silent) {
+        status.textContent = "正在读取微信登录状态...";
+        status.className = "status";
+      }
       try {
         const response = await fetch("/api/lightagent/wechat/status");
         const body = await response.json();
         if (!response.ok) throw new Error(body.detail || "读取失败");
-        const connected = body.login_status === "connected" || body.login_status === "logged_in";
+        const connected = lightAgentWechatConnected(body);
         status.textContent = connected ? "微信已登录，可以同步群聊和成员" : `微信未登录或等待扫码：${body.login_status || "unknown"}`;
         status.className = `status ${connected ? "ok" : ""}`;
         if (body.qr_image || body.qrcode_url) {
@@ -2911,10 +3143,16 @@
         } else {
           $("lightAgentQrBox").classList.toggle("hidden", connected);
         }
-        if (connected) await loadLightAgentRooms(false);
+        if (connected) {
+          stopLightAgentWechatStatusPolling();
+          await loadLightAgentRooms(false);
+        } else {
+          startLightAgentWechatStatusPolling();
+        }
       } catch (error) {
         status.textContent = `读取微信状态失败：${error.message || error}`;
         status.className = "status error";
+        startLightAgentWechatStatusPolling();
       }
     }
 
@@ -3270,7 +3508,7 @@
       $("notificationSenderType").value = body.config && body.config.sender_type ? body.config.sender_type : "wecom_webhook";
       $("webhookUrl").value = "";
       $("webhookUrl").placeholder = body.config && body.config.webhook_configured ? "已配置，如需修改请输入新地址" : "未配置，保存时请输入机器人地址";
-      $("lightAgentUrl").value = "";
+      $("lightAgentUrl").value = body.config ? body.config.lightagent_url || "" : "";
       $("lightAgentUrl").placeholder = body.config && body.config.lightagent_configured ? "已配置，如需修改请输入推送地址" : "例如 http://127.0.0.1:9899/api/push/send";
       $("lightAgentToken").value = "";
       $("lightAgentToken").placeholder = body.config && body.config.lightagent_token_configured ? "已配置，如需修改请输入新 token" : "可选";
@@ -3278,7 +3516,7 @@
       $("messageTemplate").value = body.config ? body.config.message_template || "" : "";
       updateNotificationBackendFields();
       if ($("notificationSenderType").value === "lightagent") {
-        loadLightAgentRooms(false).then(() => {
+        refreshLightAgentWechatStatus({ silent: true }).then(() => {
           if ($("lightAgentTarget").value.trim()) return loadLightAgentMembers();
         }).catch(() => null);
       }
@@ -3913,6 +4151,166 @@
       }
     }
 
+    function setTunnelMechanicalStatus(text, type = "") {
+      $("tunnelMechanicalStatus").textContent = text;
+      $("tunnelMechanicalStatus").className = `status ${type}`;
+    }
+
+    function tunnelMechanicalSelectedPerson(selectId) {
+      const select = $(selectId);
+      const option = select.options[select.selectedIndex];
+      return {
+        id: option ? option.value : "",
+        name: option ? option.dataset.name || option.textContent || "" : "",
+      };
+    }
+
+    function renderTunnelMechanicalPeople(people, defaults = {}) {
+      const options = (people || []).map((person) => (
+        `<option value="${escapeHtml(person.id)}" data-name="${escapeHtml(person.name)}">${escapeHtml(person.name)}（${escapeHtml(person.id)}）</option>`
+      )).join("");
+      $("tunnelMechanicalChecker").innerHTML = options;
+      $("tunnelMechanicalRecorder").innerHTML = options;
+      $("tunnelMechanicalChecker").value = defaults.checkerId || "8507";
+      $("tunnelMechanicalRecorder").value = defaults.recorderId || "8587";
+    }
+
+    function renderTunnelMechanicalRows(assets, defaults = {}) {
+      $("tunnelMechanicalRows").innerHTML = (assets || []).map((asset) => `
+        <tr data-tunnel-asset-id="${escapeHtml(asset.assetId)}">
+          <td class="center"><input type="checkbox" data-field="enabled" checked /></td>
+          <td>
+            <strong>${escapeHtml(asset.assetName)}</strong>
+            <input data-field="assetName" value="${escapeHtml(asset.assetName)}" />
+            <input data-field="assetId" value="${escapeHtml(asset.assetId)}" />
+            <input type="hidden" data-field="routeName" value="${escapeHtml(asset.routeName || "南景高速[普洱]")}" />
+            <input type="hidden" data-field="maintenanceSectionId" value="${escapeHtml(asset.maintenanceSectionId || "南景高速[普洱]")}" />
+            <input type="hidden" data-field="domainId" value="${escapeHtml(asset.domainId || "987")}" />
+            <input type="hidden" data-field="deptName" value="${escapeHtml(asset.deptName || "云南交投普洱分公司")}" />
+            <input type="hidden" data-field="content" value="${escapeHtml(asset.content || "隧道机电日常检查")}" />
+          </td>
+          <td>
+            <input data-field="assetCode" value="${escapeHtml(asset.assetCode)}" />
+            <input data-field="routeCode" value="${escapeHtml(asset.routeCode || "S41")}" />
+          </td>
+          <td><textarea data-field="location">${escapeHtml(asset.location || "")}</textarea></td>
+          <td><textarea data-field="devName">${escapeHtml(asset.devName || "")}</textarea></td>
+          <td><input data-field="carLicense" value="${escapeHtml(defaults.carLicense || asset.carLicense || "云JJX350")}" /></td>
+          <td><input data-field="nums" value="${escapeHtml(defaults.nums || asset.nums || "1")}" /></td>
+        </tr>
+      `).join("");
+    }
+
+    function tunnelMechanicalRowsPayload() {
+      return [...document.querySelectorAll("#tunnelMechanicalRows tr")].map((row) => {
+        const value = (field) => row.querySelector(`[data-field="${field}"]`)?.value || "";
+        const nums = value("nums").trim();
+        return {
+          enabled: Boolean(row.querySelector('[data-field="enabled"]')?.checked),
+          assetId: value("assetId").trim(),
+          assetName: value("assetName").trim(),
+          assetCode: value("assetCode").trim(),
+          routeCode: value("routeCode").trim() || "S41",
+          routeName: value("routeName").trim() || "南景高速[普洱]",
+          maintenanceSectionId: value("maintenanceSectionId").trim() || "南景高速[普洱]",
+          domainId: value("domainId").trim() || "987",
+          deptName: value("deptName").trim() || "云南交投普洱分公司",
+          devName: value("devName").trim(),
+          location: value("location").trim(),
+          content: value("content").trim() || "隧道机电日常检查",
+          result: 1,
+          carLicense: value("carLicense").trim() || "云JJX350",
+          nums: nums === "" ? null : nums,
+        };
+      });
+    }
+
+    function tunnelMechanicalPayload(dryRun = false) {
+      const checker = tunnelMechanicalSelectedPerson("tunnelMechanicalChecker");
+      const recorder = tunnelMechanicalSelectedPerson("tunnelMechanicalRecorder");
+      return {
+        base_url: $("tunnelMechanicalBaseUrl").value.trim() || "https://zhyhpt.yciccloud.com",
+        authorization: $("tunnelMechanicalAuthorization").value.trim(),
+        cookie: $("tunnelMechanicalCookie").value.trim(),
+        checkTime: $("tunnelMechanicalCheckTime").value || beijingDateInputValue(),
+        weather: $("tunnelMechanicalWeather").value.trim() || "晴",
+        checkerId: checker.id,
+        checker: checker.name,
+        recorderId: recorder.id,
+        recorder: recorder.name,
+        rows: tunnelMechanicalRowsPayload(),
+        dry_run: dryRun,
+      };
+    }
+
+    async function loadTunnelMechanicalTemplates(force = false) {
+      if (state.tunnelMechanicalTemplates && !force) return;
+      setTunnelMechanicalStatus("正在加载隧道机电模板...");
+      try {
+        const response = await fetch("/api/tunnel-mechanical/templates");
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.detail || "加载模板失败");
+        state.tunnelMechanicalTemplates = body;
+        $("tunnelMechanicalBaseUrl").value = body.base_url || "https://zhyhpt.yciccloud.com";
+        $("tunnelMechanicalCheckTime").value = body.defaults?.checkTime || beijingDateInputValue();
+        $("tunnelMechanicalWeather").value = body.defaults?.weather || "晴";
+        $("tunnelMechanicalCarLicense").value = body.defaults?.carLicense || "云JJX350";
+        $("tunnelMechanicalNums").value = body.defaults?.nums || "1";
+        renderTunnelMechanicalPeople(body.people || [], body.defaults || {});
+        renderTunnelMechanicalRows(body.assets || [], body.defaults || {});
+        $("tunnelMechanicalResult").textContent = "";
+        setTunnelMechanicalStatus(`已加载 ${body.assets?.length || 0} 条隧道模板`, "ok");
+      } catch (error) {
+        setTunnelMechanicalStatus(`加载失败：${error.message || error}`, "error");
+      }
+    }
+
+    function applyTunnelMechanicalBatchDefaults() {
+      const carLicense = $("tunnelMechanicalCarLicense").value.trim();
+      const nums = $("tunnelMechanicalNums").value.trim();
+      document.querySelectorAll("#tunnelMechanicalRows tr").forEach((row) => {
+        const carInput = row.querySelector('[data-field="carLicense"]');
+        const numsInput = row.querySelector('[data-field="nums"]');
+        if (carInput && carLicense) carInput.value = carLicense;
+        if (numsInput) numsInput.value = nums;
+      });
+    }
+
+    async function submitTunnelMechanical(dryRun) {
+      applyTunnelMechanicalBatchDefaults();
+      const payload = tunnelMechanicalPayload(dryRun);
+      const selectedCount = payload.rows.filter((row) => row.enabled).length;
+      if (!selectedCount) {
+        setTunnelMechanicalStatus("请至少选择一条隧道记录", "error");
+        return;
+      }
+      if (!dryRun && !window.confirm(`确认向智慧养护平台新增 ${selectedCount} 条隧道机电日常检查记录？`)) return;
+      setTunnelMechanicalStatus(dryRun ? "正在生成请求预览..." : "正在提交到智慧养护平台...");
+      try {
+        const response = await fetch("/api/tunnel-mechanical/submit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const body = await response.json();
+        $("tunnelMechanicalResult").textContent = JSON.stringify(body, null, 2);
+        if (!response.ok || !body.success) throw new Error(body.detail || "提交失败");
+        setTunnelMechanicalStatus(dryRun ? `已生成 ${selectedCount} 条请求预览` : `提交完成，成功 ${selectedCount} 条`, "ok");
+      } catch (error) {
+        setTunnelMechanicalStatus(`${dryRun ? "预览" : "提交"}失败：${error.message || error}`, "error");
+      }
+    }
+
+    $("loadTunnelMechanicalBtn").addEventListener("click", () => loadTunnelMechanicalTemplates(true));
+    $("previewTunnelMechanicalBtn").addEventListener("click", () => submitTunnelMechanical(true));
+    $("submitTunnelMechanicalBtn").addEventListener("click", () => submitTunnelMechanical(false));
+    $("selectAllTunnelMechanicalBtn").addEventListener("click", () => {
+      document.querySelectorAll('#tunnelMechanicalRows [data-field="enabled"]').forEach((input) => { input.checked = true; });
+    });
+    $("clearTunnelMechanicalBtn").addEventListener("click", () => {
+      document.querySelectorAll('#tunnelMechanicalRows [data-field="enabled"]').forEach((input) => { input.checked = false; });
+    });
+
     $("refreshSystemStatusBtn").addEventListener("click", loadSystemStatus);
     $("refreshTodayRemindersBtn").addEventListener("click", loadTodayReminders);
 
@@ -3950,6 +4348,7 @@
     $("previewDate").value = beijingDateInputValue();
     $("dailyDutyPreviewDate").value = beijingDateInputValue();
     $("savedDutyDate").value = beijingDateInputValue();
+    $("tunnelMechanicalCheckTime").value = beijingDateInputValue();
     bindMobileAutofill("personName", "mentionMobile");
     bindMobileAutofill("customReminderName", "customReminderMobile");
     setupImageViewer();
@@ -3962,6 +4361,7 @@
     loadSavedDutyChart();
     loadNotificationConfig();
     loadPatrolWarningConfig();
+    loadTunnelMechanicalTemplates();
     loadPersonnel().then(loadCustomReminders);
     loadDailyDutyConfig();
     loadPeople();

@@ -36,6 +36,10 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'id="patrolWarningImageMeta"' in html
     assert 'id="patrolSendContentMode"' in html
     assert '<option value="image">仅图片</option>' in html
+    assert 'data-tab="tunnelMechanical">隧道机电每日录入' in html
+    assert 'id="tunnelMechanicalPage"' in html
+    assert 'id="submitTunnelMechanicalBtn"' in html
+    assert 'loadTunnelMechanicalTemplates' in html
     assert "refreshPatrolWarningPanel" in html
     assert "loadTodayReminders" in html
     assert "todayReminderGroupKey" in html
@@ -56,6 +60,70 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert "已过预警结束巡查提醒" in html
     assert "其余待发送提醒" in html
     assert "event-collapsed" in html
+
+
+def test_tunnel_mechanical_templates_and_dry_run_payload(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    templates_response = client.get("/api/tunnel-mechanical/templates")
+
+    assert templates_response.status_code == 200
+    templates = templates_response.json()
+    assert templates["base_url"] == "https://zhyhpt.yciccloud.com"
+    assert len(templates["assets"]) == 4
+    assert {"id": "8647", "name": "罗富耀"} in templates["people"]
+
+    asset = templates["assets"][0]
+    response = client.post(
+        "/api/tunnel-mechanical/submit",
+        json={
+            "base_url": "https://zhyhpt.yciccloud.com",
+            "authorization": "Bearer test-token",
+            "checkTime": "2026-07-24",
+            "weather": "晴",
+            "checkerId": "8647",
+            "checker": "罗富耀",
+            "recorderId": "8587",
+            "recorder": "易国兵",
+            "dry_run": True,
+            "rows": [asset],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    payload = body["submissions"][0]["payload"]
+    assert body["success"] is True
+    assert body["dry_run"] is True
+    assert payload["assetId"] == "723"
+    assert payload["checker"] == "罗富耀"
+    assert payload["recorder"] == "易国兵"
+    assert payload["checkTime"] == "2026-07-24"
+    assert payload["domains"][0]["location"] == "K86+660-K87+351三宝厂隧道"
+
+
+def test_tunnel_mechanical_submit_rejects_unexpected_host(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    asset = client.get("/api/tunnel-mechanical/templates").json()["assets"][0]
+
+    response = client.post(
+        "/api/tunnel-mechanical/submit",
+        json={
+            "base_url": "https://example.com",
+            "checkTime": "2026-07-24",
+            "weather": "晴",
+            "checkerId": "8647",
+            "checker": "罗富耀",
+            "recorderId": "8587",
+            "recorder": "易国兵",
+            "dry_run": False,
+            "rows": [asset],
+        },
+    )
+
+    assert response.status_code == 400
 
 
 def test_today_reminders_endpoint_returns_today_plan(tmp_path):
@@ -460,7 +528,7 @@ def test_lightagent_notification_config_hides_secret_fields_and_tests_send(tmp_p
     assert save_response.status_code == 200
     public_config = get_response.json()["config"]
     assert public_config["sender_type"] == "lightagent"
-    assert public_config["lightagent_url"] == ""
+    assert public_config["lightagent_url"] == "https://lightagent.test/api/push/send"
     assert public_config["lightagent_configured"] is True
     assert public_config["lightagent_token_configured"] is True
     assert public_config["lightagent_target"] == "room-1"
@@ -494,14 +562,20 @@ def test_lightagent_notification_env_defaults_are_used_for_empty_database(tmp_pa
     monkeypatch.setattr("app.main.LightAgentNotifyClient", FakeLightAgentClient)
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
-    repo.save_notification_config(webhook_url="https://example.test/cgi-bin/webhook/send?key=old")
+    repo.save_notification_config(
+        sender_type="lightagent",
+        webhook_url="",
+        lightagent_url="http://old-lightagent:9899/api/push/send",
+        lightagent_token="old-token",
+        lightagent_target="old-room",
+    )
     client = TestClient(app)
 
     public_config = client.get("/api/notification-config").json()["config"]
     test_response = client.post("/api/notification-config/test", json={"test_mobile": "10000000000"})
 
     assert public_config["sender_type"] == "lightagent"
-    assert public_config["lightagent_url"] == ""
+    assert public_config["lightagent_url"] == "http://lightagent:9899/api/push/send"
     assert public_config["lightagent_configured"] is True
     assert public_config["lightagent_token_configured"] is True
     assert public_config["lightagent_target"] == "room-1"
@@ -536,7 +610,14 @@ def test_lightagent_wechat_proxy_endpoints(tmp_path, monkeypatch):
                 ]
             }
         if method == "GET" and path == "/api/wechat-group/members":
-            return {"status": "success", "members": [{"runtime_sender_id": "@member-1", "sender_nickname": "Alice"}]}
+            return {
+                "status": "success",
+                "members": [
+                    {"runtime_sender_id": "@member-1", "sender_nickname": "Alice"},
+                    {"id": "@member-2", "nickName": "Bob"},
+                    {"sender_id": "@member-3", "sender_nickname": "@member-3"},
+                ],
+            }
         raise AssertionError(f"unexpected LightAgent request: {method} {path}")
 
     monkeypatch.setattr(main_module, "_lightagent_web_request", fake_lightagent_web_request)
@@ -558,7 +639,31 @@ def test_lightagent_wechat_proxy_endpoints(tmp_path, monkeypatch):
         "selected_room_ids": ["room-1"],
         "selected_room_names": ["test-room"],
     }
-    assert members_response.json()["members"] == [{"runtime_sender_id": "@member-1", "sender_nickname": "Alice"}]
+    assert members_response.json()["members"] == [
+        {
+            "runtime_sender_id": "@member-1",
+            "sender_nickname": "Alice",
+            "sender_id": "@member-1",
+            "display_name": "Alice",
+            "is_raw_id_name": False,
+        },
+        {
+            "id": "@member-2",
+            "nickName": "Bob",
+            "runtime_sender_id": "@member-2",
+            "sender_id": "@member-2",
+            "display_name": "Bob",
+            "sender_nickname": "Bob",
+            "is_raw_id_name": False,
+        },
+        {
+            "sender_id": "@member-3",
+            "sender_nickname": "@member-3",
+            "runtime_sender_id": "@member-3",
+            "display_name": "@member-3",
+            "is_raw_id_name": True,
+        },
+    ]
     assert calls[-1] == {
         "method": "GET",
         "path": "/api/wechat-group/members",
