@@ -18,7 +18,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import httpx
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
@@ -222,6 +222,14 @@ class WechatQueryRequest(BaseModel):
     target_date: date | None = None
 
 
+class WechatRosterConfirmRequest(BaseModel):
+    year: int
+    month: int
+    source_image_path: str = ""
+    grid: list[dict[str, Any]]
+    overwrite: bool = False
+
+
 def create_app(
     *,
     data_dir: str | Path | None = None,
@@ -253,6 +261,8 @@ def create_app(
             if request.url.path == "/health":
                 return await call_next(request)
             if request.url.path in {"/login", "/logout"}:
+                return await call_next(request)
+            if _is_wechat_internal_api_request(request):
                 return await call_next(request)
             if _is_request_authorized(request, admin_username, configured_admin_password, session_secret):
                 return await call_next(request)
@@ -323,15 +333,8 @@ def create_app(
 
     @app.post("/api/rosters/upload")
     def upload_roster(file: UploadFile = File(...)):
-        suffix = Path(file.filename or "roster.png").suffix.lower() or ".png"
-        if suffix not in ALLOWED_UPLOAD_SUFFIXES:
-            raise HTTPException(status_code=400, detail="仅支持 jpg、png、webp、bmp 图片")
-        if file.content_type and file.content_type.lower() not in ALLOWED_UPLOAD_TYPES:
-            raise HTTPException(status_code=400, detail="上传文件类型不是图片")
-        target = uploads / f"{uuid.uuid4().hex}{suffix}"
+        target = _save_roster_upload(file, uploads)
         try:
-            _save_upload_file(file, target)
-            _cleanup_old_uploads(uploads)
             result = extract_roster_image(str(target))
             result["source_image_url"] = f"/api/uploads/{Path(result.get('source_image_path') or target).name}"
             return result
@@ -722,6 +725,27 @@ def create_app(
         _require_wechat_query_auth(http_request)
         return _build_wechat_query_response(repo, query)
 
+    @app.post("/api/wechat-roster/import")
+    def wechat_roster_import(
+        http_request: Request,
+        file: UploadFile = File(...),
+        overwrite: bool = Form(False),
+    ):
+        _require_wechat_query_auth(http_request)
+        return _build_wechat_roster_import_response(repo, uploads, file, overwrite=overwrite)
+
+    @app.post("/api/wechat-roster/confirm")
+    def wechat_roster_confirm(http_request: Request, request: WechatRosterConfirmRequest):
+        _require_wechat_query_auth(http_request)
+        return _build_wechat_roster_confirm_response(
+            repo,
+            int(request.year),
+            int(request.month),
+            list(request.grid or []),
+            source_image_path=str(request.source_image_path or ""),
+            overwrite=bool(request.overwrite),
+        )
+
     @app.get("/api/send-records")
     def list_send_records(limit: int = 100):
         return {"records": repo.list_send_records(limit)}
@@ -835,6 +859,22 @@ def _save_upload_file(file: UploadFile, target: Path) -> None:
             output.write(chunk)
 
 
+def _save_roster_upload(file: UploadFile, uploads: Path) -> Path:
+    suffix = Path(file.filename or "roster.png").suffix.lower() or ".png"
+    if suffix not in ALLOWED_UPLOAD_SUFFIXES:
+        raise HTTPException(status_code=400, detail="仅支持 jpg、png、webp、bmp 图片")
+    if file.content_type and file.content_type.lower() not in ALLOWED_UPLOAD_TYPES:
+        raise HTTPException(status_code=400, detail="上传文件类型不是图片")
+    target = uploads / f"{uuid.uuid4().hex}{suffix}"
+    try:
+        _save_upload_file(file, target)
+        _cleanup_old_uploads(uploads)
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+    return target
+
+
 def _cleanup_old_uploads(uploads: Path) -> None:
     if UPLOAD_KEEP_DAYS <= 0:
         return
@@ -863,6 +903,22 @@ def _is_request_authorized(request: Request, username: str, password: str, sessi
     if _is_authorized(request.headers.get("authorization", ""), username, password):
         return True
     return _verify_session_token(request.cookies.get(SESSION_COOKIE_NAME, ""), username, session_secret)
+
+
+def _is_wechat_internal_api_request(request: Request) -> bool:
+    if request.url.path not in {
+        "/api/wechat-query",
+        "/api/wechat-roster/import",
+        "/api/wechat-roster/confirm",
+    }:
+        return False
+    token = _wechat_query_token()
+    if not token:
+        return True
+    auth = str(request.headers.get("authorization") or "")
+    bearer = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+    supplied = str(request.headers.get("x-duty-query-token") or bearer).strip()
+    return bool(supplied) and secrets.compare_digest(supplied, token)
 
 
 def _create_session_token(username: str, secret: str, max_age_seconds: int) -> str:
@@ -1018,6 +1074,123 @@ def _require_wechat_query_auth(request: Request) -> None:
     supplied = str(request.headers.get("x-duty-query-token") or bearer).strip()
     if not supplied or not secrets.compare_digest(supplied, token):
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _build_wechat_roster_import_response(
+    repo: DutyRepository,
+    uploads: Path,
+    file: UploadFile,
+    *,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    target = _save_roster_upload(file, uploads)
+    try:
+        result = extract_roster_image(str(target))
+    except Exception as exc:
+        target.unlink(missing_ok=True)
+        LOGGER.exception("微信群排班表识别失败：%s", exc)
+        return {
+            "success": False,
+            "import_status": "ocr_failed",
+            "reply": "排班表图片识别失败，请换一张更清晰的原图，或到 duty-reminder 网页端上传校对。",
+        }
+    result["source_image_url"] = f"/api/uploads/{Path(result.get('source_image_path') or target).name}"
+    grid = list(result.get("grid") or [])
+    year = int(result.get("year") or _today_in_tz().year)
+    month = int(result.get("month") or _today_in_tz().month)
+    if result.get("ocr_status") not in {"ok", "template_ok"} or not grid:
+        return {
+            "success": False,
+            "import_status": "ocr_failed",
+            "ocr_status": str(result.get("ocr_status") or ""),
+            "year": year,
+            "month": month,
+            "source_image_path": str(result.get("source_image_path") or target),
+            "source_image_url": result["source_image_url"],
+            "reply": "没有从图片中识别到可导入的排班表，请换一张完整、清晰的排班表图片。",
+        }
+    return _build_wechat_roster_confirm_response(
+        repo,
+        year,
+        month,
+        grid,
+        source_image_path=str(result.get("source_image_path") or target),
+        overwrite=overwrite,
+        ocr_status=str(result.get("ocr_status") or ""),
+        source_image_url=str(result.get("source_image_url") or ""),
+    )
+
+
+def _build_wechat_roster_confirm_response(
+    repo: DutyRepository,
+    year: int,
+    month: int,
+    grid: list[dict[str, Any]],
+    *,
+    source_image_path: str = "",
+    overwrite: bool = False,
+    ocr_status: str = "",
+    source_image_url: str = "",
+) -> dict[str, Any]:
+    try:
+        sanitized_grid = _sanitize_roster_grid_for_month(grid, year, month)
+    except Exception:
+        return {
+            "success": False,
+            "import_status": "invalid_month",
+            "reply": f"排班表年月无效：{year}年{month}月，请到网页端上传后手动校对。",
+        }
+    if _has_unconfirmed_roster_names(sanitized_grid):
+        return {
+            "success": False,
+            "import_status": "needs_names",
+            "year": year,
+            "month": month,
+            "people_count": len(sanitized_grid),
+            "source_image_path": source_image_path,
+            "source_image_url": source_image_url,
+            "grid": sanitized_grid,
+            "reply": (
+                f"已识别 {year}年{month}月排班表，共 {len(sanitized_grid)} 行，"
+                "但姓名没有识别完整，暂不自动导入。请到 duty-reminder 网页端上传校对后确认。"
+            ),
+        }
+    existing = repo.get_roster_month(year, month)
+    if existing and not overwrite:
+        diffs = _diff_roster_grids(existing.get("grid", []), sanitized_grid)
+        preview = f"，发现 {len(diffs)} 处差异" if diffs else "，内容看起来没有明显差异"
+        return {
+            "success": False,
+            "import_status": "conflict",
+            "conflict": True,
+            "year": year,
+            "month": month,
+            "people_count": len(sanitized_grid),
+            "source_image_path": source_image_path,
+            "source_image_url": source_image_url,
+            "grid": sanitized_grid,
+            "diffs": diffs[:50],
+            "reply": (
+                f"{year}年{month}月排班表已存在{preview}。\n"
+                "5 分钟内回复“覆盖导入”可替换现有排班；回复“取消导入”放弃。"
+            ),
+        }
+    repo.save_roster_month(year, month, sanitized_grid, source_image_path)
+    return {
+        "success": True,
+        "import_status": "imported_overwrite" if existing and overwrite else "imported",
+        "ocr_status": ocr_status,
+        "year": year,
+        "month": month,
+        "people_count": len(sanitized_grid),
+        "source_image_path": source_image_path,
+        "source_image_url": source_image_url,
+        "reply": (
+            f"已导入 {year}年{month}月排班表，共 {len(sanitized_grid)} 人。"
+            if not existing
+            else f"已覆盖导入 {year}年{month}月排班表，共 {len(sanitized_grid)} 人。"
+        ),
+    }
 
 
 def _build_wechat_query_response(repo: DutyRepository, query: WechatQueryRequest) -> dict[str, Any]:

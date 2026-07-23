@@ -598,6 +598,110 @@ def test_wechat_query_help_returns_numbered_menu(tmp_path, monkeypatch):
     assert "回复序号即可执行" in body["reply"]
 
 
+def test_wechat_roster_import_requires_token(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/wechat-roster/import",
+        files={"file": ("roster.png", b"fake-image", "image/png")},
+    )
+
+    assert response.status_code == 401
+
+
+def test_wechat_roster_import_auto_confirms_with_internal_token_when_admin_password_is_set(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+
+    def fake_extract(path):
+        return {
+            "year": 2025,
+            "month": 9,
+            "source_image_path": str(path),
+            "ocr_status": "template_ok",
+            "grid": [{"name": "示例甲", "days": {"16": "中"}}],
+        }
+
+    monkeypatch.setattr("app.main.extract_roster_image", fake_extract)
+    app = create_app(
+        data_dir=tmp_path / "data",
+        upload_dir=tmp_path / "uploads",
+        start_scheduler=False,
+        admin_password="admin-secret",
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/wechat-roster/import",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        files={"file": ("roster.png", b"fake-image", "image/png")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["import_status"] == "imported"
+    assert "已导入 2025年9月排班表" in body["reply"]
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    roster = repo.get_roster_month(2025, 9)
+    assert roster is not None
+    assert roster["grid"] == [{"name": "示例甲", "days": {"16": "中"}}]
+
+
+def test_wechat_roster_import_conflict_can_be_confirmed_with_token(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+
+    def fake_extract(path):
+        return {
+            "year": 2025,
+            "month": 9,
+            "source_image_path": str(path),
+            "ocr_status": "template_ok",
+            "grid": [{"name": "示例甲", "days": {"16": "晚"}}],
+        }
+
+    monkeypatch.setattr("app.main.extract_roster_image", fake_extract)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/rosters/confirm",
+        json={"year": 2025, "month": 9, "grid": [{"name": "示例甲", "days": {"16": "中"}}]},
+    )
+
+    import_response = client.post(
+        "/api/wechat-roster/import",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        files={"file": ("roster.png", b"fake-image", "image/png")},
+    )
+
+    assert import_response.status_code == 200
+    import_body = import_response.json()
+    assert import_body["success"] is False
+    assert import_body["import_status"] == "conflict"
+    assert "覆盖导入" in import_body["reply"]
+
+    confirm_response = client.post(
+        "/api/wechat-roster/confirm",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={
+            "year": import_body["year"],
+            "month": import_body["month"],
+            "source_image_path": import_body["source_image_path"],
+            "grid": import_body["grid"],
+            "overwrite": True,
+        },
+    )
+
+    assert confirm_response.status_code == 200
+    confirm_body = confirm_response.json()
+    assert confirm_body["success"] is True
+    assert confirm_body["import_status"] == "imported_overwrite"
+    assert "已覆盖导入 2025年9月排班表" in confirm_body["reply"]
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    assert repo.get_roster_month(2025, 9)["grid"] == [{"name": "示例甲", "days": {"16": "晚"}}]
+
+
 def test_wechat_query_returns_bound_person_monitor_plan(tmp_path, monkeypatch):
     monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
