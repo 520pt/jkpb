@@ -176,6 +176,33 @@ def test_personnel_contacts_save_and_clear_wechat_binding(tmp_path: Path):
     assert repo.list_personnel() == [{"name": "Alice", "mention_mobile": "10000000000"}]
 
 
+def test_monitored_people_include_saved_wechat_binding(tmp_path: Path):
+    repo = DutyRepository(tmp_path / "duty.db")
+
+    repo.save_personnel_contacts(
+        [
+            _personnel_row(
+                "示例甲",
+                "10000000000",
+                wechat_group_room_id="room-1",
+                wechat_group_room_name="功能群",
+                wechat_group_member_id="stable-member-1",
+                wechat_group_runtime_sender_id="@member-1",
+                wechat_group_member_name="示例甲微信",
+            )
+        ]
+    )
+    repo.save_monitored_person(name="示例甲", mention_mobile="10000000000")
+
+    people = repo.list_monitored_people()
+
+    assert people[0]["wechat_group_room_id"] == "room-1"
+    assert people[0]["wechat_group_room_name"] == "功能群"
+    assert people[0]["wechat_group_member_id"] == "stable-member-1"
+    assert people[0]["wechat_group_runtime_sender_id"] == "@member-1"
+    assert people[0]["wechat_group_member_name"] == "示例甲微信"
+
+
 def test_custom_reminder_roundtrip_updates_personnel_contact(tmp_path: Path):
     repo = DutyRepository(tmp_path / "duty.db")
 

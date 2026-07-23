@@ -656,6 +656,11 @@ class DutyRepository:
         wecom_userid: str = "",
         mention_text: str = "",
         mention_mobile: str = "",
+        wechat_group_room_id: str = "",
+        wechat_group_room_name: str = "",
+        wechat_group_member_id: str = "",
+        wechat_group_runtime_sender_id: str = "",
+        wechat_group_member_name: str = "",
         daily_time: str = "07:50",
         before_shift_minutes: int = 10,
         rest_reminder_enabled: bool = False,
@@ -700,7 +705,19 @@ class DutyRepository:
             )
             if clean_original_name and clean_original_name != clean_name:
                 conn.execute("DELETE FROM monitored_people WHERE name = ?", (clean_original_name,))
-        self.upsert_personnel_contacts([{"name": clean_name, "mention_mobile": mention_mobile}])
+        self.upsert_personnel_contacts(
+            [
+                {
+                    "name": clean_name,
+                    "mention_mobile": mention_mobile,
+                    "wechat_group_room_id": wechat_group_room_id,
+                    "wechat_group_room_name": wechat_group_room_name,
+                    "wechat_group_member_id": wechat_group_member_id,
+                    "wechat_group_runtime_sender_id": wechat_group_runtime_sender_id,
+                    "wechat_group_member_name": wechat_group_member_name,
+                }
+            ]
+        )
 
     def delete_monitored_person(self, name: str) -> bool:
         clean_name = name.strip()
@@ -711,14 +728,25 @@ class DutyRepository:
         return cursor.rowcount > 0
 
     def list_monitored_people(self, enabled_only: bool = False) -> list[dict[str, Any]]:
-        query = "SELECT * FROM monitored_people"
+        query = """
+            SELECT
+                monitored_people.*,
+                personnel_names.wechat_group_room_id AS contact_wechat_group_room_id,
+                personnel_names.wechat_group_room_name AS contact_wechat_group_room_name,
+                personnel_names.wechat_group_member_id AS contact_wechat_group_member_id,
+                personnel_names.wechat_group_runtime_sender_id AS contact_wechat_group_runtime_sender_id,
+                personnel_names.wechat_group_member_name AS contact_wechat_group_member_name
+            FROM monitored_people
+            LEFT JOIN personnel_names ON personnel_names.name = monitored_people.name
+        """
         if enabled_only:
-            query += " WHERE enabled = 1"
-        query += " ORDER BY name"
+            query += " WHERE monitored_people.enabled = 1"
+        query += " ORDER BY monitored_people.name"
         with self._connect() as conn:
             rows = conn.execute(query).fetchall()
-        return [
-            {
+        people = []
+        for row in rows:
+            item = {
                 "name": row["name"],
                 "wecom_userid": row["wecom_userid"],
                 "mention_text": row["mention_text"],
@@ -730,8 +758,17 @@ class DutyRepository:
                 "rest_message_template": _normalize_rest_message_template(row["rest_message_template"]),
                 "enabled": bool(row["enabled"]),
             }
-            for row in rows
-        ]
+            wechat_fields = {
+                "wechat_group_room_id": row["contact_wechat_group_room_id"],
+                "wechat_group_room_name": row["contact_wechat_group_room_name"],
+                "wechat_group_member_id": row["contact_wechat_group_member_id"],
+                "wechat_group_runtime_sender_id": row["contact_wechat_group_runtime_sender_id"],
+                "wechat_group_member_name": row["contact_wechat_group_member_name"],
+            }
+            if any(str(value or "").strip() for value in wechat_fields.values()):
+                item.update(wechat_fields)
+            people.append(item)
+        return people
 
     def save_custom_reminder(
         self,

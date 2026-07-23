@@ -80,6 +80,10 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'data-delete-person="${escapeHtml(person.name)}"' in html
     assert 'id="testMobile" placeholder="10000000000"' in html
     assert 'id="mentionMobile" placeholder="10000000000"' in html
+    assert 'id="monitorWechatMember"' in html
+    assert 'id="monitorWechatMemberId" readonly placeholder="未绑定"' in html
+    assert "monitorWechatBindingPayload" in html
+    assert "monitorWechatBindingText" in html
     assert 'id="patrolWarningSettings"' in html
     assert 'id="patrolLoginUrl"' in html
     assert 'id="patrolRouteCode" placeholder="S41"' in html
@@ -345,6 +349,49 @@ def test_tunnel_mechanical_login_retries_when_auto_captcha_is_wrong(tmp_path, mo
 
     assert state["access_token"] == "token-2"
     assert calls == {"captcha": 2, "login": 2}
+
+
+def test_tunnel_mechanical_captcha_fetch_retries_until_solved(monkeypatch):
+    calls = {"get": 0, "solve": 0}
+
+    class FakeResponse:
+        status_code = 200
+
+        def __init__(self, image):
+            self._image = image
+
+        def json(self):
+            return {"code": 200, "captchaEnabled": True, "img": self._image, "uuid": f"uuid-{calls['get']}"}
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url, headers=None):
+            calls["get"] += 1
+            return FakeResponse(f"encrypted-{calls['get']}")
+
+    def fake_solve(image):
+        calls["solve"] += 1
+        if calls["solve"] < 3:
+            raise main_module.HTTPException(status_code=422, detail="unreadable")
+        return "8"
+
+    monkeypatch.setattr(main_module.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(main_module, "_tunnel_mechanical_decrypt_text", lambda text: text.replace("encrypted", "image"))
+    monkeypatch.setattr(main_module, "_solve_tunnel_mechanical_captcha", fake_solve)
+
+    result = asyncio.run(main_module._fetch_tunnel_mechanical_captcha("https://example.test", solve_attempts=5))
+
+    assert result["code"] == "8"
+    assert result["uuid"] == "uuid-3"
+    assert calls == {"get": 3, "solve": 3}
 
 
 def test_tunnel_mechanical_captcha_text_solver_calculates_math():
@@ -1870,6 +1917,35 @@ def test_monitored_person_can_be_updated_and_deleted(tmp_path):
     assert update_response.json()["people"][0]["daily_time"] == "08:10"
     assert delete_response.status_code == 200
     assert delete_response.json()["people"] == []
+
+
+def test_monitored_person_roundtrips_wechat_binding(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/people",
+        json={
+            "name": "示例甲",
+            "mention_mobile": "10000000000",
+            "wechat_group_room_id": "room-1",
+            "wechat_group_room_name": "功能群",
+            "wechat_group_member_id": "stable-member-1",
+            "wechat_group_runtime_sender_id": "@member-1",
+            "wechat_group_member_name": "示例甲微信 · @member-1",
+            "daily_time": "07:50",
+            "before_shift_minutes": 10,
+            "enabled": True,
+        },
+    )
+
+    assert response.status_code == 200
+    person = response.json()["people"][0]
+    assert person["wechat_group_room_id"] == "room-1"
+    assert person["wechat_group_room_name"] == "功能群"
+    assert person["wechat_group_member_id"] == "stable-member-1"
+    assert person["wechat_group_runtime_sender_id"] == "@member-1"
+    assert person["wechat_group_member_name"] == "示例甲微信 · @member-1"
 
 
 def test_saving_notification_config_with_blank_webhook_preserves_existing_value(tmp_path):

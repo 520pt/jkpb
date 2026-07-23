@@ -1687,6 +1687,14 @@
                   <label>@ 手机号 <input id="mentionMobile" placeholder="10000000000" /></label>
                 </div>
                 <div class="field-grid">
+                  <label>个人微信群成员
+                    <select id="monitorWechatMember"></select>
+                  </label>
+                  <label>微信群成员 ID
+                    <input id="monitorWechatMemberId" readonly placeholder="未绑定" />
+                  </label>
+                </div>
+                <div class="field-grid">
                   <label>每日提醒时间 <input id="dailyTime" type="time" value="07:50" /></label>
                   <label>班次提前提醒分钟 <input id="beforeMinutes" type="number" min="0" max="1440" value="10" /></label>
                 </div>
@@ -2808,6 +2816,7 @@
       state.editingPersonName = null;
       $("personName").value = "";
       $("mentionMobile").value = "";
+      renderMonitorWechatMemberOptions("");
       $("dailyTime").value = "07:50";
       $("beforeMinutes").value = "10";
       $("restReminderEnabled").checked = false;
@@ -2824,6 +2833,7 @@
       state.editingPersonName = person.name;
       $("personName").value = person.name || "";
       $("mentionMobile").value = person.mention_mobile || "";
+      renderMonitorWechatMemberOptions(person.wechat_group_runtime_sender_id || "");
       $("dailyTime").value = person.daily_time || "07:50";
       $("beforeMinutes").value = String(person.before_shift_minutes || 10);
       $("restReminderEnabled").checked = Boolean(person.rest_reminder_enabled);
@@ -2841,6 +2851,7 @@
         original_name: state.editingPersonName || "",
         name: $("personName").value.trim(),
         mention_mobile: $("mentionMobile").value.trim(),
+        ...monitorWechatBindingPayload(),
         daily_time: $("dailyTime").value || "07:50",
         before_shift_minutes: Number($("beforeMinutes").value || 10),
         rest_reminder_enabled: $("restReminderEnabled").checked,
@@ -2867,6 +2878,7 @@
         <div class="item">
           <strong>${escapeHtml(person.name)}</strong>
           <small>@手机号 ${escapeHtml(person.mention_mobile || "未填写")} · 每日提醒时间 ${escapeHtml(person.daily_time)} · 班次提前提醒 ${person.before_shift_minutes} 分钟 · 休息提醒 ${person.rest_reminder_enabled ? escapeHtml(person.rest_reminder_time) : "未启用"}</small>
+          <small>个人微信群 ${monitorWechatBindingText(person)}</small>
           ${person.rest_reminder_enabled ? `<small>休息文案 ${escapeHtml(person.rest_message_template || "{name} {rest_status}")}</small>` : ""}
           <div class="settings-actions">
             <button type="button" data-edit-person="${escapeHtml(person.name)}">编辑</button>
@@ -2874,6 +2886,8 @@
           </div>
         </div>
       `).join("") || `<div class="item"><small>暂无人员</small></div>`;
+      renderPersonnelNameOptions();
+      renderMonitorWechatMemberOptions();
     }
 
     $("peopleList").addEventListener("click", async (event) => {
@@ -2997,6 +3011,7 @@
       return Array.from(new Set([
         ...parseNameList($("personnelNames").value),
         ...state.personnelPeople.map((person) => person.name).filter(Boolean),
+        ...state.monitoredPeople.map((person) => person.name).filter(Boolean),
       ])).sort((a, b) => a.localeCompare(b, "zh-CN"));
     }
 
@@ -3004,6 +3019,84 @@
       const target = String(name || "").trim();
       const person = state.personnelPeople.find((item) => item.name === target);
       return person ? String(person.mention_mobile || "").trim() : "";
+    }
+
+    function personnelContactByName(name) {
+      const target = String(name || "").trim();
+      return state.personnelPeople.find((item) => item.name === target) || {};
+    }
+
+    function monitorPersonByName(name) {
+      const target = String(name || "").trim();
+      return state.monitoredPeople.find((item) => item.name === target) || {};
+    }
+
+    function monitorWechatSavedBinding(name) {
+      const personnel = personnelContactByName(name);
+      const monitored = monitorPersonByName(name);
+      return {
+        ...monitored,
+        ...personnel,
+        wechat_group_runtime_sender_id: String(personnel.wechat_group_runtime_sender_id || monitored.wechat_group_runtime_sender_id || "").trim(),
+        wechat_group_member_name: String(personnel.wechat_group_member_name || monitored.wechat_group_member_name || "").trim(),
+        wechat_group_member_id: String(personnel.wechat_group_member_id || monitored.wechat_group_member_id || "").trim(),
+        wechat_group_room_id: String(personnel.wechat_group_room_id || monitored.wechat_group_room_id || "").trim(),
+        wechat_group_room_name: String(personnel.wechat_group_room_name || monitored.wechat_group_room_name || "").trim(),
+      };
+    }
+
+    function monitorWechatBindingText(person) {
+      const id = String(person.wechat_group_runtime_sender_id || "").trim();
+      const name = String(person.wechat_group_member_name || "").trim();
+      const room = String(person.wechat_group_room_name || person.wechat_group_room_id || "").trim();
+      if (!id) return "未绑定";
+      const label = name || "已绑定";
+      const roomText = room ? ` · 群：${room}` : "";
+      return `${escapeHtml(label)} · ID：${escapeHtml(id)}${escapeHtml(roomText)}`;
+    }
+
+    function currentLightAgentRoomForMonitorBinding() {
+      const option = $("lightAgentRoomSelect") ? $("lightAgentRoomSelect").selectedOptions[0] : null;
+      const id = $("lightAgentTarget") ? $("lightAgentTarget").value.trim() : "";
+      return {
+        id,
+        name: option ? String(option.dataset.roomName || "").trim() : "",
+      };
+    }
+
+    function renderMonitorWechatMemberOptions(selectedId = "") {
+      const select = $("monitorWechatMember");
+      const idInput = $("monitorWechatMemberId");
+      if (!select || !idInput) return;
+      const saved = monitorWechatSavedBinding($("personName") ? $("personName").value : "");
+      const selected = String(selectedId || saved.wechat_group_runtime_sender_id || "").trim();
+      const members = state.lightAgentMembers || [];
+      const hasSelectedInMembers = members.some((member) => wechatMemberRuntimeId(member) === selected);
+      const savedOption = selected && !hasSelectedInMembers
+        ? `<option value="${escapeHtml(selected)}" data-stable-member-id="${escapeHtml(saved.wechat_group_member_id || "")}" data-member-name="${escapeHtml(saved.wechat_group_member_name || selected)}" selected>${escapeHtml(saved.wechat_group_member_name || "已保存成员")} · ${escapeHtml(shortWechatId(selected))}</option>`
+        : "";
+      select.innerHTML = `<option value="">未绑定个人微信群成员</option>` + savedOption + members.map((member) => {
+        const id = wechatMemberRuntimeId(member);
+        const label = wechatMemberDisplayText(member);
+        const stableId = String(member.stable_member_id || member.wechat_group_member_id || "").trim();
+        return `<option value="${escapeHtml(id)}" data-stable-member-id="${escapeHtml(stableId)}" data-member-name="${escapeHtml(label)}" ${id && id === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
+      }).join("");
+      idInput.value = selected || "";
+    }
+
+    function monitorWechatBindingPayload() {
+      const select = $("monitorWechatMember");
+      const option = select ? select.selectedOptions[0] : null;
+      const runtimeId = select ? String(select.value || "").trim() : "";
+      const room = currentLightAgentRoomForMonitorBinding();
+      const saved = monitorWechatSavedBinding($("personName") ? $("personName").value : "");
+      return {
+        wechat_group_room_id: runtimeId ? (room.id || saved.wechat_group_room_id || "") : "",
+        wechat_group_room_name: runtimeId ? (room.name || saved.wechat_group_room_name || "") : "",
+        wechat_group_member_id: runtimeId && option ? String(option.dataset.stableMemberId || saved.wechat_group_member_id || "").trim() : "",
+        wechat_group_runtime_sender_id: runtimeId,
+        wechat_group_member_name: runtimeId && option ? String(option.dataset.memberName || saved.wechat_group_member_name || "").trim() : "",
+      };
     }
 
     function renderPersonnelNameOptions() {
@@ -3168,6 +3261,7 @@
       setNameListValue("personnelNames", names);
       renderPersonnelNameOptions();
       renderWechatBindingList();
+      renderMonitorWechatMemberOptions();
     }
 
     function updateDriverNameOptions() {
@@ -3322,6 +3416,7 @@
         }).join("") || `<div class="item"><small>登录微信并同步成员后显示群成员</small></div>`;
       }
       renderWechatBindingList();
+      renderMonitorWechatMemberOptions();
     }
 
     function renderWechatBindingList() {
@@ -3462,6 +3557,7 @@
       if (!response.ok || !body.success) throw new Error(body.detail || "保存绑定失败");
       state.personnelPeople = body.people || [];
       renderWechatBindingList();
+      renderMonitorWechatMemberOptions();
       $("lightAgentWechatStatus").textContent = "微信群成员绑定已保存";
       $("lightAgentWechatStatus").className = "status ok";
     }
@@ -3489,6 +3585,7 @@
       $("lightAgentTarget").value = $("lightAgentRoomSelect").value;
       state.lightAgentMembers = [];
       renderLightAgentMembers();
+      renderMonitorWechatMemberOptions();
       if ($("lightAgentTarget").value) {
         try { await loadLightAgentMembers(); } catch (_) {}
       }
@@ -4927,6 +5024,11 @@
     $("tunnelMechanicalCheckTime").value = beijingDateInputValue();
     bindMobileAutofill("personName", "mentionMobile");
     bindMobileAutofill("customReminderName", "customReminderMobile");
+    $("personName").addEventListener("change", () => renderMonitorWechatMemberOptions());
+    $("personName").addEventListener("blur", () => renderMonitorWechatMemberOptions());
+    $("monitorWechatMember").addEventListener("change", () => {
+      $("monitorWechatMemberId").value = $("monitorWechatMember").value.trim();
+    });
     setupImageViewer();
     setupNameTagEditor("personnelNames");
     setupNameTagEditor("bigDriverNames");

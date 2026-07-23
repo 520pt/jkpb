@@ -87,6 +87,11 @@ class MonitoredPersonRequest(BaseModel):
     wecom_userid: str = ""
     mention_text: str = ""
     mention_mobile: str = ""
+    wechat_group_room_id: str = ""
+    wechat_group_room_name: str = ""
+    wechat_group_member_id: str = ""
+    wechat_group_runtime_sender_id: str = ""
+    wechat_group_member_name: str = ""
     daily_time: str = "07:50"
     before_shift_minutes: int = Field(default=10, ge=0, le=1440)
     rest_reminder_enabled: bool = False
@@ -2959,39 +2964,46 @@ def _tunnel_mechanical_cookie_header(cookies: httpx.Cookies) -> str:
     return "; ".join(f"{cookie.name}={cookie.value}" for cookie in cookies.jar)
 
 
-async def _fetch_tunnel_mechanical_captcha(base_url: str) -> dict[str, Any]:
+async def _fetch_tunnel_mechanical_captcha(base_url: str, *, solve_attempts: int = 5) -> dict[str, Any]:
     base_url = _tunnel_mechanical_base_url(base_url)
-    try:
-        async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
-            response = await client.get(
-                f"{base_url}/prod-api/code",
-                headers={
-                    "Accept": "application/json, text/plain, */*",
-                    "Origin": base_url,
-                    "Referer": f"{base_url}/login",
-                },
-            )
-            body = response.json()
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"获取智慧养护验证码失败：{exc}") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=502, detail="获取智慧养护验证码失败：平台返回的不是 JSON") from exc
-    if response.status_code != 200 or str(body.get("code") or "") not in {"200", "0"}:
-        raise HTTPException(status_code=502, detail=str(body.get("msg") or "获取智慧养护验证码失败"))
-    img = _tunnel_mechanical_decrypt_text(str(body.get("img") or "")) if body.get("img") else ""
-    code = ""
-    if img and bool(body.get("captchaEnabled", True)):
+    attempts = max(1, int(solve_attempts or 1))
+    last_result: dict[str, Any] | None = None
+    for _ in range(attempts):
         try:
-            code = _solve_tunnel_mechanical_captcha(img)
-        except HTTPException:
-            code = ""
-    return {
-        "success": True,
-        "captcha_enabled": bool(body.get("captchaEnabled", True)),
-        "img": img,
-        "code": code,
-        "uuid": str(body.get("uuid") or ""),
-    }
+            async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
+                response = await client.get(
+                    f"{base_url}/prod-api/code",
+                    headers={
+                        "Accept": "application/json, text/plain, */*",
+                        "Origin": base_url,
+                        "Referer": f"{base_url}/login",
+                    },
+                )
+                body = response.json()
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"获取智慧养护验证码失败：{exc}") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=502, detail="获取智慧养护验证码失败：平台返回的不是 JSON") from exc
+        if response.status_code != 200 or str(body.get("code") or "") not in {"200", "0"}:
+            raise HTTPException(status_code=502, detail=str(body.get("msg") or "获取智慧养护验证码失败"))
+        img = _tunnel_mechanical_decrypt_text(str(body.get("img") or "")) if body.get("img") else ""
+        captcha_enabled = bool(body.get("captchaEnabled", True))
+        code = ""
+        if img and captcha_enabled:
+            try:
+                code = _solve_tunnel_mechanical_captcha(img)
+            except HTTPException:
+                code = ""
+        last_result = {
+            "success": True,
+            "captcha_enabled": captcha_enabled,
+            "img": img,
+            "code": code,
+            "uuid": str(body.get("uuid") or ""),
+        }
+        if code or not captcha_enabled:
+            return last_result
+    return last_result or {"success": True, "captcha_enabled": False, "img": "", "code": "", "uuid": ""}
 
 
 def _tunnel_mechanical_login_payload(config: dict[str, Any], *, code: str = "", uuid: str = "") -> dict[str, str]:
@@ -3112,8 +3124,15 @@ async def _login_tunnel_mechanical(
             if captcha.get("captcha_enabled"):
                 attempt_code = str(captcha.get("code") or "").strip()
                 if not attempt_code:
-                    attempt_code = _solve_tunnel_mechanical_captcha(str(captcha.get("img") or ""))
+                    try:
+                        attempt_code = _solve_tunnel_mechanical_captcha(str(captcha.get("img") or ""))
+                    except HTTPException as exc:
+                        last_message = str(exc.detail or "无法自动识别验证码")
+                        continue
             attempt_uuid = str(captcha.get("uuid") or "")
+        if not attempt_code and not attempt_uuid:
+            last_message = "无法自动获取验证码"
+            continue
         payload = _tunnel_mechanical_login_payload(config, code=attempt_code, uuid=attempt_uuid)
         now = datetime.now(TZ)
         try:
