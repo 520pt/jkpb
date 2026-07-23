@@ -7,7 +7,6 @@ services:
         INSTALL_LIGHTAGENT_BROWSER: "${INSTALL_LIGHTAGENT_BROWSER:-false}"
         USE_CN_MIRROR: "${USE_CN_MIRROR:-false}"
     image: lightagent:latest
-    container_name: lightagent
     restart: unless-stopped
     environment:
       TZ: "${TZ:-Asia/Shanghai}"
@@ -44,7 +43,6 @@ services:
       args:
         INSTALL_OCR: "${INSTALL_OCR:-false}"
     image: duty-reminder:latest
-    container_name: duty-reminder
     restart: unless-stopped
     environment:
       TZ: "${TZ:-Asia/Shanghai}"

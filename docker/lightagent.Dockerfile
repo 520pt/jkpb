@@ -153,6 +153,7 @@ RUN cp config-template.json config.json \
 COPY docker/entrypoint.sh /entrypoint.sh
 
 RUN chmod +x /entrypoint.sh \
+    && sed -i 's/\r$//' /entrypoint.sh \
     && chown agent:agent /entrypoint.sh
 
 EXPOSE 9899
