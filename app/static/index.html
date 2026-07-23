@@ -1265,7 +1265,7 @@
       <div class="settings-shell">
         <nav class="settings-nav">
           <h3>配置目录</h3>
-          <button class="active" data-settings-target="wecomSettings">企业微信通知</button>
+          <button class="active" data-settings-target="wecomSettings">通知通道</button>
           <button data-settings-target="monitorSettings">监控班提醒</button>
           <button data-settings-target="patrolWarningSettings">公路巡查预警</button>
           <button data-settings-target="customReminderSettings">自定义提醒</button>
@@ -1277,9 +1277,24 @@
         <div class="settings-grid">
           <section class="settings-panel single active" id="wecomSettings">
             <div class="side-block wide">
-              <h3>企业微信通知</h3>
+              <h3>通知通道</h3>
               <div class="stack">
-                <label>群机器人地址 <input id="webhookUrl" placeholder="未配置，保存时请输入机器人地址" /></label>
+                <label>发送通道
+                  <select id="notificationSenderType">
+                    <option value="wecom_webhook">企业微信群机器人</option>
+                    <option value="lightagent">LightAgent 个人微信群</option>
+                  </select>
+                </label>
+                <div id="wecomNotificationFields" class="stack">
+                  <label>群机器人地址 <input id="webhookUrl" placeholder="未配置，保存时请输入机器人地址" /></label>
+                </div>
+                <div id="lightAgentNotificationFields" class="stack hidden">
+                  <label>LightAgent 推送地址 <input id="lightAgentUrl" placeholder="例如 http://127.0.0.1:9899/api/push/send" /></label>
+                  <div class="field-grid">
+                    <label>目标群 room_id <input id="lightAgentTarget" placeholder="LightAgent 群聊管理中的 room_id" /></label>
+                    <label>推送 token <input id="lightAgentToken" type="password" placeholder="已配置时可留空" /></label>
+                  </div>
+                </div>
                 <div class="field-grid">
                   <label>测试@手机号 <input id="testMobile" placeholder="10000000000" /></label>
                 </div>
@@ -2962,18 +2977,29 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          sender_type: $("notificationSenderType").value,
           webhook_url: $("webhookUrl").value.trim(),
+          lightagent_url: $("lightAgentUrl").value.trim(),
+          lightagent_token: $("lightAgentToken").value.trim(),
+          lightagent_target: $("lightAgentTarget").value.trim(),
           message_template: $("messageTemplate").value.trim()
         })
       });
       const body = await response.json();
       if (showStatus) {
-        $("notificationStatus").textContent = body.success ? "已保存企业微信通知配置" : "保存失败";
+        $("notificationStatus").textContent = body.success ? "已保存通知配置" : "保存失败";
         $("notificationStatus").className = `status ${body.success ? "ok" : "error"}`;
       }
       return body.success;
     }
 
+    function updateNotificationBackendFields() {
+      const isLightAgent = $("notificationSenderType").value === "lightagent";
+      $("wecomNotificationFields").classList.toggle("hidden", isLightAgent);
+      $("lightAgentNotificationFields").classList.toggle("hidden", !isLightAgent);
+    }
+
+    $("notificationSenderType").addEventListener("change", updateNotificationBackendFields);
     $("saveNotificationBtn").addEventListener("click", () => saveNotificationConfig(true));
 
     $("testNotificationBtn").addEventListener("click", async () => {
@@ -3033,9 +3059,16 @@
     async function loadNotificationConfig() {
       const response = await fetch("/api/notification-config");
       const body = await response.json();
+      $("notificationSenderType").value = body.config && body.config.sender_type ? body.config.sender_type : "wecom_webhook";
       $("webhookUrl").value = "";
       $("webhookUrl").placeholder = body.config && body.config.webhook_configured ? "已配置，如需修改请输入新地址" : "未配置，保存时请输入机器人地址";
+      $("lightAgentUrl").value = "";
+      $("lightAgentUrl").placeholder = body.config && body.config.lightagent_configured ? "已配置，如需修改请输入推送地址" : "例如 http://127.0.0.1:9899/api/push/send";
+      $("lightAgentToken").value = "";
+      $("lightAgentToken").placeholder = body.config && body.config.lightagent_token_configured ? "已配置，如需修改请输入新 token" : "可选";
+      $("lightAgentTarget").value = body.config ? body.config.lightagent_target || "" : "";
       $("messageTemplate").value = body.config ? body.config.message_template || "" : "";
+      updateNotificationBackendFields();
     }
 
     function patrolWarningPayload() {
@@ -3630,10 +3663,11 @@
         const patrolScheduleText = patrol.backoff_until
           ? `退避到 ${formatIsoMinute(patrol.backoff_until)}`
           : (patrol.next_check_at ? `下次检查 ${formatIsoMinute(patrol.next_check_at)}` : "尚未安排检查");
+        const notificationLabel = body.notification_sender_type === "lightagent" ? "LightAgent 个人微信群" : "企业微信群机器人";
         const cards = [
           ["北京时间", formatIsoMinute(body.now_beijing), body.timezone || ""],
           ["定时任务", yesNo(body.scheduler_enabled), body.scheduler_enabled ? "会自动发送到期提醒" : "当前不会自动发送"],
-          ["企业微信机器人", body.webhook_configured ? "已配置" : "未配置", body.webhook_configured ? "可发送群机器人消息" : "请先配置机器人地址"],
+          ["通知通道", body.notification_configured ? "已配置" : "未配置", body.notification_configured ? notificationLabel : "请先配置通知发送通道"],
           ["中文字体", body.cjk_font_ready ? "正常" : "缺失", body.cjk_font_ready ? "今日在岗图片中文可渲染" : "Docker 需安装中文字体"],
           ["排班表", `${body.roster_month_count || 0} 个月`, "已确认导入"],
           ["监控班提醒人员", `${body.monitored_people_count || 0} 人`, "已配置人员"],

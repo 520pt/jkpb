@@ -424,6 +424,53 @@ def test_notification_config_and_people_mobile_are_saved(tmp_path):
     assert repo.get_notification_config()["webhook_url"].endswith("unit-test")
 
 
+def test_lightagent_notification_config_hides_secret_fields_and_tests_send(tmp_path, monkeypatch):
+    sent: dict[str, object] = {}
+
+    class FakeLightAgentClient:
+        def __init__(self, *, endpoint_url: str, target: str, token: str = ""):
+            sent["endpoint_url"] = endpoint_url
+            sent["target"] = target
+            sent["token"] = token
+
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            sent["content"] = content
+            sent["mobiles"] = mentioned_mobile_list
+
+    monkeypatch.setattr("app.main.LightAgentNotifyClient", FakeLightAgentClient)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    save_response = client.post(
+        "/api/notification-config",
+        json={
+            "sender_type": "lightagent",
+            "lightagent_url": "https://lightagent.test/api/push/send",
+            "lightagent_token": "push-token",
+            "lightagent_target": "room-1",
+            "message_template": "{name} {date} {shift_label}",
+        },
+    )
+    get_response = client.get("/api/notification-config")
+    test_response = client.post("/api/notification-config/test", json={"test_mobile": "10000000000"})
+
+    assert save_response.status_code == 200
+    public_config = get_response.json()["config"]
+    assert public_config["sender_type"] == "lightagent"
+    assert public_config["lightagent_url"] == ""
+    assert public_config["lightagent_configured"] is True
+    assert public_config["lightagent_token_configured"] is True
+    assert public_config["lightagent_target"] == "room-1"
+    assert test_response.status_code == 200
+    assert sent == {
+        "endpoint_url": "https://lightagent.test/api/push/send",
+        "target": "room-1",
+        "token": "push-token",
+        "content": "示例甲 2025-09-16 中班",
+        "mobiles": ["10000000000"],
+    }
+
+
 def test_monitored_person_can_be_updated_and_deleted(tmp_path):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)

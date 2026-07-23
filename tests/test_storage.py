@@ -245,7 +245,14 @@ def test_saving_notification_config_replaces_existing_value(tmp_path: Path):
 
     config = repo.get_notification_config()
 
-    assert config == {"webhook_url": "https://example.test/new", "message_template": "new {name}"}
+    assert config == {
+        "sender_type": "wecom_webhook",
+        "webhook_url": "https://example.test/new",
+        "lightagent_url": "",
+        "lightagent_token": "",
+        "lightagent_target": "",
+        "message_template": "new {name}",
+    }
 
 
 def test_send_records_roundtrip(tmp_path: Path):

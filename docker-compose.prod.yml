@@ -1,4 +1,28 @@
 services:
+  lightagent:
+    image: ghcr.io/520pt/jkpb-lightagent:latest
+    container_name: lightagent
+    restart: unless-stopped
+    ports:
+      - "9899:9899"
+    environment:
+      TZ: Asia/Shanghai
+      LIGHTAGENT_LANG: auto
+      CHANNEL_TYPE: web,wechat_group
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: "9899"
+      WEB_PASSWORD: CHANGE_THIS_LIGHTAGENT_PASSWORD
+      LIGHTAGENT_PUSH_TOKEN: CHANGE_THIS_LIGHTAGENT_PUSH_TOKEN
+      AGENT: "true"
+      MODEL: deepseek-v4-flash
+      DEEPSEEK_API_KEY: CHANGE_THIS_DEEPSEEK_KEY
+      DEEPSEEK_API_BASE: https://api.deepseek.com/v1
+      WECHAT_GROUP_ENABLED: "true"
+      WECHAT_GROUP_SIDECAR_NODE: node
+      WECHAT_GROUP_SIDECAR_MEMORY_PATH: /home/agent/lightagent/wechat_group
+    volumes:
+      - ./lightagent:/home/agent/lightagent
+
   duty-reminder:
     image: ghcr.io/520pt/jkpb:latest
     container_name: duty-reminder
@@ -13,3 +37,5 @@ services:
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads
+    depends_on:
+      - lightagent

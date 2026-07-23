@@ -6,7 +6,7 @@ import json
 import httpx
 import pytest
 
-from app.wecom import WeComClient, WeComError, WeComWebhookClient
+from app.wecom import LightAgentNotifyClient, WeComClient, WeComError, WeComWebhookClient
 
 
 def test_send_text_requests_token_and_posts_message_payload():
@@ -82,6 +82,10 @@ def test_webhook_image_posts_base64_and_md5_payload():
     asyncio.run(_webhook_image_posts_base64_and_md5_payload())
 
 
+def test_lightagent_text_posts_gateway_payload_with_token():
+    asyncio.run(_lightagent_text_posts_gateway_payload_with_token())
+
+
 def test_wecom_clients_ignore_environment_proxy_by_default():
     app_client = WeComClient(corp_id="corp", corp_secret="secret", agent_id=1)
     webhook_client = WeComWebhookClient(webhook_url="https://example.test/cgi-bin/webhook/send?key=unit-test")
@@ -140,6 +144,38 @@ async def _webhook_image_posts_base64_and_md5_payload():
     )
 
     await client.send_image(image_bytes)
+    await http_client.aclose()
+
+    assert len(requests) == 1
+
+
+async def _lightagent_text_posts_gateway_payload_with_token():
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.headers["authorization"] == "Bearer push-token"
+        body = json.loads(request.content.decode("utf-8"))
+        assert body == {
+            "channel": "wechat_group",
+            "target": "room-1",
+            "msgtype": "text",
+            "text": {
+                "content": "提醒内容",
+                "mentioned_mobile_list": ["10000000000"],
+            },
+        }
+        return httpx.Response(200, json={"success": True})
+
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = LightAgentNotifyClient(
+        endpoint_url="https://lightagent.test/api/push/send",
+        target="room-1",
+        token="push-token",
+        http_client=http_client,
+    )
+
+    await client.send_text("提醒内容", ["10000000000"])
     await http_client.aclose()
 
     assert len(requests) == 1

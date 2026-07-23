@@ -48,6 +48,12 @@ DEFAULT_PATROL_WARNING_END_TEMPLATE = (
     "预警已结束：{elapsed_hours} 小时\n"
     "距离预警结束后{window_hours}小时内{patrol_frequency_clause}，倒计时结束还有 {remaining_hours} 小时。"
 )
+NOTIFICATION_SENDER_TYPES = {"wecom_webhook", "lightagent"}
+
+
+def _normalize_notification_sender_type(value: str) -> str:
+    normalized = str(value or "wecom_webhook").strip().lower()
+    return normalized if normalized in NOTIFICATION_SENDER_TYPES else "wecom_webhook"
 
 
 def _normalize_patrol_send_content_mode(value: str) -> str:
@@ -110,7 +116,11 @@ class DutyRepository:
 
                 CREATE TABLE IF NOT EXISTS notification_config (
                     id INTEGER PRIMARY KEY CHECK (id = 1),
+                    sender_type TEXT NOT NULL DEFAULT 'wecom_webhook',
                     webhook_url TEXT NOT NULL DEFAULT '',
+                    lightagent_url TEXT NOT NULL DEFAULT '',
+                    lightagent_token TEXT NOT NULL DEFAULT '',
+                    lightagent_target TEXT NOT NULL DEFAULT '',
                     message_template TEXT NOT NULL DEFAULT '',
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
@@ -208,8 +218,16 @@ class DutyRepository:
             if "rest_message_template" not in columns:
                 conn.execute("ALTER TABLE monitored_people ADD COLUMN rest_message_template TEXT NOT NULL DEFAULT ''")
             config_columns = {row["name"] for row in conn.execute("PRAGMA table_info(notification_config)").fetchall()}
+            if "sender_type" not in config_columns:
+                conn.execute("ALTER TABLE notification_config ADD COLUMN sender_type TEXT NOT NULL DEFAULT 'wecom_webhook'")
             if "message_template" not in config_columns:
                 conn.execute("ALTER TABLE notification_config ADD COLUMN message_template TEXT NOT NULL DEFAULT ''")
+            if "lightagent_url" not in config_columns:
+                conn.execute("ALTER TABLE notification_config ADD COLUMN lightagent_url TEXT NOT NULL DEFAULT ''")
+            if "lightagent_token" not in config_columns:
+                conn.execute("ALTER TABLE notification_config ADD COLUMN lightagent_token TEXT NOT NULL DEFAULT ''")
+            if "lightagent_target" not in config_columns:
+                conn.execute("ALTER TABLE notification_config ADD COLUMN lightagent_target TEXT NOT NULL DEFAULT ''")
             personnel_columns = {row["name"] for row in conn.execute("PRAGMA table_info(personnel_names)").fetchall()}
             if "mention_mobile" not in personnel_columns:
                 conn.execute("ALTER TABLE personnel_names ADD COLUMN mention_mobile TEXT NOT NULL DEFAULT ''")
@@ -584,27 +602,65 @@ class DutyRepository:
             for row in rows
         ]
 
-    def save_notification_config(self, *, webhook_url: str, message_template: str = DEFAULT_MESSAGE_TEMPLATE) -> None:
+    def save_notification_config(
+        self,
+        *,
+        webhook_url: str,
+        message_template: str = DEFAULT_MESSAGE_TEMPLATE,
+        sender_type: str = "wecom_webhook",
+        lightagent_url: str = "",
+        lightagent_token: str = "",
+        lightagent_target: str = "",
+    ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO notification_config (id, webhook_url, message_template)
-                VALUES (1, ?, ?)
+                INSERT INTO notification_config
+                    (id, sender_type, webhook_url, lightagent_url, lightagent_token, lightagent_target, message_template)
+                VALUES (1, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
+                    sender_type = excluded.sender_type,
                     webhook_url = excluded.webhook_url,
+                    lightagent_url = excluded.lightagent_url,
+                    lightagent_token = excluded.lightagent_token,
+                    lightagent_target = excluded.lightagent_target,
                     message_template = excluded.message_template,
                     updated_at = CURRENT_TIMESTAMP
                 """,
-                (webhook_url, message_template or DEFAULT_MESSAGE_TEMPLATE),
+                (
+                    _normalize_notification_sender_type(sender_type),
+                    webhook_url,
+                    lightagent_url,
+                    lightagent_token,
+                    lightagent_target,
+                    message_template or DEFAULT_MESSAGE_TEMPLATE,
+                ),
             )
 
     def get_notification_config(self) -> dict[str, Any]:
         with self._connect() as conn:
-            row = conn.execute("SELECT webhook_url, message_template FROM notification_config WHERE id = 1").fetchone()
+            row = conn.execute(
+                """
+                SELECT sender_type, webhook_url, lightagent_url, lightagent_token, lightagent_target, message_template
+                FROM notification_config
+                WHERE id = 1
+                """
+            ).fetchone()
         if row is None:
-            return {"webhook_url": "", "message_template": DEFAULT_MESSAGE_TEMPLATE}
+            return {
+                "sender_type": "wecom_webhook",
+                "webhook_url": "",
+                "lightagent_url": "",
+                "lightagent_token": "",
+                "lightagent_target": "",
+                "message_template": DEFAULT_MESSAGE_TEMPLATE,
+            }
         return {
+            "sender_type": _normalize_notification_sender_type(row["sender_type"]),
             "webhook_url": row["webhook_url"],
+            "lightagent_url": row["lightagent_url"],
+            "lightagent_token": row["lightagent_token"],
+            "lightagent_target": row["lightagent_target"],
             "message_template": row["message_template"] or DEFAULT_MESSAGE_TEMPLATE,
         }
 

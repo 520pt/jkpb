@@ -1,7 +1,12 @@
 .venv
+.git
+.pytest-tmp
 __pycache__
 .pytest_cache
+LightAgent
 data
 uploads
+logs
+work
 *.db
 *.pyc

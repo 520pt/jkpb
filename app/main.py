@@ -45,7 +45,7 @@ from app.storage import (
     DEFAULT_REST_MESSAGE_TEMPLATE,
     DutyRepository,
 )
-from app.wecom import WeComClient, WeComError, WeComWebhookClient
+from app.wecom import LightAgentNotifyClient, WeComClient, WeComError, WeComWebhookClient
 
 
 TZ = ZoneInfo(os.getenv("TZ", "Asia/Shanghai"))
@@ -104,7 +104,11 @@ class MonitoredPersonRequest(BaseModel):
 
 
 class NotificationConfigRequest(BaseModel):
+    sender_type: str = ""
     webhook_url: str = ""
+    lightagent_url: str = ""
+    lightagent_token: str = ""
+    lightagent_target: str = ""
     message_template: str = DEFAULT_MESSAGE_TEMPLATE
 
 
@@ -445,13 +449,13 @@ def create_app(
 
     @app.post("/api/daily-duty-config/test")
     async def test_daily_duty_config(request: PreviewRequest):
-        webhook_url = str(repo.get_notification_config().get("webhook_url", "")).strip()
-        if not webhook_url:
-            raise HTTPException(status_code=400, detail="请先配置企业微信群机器人地址")
+        notification_client = _notification_client_from_repo(repo)
+        if notification_client is None:
+            raise HTTPException(status_code=400, detail="请先配置通知发送通道")
         target = request.target_date or _today_in_tz()
         preview = _build_daily_duty_preview(repo, target)
         try:
-            await WeComWebhookClient(webhook_url=webhook_url).send_image(render_daily_duty_image(preview))
+            await notification_client.send_image(render_daily_duty_image(preview))
             repo.save_send_record(
                 kind="daily_duty_test",
                 target="今日在岗人员",
@@ -597,8 +601,15 @@ def create_app(
     def save_notification_config(request: NotificationConfigRequest):
         existing = repo.get_notification_config()
         webhook_url = request.webhook_url.strip() or str(existing.get("webhook_url", "")).strip()
+        lightagent_url = request.lightagent_url.strip() or str(existing.get("lightagent_url", "")).strip()
+        lightagent_token = request.lightagent_token.strip() or str(existing.get("lightagent_token", "")).strip()
+        lightagent_target = request.lightagent_target.strip() or str(existing.get("lightagent_target", "")).strip()
         repo.save_notification_config(
+            sender_type=request.sender_type.strip() or str(existing.get("sender_type", "wecom_webhook")),
             webhook_url=webhook_url,
+            lightagent_url=lightagent_url,
+            lightagent_token=lightagent_token,
+            lightagent_target=lightagent_target,
             message_template=request.message_template.strip() or DEFAULT_MESSAGE_TEMPLATE,
         )
         return {"success": True, "config": _public_notification_config(repo.get_notification_config())}
@@ -606,9 +617,9 @@ def create_app(
     @app.post("/api/notification-config/test")
     async def test_notification_config(request: NotificationTestRequest):
         config = repo.get_notification_config()
-        webhook_url = str(config.get("webhook_url", "")).strip()
-        if not webhook_url:
-            raise HTTPException(status_code=400, detail="请先配置企业微信群机器人地址")
+        notification_client = _notification_client_from_config(config)
+        if notification_client is None:
+            raise HTTPException(status_code=400, detail="请先配置通知发送通道")
         content = _render_message_template(
             str(config.get("message_template") or DEFAULT_MESSAGE_TEMPLATE),
             {
@@ -619,7 +630,7 @@ def create_app(
             },
         )
         try:
-            await WeComWebhookClient(webhook_url=webhook_url).send_text(content, [request.test_mobile.strip()])
+            await notification_client.send_text(content, [request.test_mobile.strip()])
             repo.save_send_record(
                 kind="notification_test",
                 target=request.test_mobile.strip() or "测试消息",
@@ -825,6 +836,11 @@ def _safe_next_url(next_url: str) -> str:
     return text
 
 
+def _normalize_notification_sender_type(value: str) -> str:
+    normalized = str(value or "wecom_webhook").strip().lower()
+    return normalized if normalized in {"wecom_webhook", "lightagent"} else "wecom_webhook"
+
+
 def _login_page_response(static_dir: Path, *, error: str = "", next_url: str = "/", status_code: int = 200) -> HTMLResponse:
     template = (static_dir / "login.html").read_text(encoding="utf-8")
     error_html = f'<div class="login-error">{html_lib.escape(error)}</div>' if error else ""
@@ -837,10 +853,23 @@ def _login_page_response(static_dir: Path, *, error: str = "", next_url: str = "
 
 def _public_notification_config(config: dict[str, Any]) -> dict[str, Any]:
     webhook_url = str(config.get("webhook_url", "")).strip()
+    lightagent_url = str(config.get("lightagent_url", "")).strip()
+    lightagent_target = str(config.get("lightagent_target", "")).strip()
+    lightagent_token = str(config.get("lightagent_token", "")).strip()
+    sender_type = _normalize_notification_sender_type(str(config.get("sender_type") or "wecom_webhook"))
+    active_configured = bool(webhook_url) if sender_type == "wecom_webhook" else bool(lightagent_url and lightagent_target)
     return {
+        "sender_type": sender_type,
         "webhook_url": "",
         "webhook_configured": bool(webhook_url),
         "webhook_display": "已配置" if webhook_url else "未配置",
+        "lightagent_url": "",
+        "lightagent_configured": bool(lightagent_url and lightagent_target),
+        "lightagent_display": "已配置" if lightagent_url and lightagent_target else "未配置",
+        "lightagent_token_configured": bool(lightagent_token),
+        "lightagent_target": lightagent_target,
+        "notification_configured": active_configured,
+        "notification_display": "已配置" if active_configured else "未配置",
         "message_template": config.get("message_template") or DEFAULT_MESSAGE_TEMPLATE,
     }
 
@@ -1298,11 +1327,14 @@ def _build_system_status(repo: DutyRepository, scheduler_enabled: bool, cjk_font
     failed_records = [record for record in records_today if record["status"] != "success"]
     patrol_config = repo.get_patrol_warning_config()
     patrol_state = repo.get_patrol_warning_state()
+    notification_config = _public_notification_config(repo.get_notification_config())
     return {
         "now_beijing": now.isoformat(),
         "timezone": str(TZ),
         "scheduler_enabled": scheduler_enabled,
-        "webhook_configured": bool(str(repo.get_notification_config().get("webhook_url", "")).strip()),
+        "webhook_configured": bool(notification_config.get("webhook_configured")),
+        "notification_configured": bool(notification_config.get("notification_configured")),
+        "notification_sender_type": str(notification_config.get("sender_type") or "wecom_webhook"),
         "cjk_font_ready": cjk_font_ready,
         "roster_month_count": repo.count_roster_months(),
         "monitored_people_count": repo.count_monitored_people(),
@@ -1586,11 +1618,10 @@ def _mobile_for_event(event: ReminderEvent, mobile_lookup: dict[str, str]) -> st
 
 
 async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> dict[str, Any]:
-    webhook_url = str(repo.get_notification_config().get("webhook_url", "")).strip()
-    if not webhook_url:
-        raise HTTPException(status_code=400, detail="请先配置企业微信群机器人地址")
+    client = _notification_client_from_repo(repo)
+    if client is None:
+        raise HTTPException(status_code=400, detail="请先配置通知发送通道")
 
-    client = WeComWebhookClient(webhook_url=webhook_url)
     kind = str(record.get("kind") or "")
     target = str(record.get("target") or "")
     scheduled_at = str(record.get("scheduled_at") or "")
@@ -1696,11 +1727,31 @@ async def _send_due_reminders(repo: DutyRepository) -> None:
             LOGGER.exception("提醒发送失败：%s %s", event.kind, event.person_name)
 
 
-def _wecom_webhook_client_from_repo(repo: DutyRepository) -> WeComWebhookClient | None:
-    webhook_url = str(repo.get_notification_config().get("webhook_url", "")).strip()
+def _notification_client_from_repo(repo: DutyRepository):
+    return _notification_client_from_config(repo.get_notification_config())
+
+
+def _notification_client_from_config(config: dict[str, Any]):
+    sender_type = _normalize_notification_sender_type(str(config.get("sender_type") or "wecom_webhook"))
+    if sender_type == "lightagent":
+        endpoint_url = str(config.get("lightagent_url", "")).strip()
+        target = str(config.get("lightagent_target", "")).strip()
+        if not endpoint_url or not target:
+            return None
+        return LightAgentNotifyClient(
+            endpoint_url=endpoint_url,
+            target=target,
+            token=str(config.get("lightagent_token") or ""),
+        )
+
+    webhook_url = str(config.get("webhook_url", "")).strip()
     if not webhook_url:
         return None
     return WeComWebhookClient(webhook_url=webhook_url)
+
+
+def _wecom_webhook_client_from_repo(repo: DutyRepository):
+    return _notification_client_from_repo(repo)
 
 
 def _render_message_template(template: str, values: dict[str, str]) -> str:

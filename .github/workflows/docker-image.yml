@@ -11,6 +11,7 @@ permissions:
 
 env:
   IMAGE_NAME: ghcr.io/520pt/jkpb
+  LIGHTAGENT_IMAGE_NAME: ghcr.io/520pt/jkpb-lightagent
 
 jobs:
   docker:
@@ -18,6 +19,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -41,8 +44,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract Docker metadata
-        id: meta
+      - name: Extract duty-reminder Docker metadata
+        id: meta-duty
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE_NAME }}
@@ -50,14 +53,38 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=sha-
 
-      - name: Build and push
+      - name: Build and push duty-reminder
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: Dockerfile
           push: true
           build-args: |
             INSTALL_OCR=false
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ${{ steps.meta-duty.outputs.tags }}
+          labels: ${{ steps.meta-duty.outputs.labels }}
+          cache-from: type=gha,scope=duty-reminder
+          cache-to: type=gha,mode=max,scope=duty-reminder
+
+      - name: Extract LightAgent Docker metadata
+        id: meta-lightagent
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.LIGHTAGENT_IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-
+
+      - name: Build and push LightAgent
+        uses: docker/build-push-action@v6
+        with:
+          context: LightAgent
+          file: docker/lightagent.Dockerfile
+          push: true
+          build-args: |
+            INSTALL_LIGHTAGENT_BROWSER=false
+            USE_CN_MIRROR=false
+          tags: ${{ steps.meta-lightagent.outputs.tags }}
+          labels: ${{ steps.meta-lightagent.outputs.labels }}
+          cache-from: type=gha,scope=lightagent
+          cache-to: type=gha,mode=max,scope=lightagent

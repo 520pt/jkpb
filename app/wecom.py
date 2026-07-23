@@ -110,3 +110,67 @@ class WeComWebhookClient:
             raise WeComError("企业微信机器人返回异常") from exc
         if data.get("errcode") != 0:
             raise WeComError(f"WeCom webhook send failed: {data.get('errmsg', 'unknown error')}")
+
+
+class LightAgentNotifyClient:
+    """HTTP push adapter for a LightAgent/Wechat gateway.
+
+    LightAgent's current WeChat group sender is internal to its running channel.
+    This client targets a small HTTP gateway in front of LightAgent with a stable
+    JSON contract, so duty-reminder does not have to import or vendor LightAgent.
+    """
+
+    def __init__(
+        self,
+        *,
+        endpoint_url: str,
+        target: str,
+        token: str = "",
+        channel: str = "wechat_group",
+        http_client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self.endpoint_url = endpoint_url.strip()
+        self.target = target.strip()
+        self.token = token.strip()
+        self.channel = channel.strip() or "wechat_group"
+        self.http_client = http_client or httpx.AsyncClient(timeout=10, trust_env=False)
+
+    async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None) -> None:
+        text: dict[str, object] = {"content": content}
+        mentions = [mobile for mobile in (mentioned_mobile_list or []) if mobile]
+        if mentions:
+            text["mentioned_mobile_list"] = mentions
+        await self._post({"msgtype": "text", "text": text})
+
+    async def send_image(self, image_bytes: bytes) -> None:
+        await self._post(
+            {
+                "msgtype": "image",
+                "image": {
+                    "base64": base64.b64encode(image_bytes).decode("ascii"),
+                    "md5": hashlib.md5(image_bytes).hexdigest(),
+                },
+            }
+        )
+
+    async def _post(self, payload: dict[str, object]) -> None:
+        if not self.endpoint_url:
+            raise WeComError("LightAgent 推送地址未配置")
+        if not self.target:
+            raise WeComError("LightAgent 目标群 room_id 未配置")
+        headers = {"Authorization": f"Bearer {self.token}"} if self.token else None
+        body = {"channel": self.channel, "target": self.target, **payload}
+        try:
+            response = await self.http_client.post(self.endpoint_url, json=body, headers=headers)
+        except httpx.HTTPError as exc:
+            raise WeComError(f"LightAgent 推送连接失败：{exc.__class__.__name__}") from exc
+        if response.status_code >= 400:
+            raise WeComError(f"LightAgent 推送失败：HTTP {response.status_code}")
+        try:
+            data = response.json()
+        except ValueError:
+            return
+        if data.get("errcode") not in (None, 0):
+            raise WeComError(f"LightAgent 推送失败：{data.get('errmsg', 'unknown error')}")
+        if data.get("success") is False or data.get("ok") is False:
+            raise WeComError(f"LightAgent 推送失败：{data.get('error') or data.get('detail') or 'unknown error'}")

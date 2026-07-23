@@ -1,4 +1,43 @@
 services:
+  lightagent:
+    build:
+      context: ./LightAgent
+      dockerfile: ../docker/lightagent.Dockerfile
+      args:
+        INSTALL_LIGHTAGENT_BROWSER: "${INSTALL_LIGHTAGENT_BROWSER:-false}"
+        USE_CN_MIRROR: "${USE_CN_MIRROR:-false}"
+    image: lightagent:latest
+    container_name: lightagent
+    restart: unless-stopped
+    environment:
+      TZ: "${TZ:-Asia/Shanghai}"
+      LIGHTAGENT_LANG: "${LIGHTAGENT_LANG:-auto}"
+      CHANNEL_TYPE: "${LIGHTAGENT_CHANNEL_TYPE:-web,wechat_group}"
+      WEB_HOST: "0.0.0.0"
+      WEB_PORT: "9899"
+      WEB_PASSWORD: "${LIGHTAGENT_WEB_PASSWORD:-}"
+      LIGHTAGENT_PUSH_TOKEN: "${LIGHTAGENT_PUSH_TOKEN:-}"
+      AGENT: "${LIGHTAGENT_AGENT:-true}"
+      MODEL: "${LIGHTAGENT_MODEL:-deepseek-v4-flash}"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+      DEEPSEEK_API_BASE: "${DEEPSEEK_API_BASE:-https://api.deepseek.com/v1}"
+      OPEN_AI_API_KEY: "${OPEN_AI_API_KEY:-}"
+      OPEN_AI_API_BASE: "${OPEN_AI_API_BASE:-https://api.openai.com/v1}"
+      DASHSCOPE_API_KEY: "${DASHSCOPE_API_KEY:-}"
+      ZHIPU_AI_API_KEY: "${ZHIPU_AI_API_KEY:-}"
+      MOONSHOT_API_KEY: "${MOONSHOT_API_KEY:-}"
+      CLAUDE_API_KEY: "${CLAUDE_API_KEY:-}"
+      CLAUDE_API_BASE: "${CLAUDE_API_BASE:-https://api.anthropic.com/v1}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GEMINI_API_BASE: "${GEMINI_API_BASE:-https://generativelanguage.googleapis.com}"
+      WECHAT_GROUP_ENABLED: "${WECHAT_GROUP_ENABLED:-true}"
+      WECHAT_GROUP_SIDECAR_NODE: "node"
+      WECHAT_GROUP_SIDECAR_MEMORY_PATH: "/home/agent/lightagent/wechat_group"
+    ports:
+      - "${LIGHTAGENT_PORT:-9899}:9899"
+    volumes:
+      - lightagent-data:/home/agent/lightagent
+
   duty-reminder:
     build:
       context: .
@@ -24,7 +63,10 @@ services:
     volumes:
       - duty-data:/app/data
       - duty-uploads:/app/uploads
+    depends_on:
+      - lightagent
 
 volumes:
+  lightagent-data:
   duty-data:
   duty-uploads:

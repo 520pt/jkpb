@@ -38,16 +38,23 @@ Windows 本地也可以直接运行：
 
 ```bash
 cp .env.example .env
+git submodule update --init --recursive
 docker compose up -d --build
 ```
 
-部署前请先修改 `.env` 里的 `ADMIN_PASSWORD`。设置后页面和接口会启用应用内登录保护，`/health` 保持不鉴权用于健康检查。
+部署前请先修改 `.env` 里的 `ADMIN_PASSWORD`、`LIGHTAGENT_WEB_PASSWORD`、`LIGHTAGENT_PUSH_TOKEN` 和模型 API key。设置 `ADMIN_PASSWORD` 后页面和接口会启用应用内登录保护，`/health` 保持不鉴权用于健康检查。
 
 GitHub Actions 会自动构建镜像并推送到 GitHub Container Registry：
 
 ```text
 ghcr.io/520pt/jkpb:latest
+ghcr.io/520pt/jkpb-lightagent:latest
 ```
+
+`docker-compose.yml` 会同时启动两个服务：
+
+- `duty-reminder`：排班提醒服务，默认端口 `8080`。
+- `lightagent`：LightAgent Web 控制台和个人微信群通道，默认端口 `9899`。
 
 ### 服务器推荐部署
 
@@ -55,6 +62,25 @@ ghcr.io/520pt/jkpb:latest
 
 ```yaml
 services:
+  lightagent:
+    image: ghcr.io/520pt/jkpb-lightagent:latest
+    container_name: lightagent
+    restart: unless-stopped
+    ports:
+      - "9899:9899"
+    environment:
+      TZ: Asia/Shanghai
+      CHANNEL_TYPE: web,wechat_group
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: "9899"
+      WEB_PASSWORD: CHANGE_THIS_LIGHTAGENT_PASSWORD
+      LIGHTAGENT_PUSH_TOKEN: CHANGE_THIS_LIGHTAGENT_PUSH_TOKEN
+      MODEL: deepseek-v4-flash
+      DEEPSEEK_API_KEY: CHANGE_THIS_DEEPSEEK_KEY
+      WECHAT_GROUP_ENABLED: "true"
+    volumes:
+      - ./lightagent:/home/agent/lightagent
+
   duty-reminder:
     image: ghcr.io/520pt/jkpb:latest
     container_name: duty-reminder
@@ -69,6 +95,8 @@ services:
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads
+    depends_on:
+      - lightagent
 ```
 
 部署步骤：
@@ -77,7 +105,7 @@ services:
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-部署前把 `docker-compose.prod.yml` 里的 `ADMIN_PASSWORD: CHANGE_THIS_PASSWORD` 改成你自己的密码。更新镜像时再执行一次：
+部署前把 `docker-compose.prod.yml` 里的 `ADMIN_PASSWORD: CHANGE_THIS_PASSWORD`、`WEB_PASSWORD: CHANGE_THIS_LIGHTAGENT_PASSWORD`、`LIGHTAGENT_PUSH_TOKEN: CHANGE_THIS_LIGHTAGENT_PUSH_TOKEN` 和 `DEEPSEEK_API_KEY: CHANGE_THIS_DEEPSEEK_KEY` 改成你自己的值。更新镜像时再执行一次：
 
 ```bash
 docker compose -f docker-compose.prod.yml pull
@@ -121,15 +149,33 @@ docker run --rm -v duty-reminder_duty-data:/data -v "$PWD":/backup alpine tar cz
 docker run --rm -v duty-reminder_duty-uploads:/data -v "$PWD":/backup alpine tar czf /backup/duty-uploads-backup.tgz -C /data .
 ```
 
-## 企业微信配置
+## 通知通道配置
 
-在页面“设置 / 企业微信通知”里填写群机器人地址，例如：
+页面“设置 / 企业微信通知”里可以选择两种发送通道。
+
+### 企业微信群机器人
+
+选择“企业微信群机器人”后填写群机器人地址，例如：
 
 ```text
 https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_WEBHOOK_KEY
 ```
 
 保存后前端不会回显完整机器人地址，只显示“已配置”。监控班提醒里的“@ 手机号”填写企业微信成员手机号，机器人会通过 `mentioned_mobile_list` 在群里 @ 对应人员。页面提供“测试发送”按钮，驾驶员监测板块也提供“测试发送今日在岗”按钮。
+
+### LightAgent 个人微信群
+
+选择“LightAgent 个人微信群”后填写 LightAgent 推送地址、目标群 `room_id` 和可选 token。`duty-reminder` 会把文本和图片提醒 POST 到这个推送地址，由 LightAgent 侧负责个人微信扫码登录和微信群发送。
+
+同一个 Docker Compose 网络内部，推送地址通常填写：
+
+```text
+http://lightagent:9899/api/push/send
+```
+
+页面里的“推送 token”填写 `LIGHTAGENT_PUSH_TOKEN` 的值。
+
+接入细节见 [docs/LightAgent-WeChat.md](docs/LightAgent-WeChat.md)。
 
 ## 运行安全
 
