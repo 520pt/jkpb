@@ -162,7 +162,7 @@ async def _lightagent_text_posts_gateway_payload_with_token():
             "msgtype": "text",
             "text": {
                 "content": "提醒内容",
-                "mentioned_mobile_list": ["10000000000"],
+                "mention_ids": ["@wechat-member-1"],
             },
         }
         return httpx.Response(200, json={"success": True})
@@ -175,7 +175,7 @@ async def _lightagent_text_posts_gateway_payload_with_token():
         http_client=http_client,
     )
 
-    await client.send_text("提醒内容", ["10000000000"])
+    await client.send_text("提醒内容", ["@wechat-member-1"])
     await http_client.aclose()
 
     assert len(requests) == 1

@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import httpx
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -114,6 +115,7 @@ class NotificationConfigRequest(BaseModel):
 
 class NotificationTestRequest(BaseModel):
     test_mobile: str = ""
+    test_wechat_member_id: str = ""
 
 
 class PreviewRequest(BaseModel):
@@ -123,6 +125,11 @@ class PreviewRequest(BaseModel):
 class PersonnelContactRequest(BaseModel):
     name: str
     mention_mobile: str = ""
+    wechat_group_room_id: str = ""
+    wechat_group_room_name: str = ""
+    wechat_group_member_id: str = ""
+    wechat_group_runtime_sender_id: str = ""
+    wechat_group_member_name: str = ""
 
 
 class PersonnelRequest(BaseModel):
@@ -410,7 +417,7 @@ def create_app(
     def save_personnel(request: PersonnelRequest):
         repo.save_personnel_names(request.names)
         if request.people:
-            repo.upsert_personnel_contacts([person.model_dump() for person in request.people])
+            repo.save_personnel_contacts([person.model_dump() for person in request.people])
         return {"success": True, "names": repo.list_personnel_names(), "people": repo.list_personnel()}
 
     @app.get("/api/custom-reminders")
@@ -616,7 +623,7 @@ def create_app(
 
     @app.post("/api/notification-config/test")
     async def test_notification_config(request: NotificationTestRequest):
-        config = repo.get_notification_config()
+        config = _notification_config_with_env_defaults(repo.get_notification_config())
         notification_client = _notification_client_from_config(config)
         if notification_client is None:
             raise HTTPException(status_code=400, detail="请先配置通知发送通道")
@@ -629,18 +636,23 @@ def create_app(
                 "shift_label": "中班",
             },
         )
+        target = request.test_mobile.strip()
+        mentions = [target]
+        if _normalize_notification_sender_type(str(config.get("sender_type") or "")) == "lightagent":
+            target = request.test_wechat_member_id.strip() or target
+            mentions = [request.test_wechat_member_id.strip()] if request.test_wechat_member_id.strip() else []
         try:
-            await notification_client.send_text(content, [request.test_mobile.strip()])
+            await notification_client.send_text(content, mentions)
             repo.save_send_record(
                 kind="notification_test",
-                target=request.test_mobile.strip() or "测试消息",
+                target=target or "测试消息",
                 status="success",
                 content=content,
             )
         except WeComError as exc:
             repo.save_send_record(
                 kind="notification_test",
-                target=request.test_mobile.strip() or "测试消息",
+                target=target or "测试消息",
                 status="failed",
                 content=content,
                 error=str(exc),
@@ -649,13 +661,50 @@ def create_app(
         except Exception as exc:
             repo.save_send_record(
                 kind="notification_test",
-                target=request.test_mobile.strip() or "测试消息",
+                target=target or "测试消息",
                 status="failed",
                 content=content,
                 error=f"测试发送失败：{exc}",
             )
             raise HTTPException(status_code=502, detail=f"测试发送失败：{exc}") from exc
         return {"success": True, "content": content}
+
+    @app.get("/api/lightagent/wechat/status")
+    def lightagent_wechat_status():
+        return _lightagent_web_request(repo, "GET", "/api/wechat_group/qrlogin")
+
+    @app.post("/api/lightagent/wechat/refresh")
+    def refresh_lightagent_wechat():
+        return _lightagent_web_request(repo, "POST", "/api/wechat_group/qrlogin", json_body={"action": "refresh"})
+
+    @app.get("/api/lightagent/wechat/rooms")
+    def lightagent_wechat_rooms():
+        data = _lightagent_web_request(repo, "GET", "/api/channels")
+        channels = data.get("channels") if isinstance(data, dict) else []
+        for channel in channels or []:
+            if str(channel.get("name") or "") == "wechat_group":
+                extra = channel.get("extra") if isinstance(channel.get("extra"), dict) else {}
+                return {
+                    "status": "success",
+                    "connected": bool(channel.get("connected") or channel.get("active")),
+                    "login_status": str(channel.get("login_status") or ""),
+                    "rooms": extra.get("rooms") or [],
+                    "selected_room_ids": extra.get("selected_room_ids") or [],
+                    "selected_room_names": extra.get("selected_room_names") or [],
+                }
+        return {"status": "success", "connected": False, "login_status": "", "rooms": []}
+
+    @app.get("/api/lightagent/wechat/members")
+    def lightagent_wechat_members(room_id: str):
+        room_text = str(room_id or "").strip()
+        if not room_text:
+            raise HTTPException(status_code=400, detail="room_id is required")
+        return _lightagent_web_request(
+            repo,
+            "GET",
+            "/api/wechat-group/members",
+            params={"stable_room_id": room_text, "limit": "500"},
+        )
 
     @app.get("/api/send-records")
     def list_send_records(limit: int = 100):
@@ -882,6 +931,58 @@ def _notification_config_with_env_defaults(config: dict[str, Any]) -> dict[str, 
         if not str(merged.get(key, "")).strip() and env_config[key]:
             merged[key] = env_config[key]
     return merged
+
+
+def _lightagent_web_base_url(config: dict[str, Any]) -> str:
+    explicit = os.getenv("LIGHTAGENT_WEB_URL", "").strip() or os.getenv("LIGHTAGENT_BASE_URL", "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    endpoint = str(config.get("lightagent_url") or "").strip()
+    for suffix in ("/api/push/send", "/push/send"):
+        if endpoint.endswith(suffix):
+            return endpoint[: -len(suffix)].rstrip("/")
+    return endpoint.rstrip("/")
+
+
+def _lightagent_web_password() -> str:
+    return os.getenv("LIGHTAGENT_WEB_PASSWORD", "").strip() or os.getenv("LIGHTAGENT_PASSWORD", "").strip()
+
+
+def _lightagent_web_request(
+    repo: DutyRepository,
+    method: str,
+    path: str,
+    *,
+    params: dict[str, str] | None = None,
+    json_body: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    config = _notification_config_with_env_defaults(repo.get_notification_config())
+    base_url = _lightagent_web_base_url(config)
+    if not base_url:
+        raise HTTPException(status_code=400, detail="LightAgent Web 地址未配置")
+    password = _lightagent_web_password()
+    try:
+        with httpx.Client(timeout=10, trust_env=False) as client:
+            if password:
+                login_response = client.post(f"{base_url}/auth/login", json={"password": password})
+                login_response.raise_for_status()
+                login_data = login_response.json()
+                if login_data.get("status") == "error":
+                    raise HTTPException(status_code=502, detail=str(login_data.get("message") or "LightAgent 登录失败"))
+            response = client.request(method, f"{base_url}{path}", params=params, json=json_body)
+            response.raise_for_status()
+            data = response.json()
+    except HTTPException:
+        raise
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=502, detail=f"LightAgent Web 请求失败：HTTP {exc.response.status_code}") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"LightAgent Web 连接失败：{exc.__class__.__name__}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail="LightAgent Web 返回非 JSON 数据") from exc
+    if isinstance(data, dict) and data.get("status") == "error":
+        raise HTTPException(status_code=502, detail=str(data.get("message") or "LightAgent Web 请求失败"))
+    return data if isinstance(data, dict) else {"status": "success", "data": data}
 
 
 def _login_page_response(static_dir: Path, *, error: str = "", next_url: str = "/", status_code: int = 200) -> HTMLResponse:
@@ -1580,9 +1681,10 @@ async def _send_patrol_warning_message(
     image_mode: str = "auto",
 ) -> None:
     try:
-        send_content_mode = _normalize_patrol_send_content_mode(str(repo.get_patrol_warning_config().get("send_content_mode") or "both"))
+        patrol_config = repo.get_patrol_warning_config()
+        send_content_mode = _normalize_patrol_send_content_mode(str(patrol_config.get("send_content_mode") or "both"))
         if send_content_mode in {"both", "text"}:
-            await webhook_client.send_text(content, mentioned_mobile_list)
+            await webhook_client.send_text(content, _patrol_warning_mentions_for_client(repo, patrol_config, webhook_client))
         if send_content_mode in {"both", "image"} and warning is not None:
             await webhook_client.send_image(
                 render_patrol_warning_image(
@@ -1657,8 +1759,71 @@ def _person_mobile_lookup(repo: DutyRepository) -> dict[str, str]:
     return {name: mobile for name, mobile in lookup.items() if name}
 
 
+def _person_wechat_sender_lookup(repo: DutyRepository) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+    for person in repo.list_personnel():
+        sender_id = str(person.get("wechat_group_runtime_sender_id") or "").strip()
+        if sender_id:
+            lookup[str(person.get("name") or "").strip()] = sender_id
+    return {name: sender_id for name, sender_id in lookup.items() if name}
+
+
 def _mobile_for_event(event: ReminderEvent, mobile_lookup: dict[str, str]) -> str:
     return event.mention_mobile.strip() or mobile_lookup.get(event.person_name, "")
+
+
+def _mentions_for_event(client: Any, event: ReminderEvent, mobile_lookup: dict[str, str], wechat_lookup: dict[str, str]) -> list[str]:
+    if isinstance(client, LightAgentNotifyClient):
+        sender_id = wechat_lookup.get(event.person_name, "")
+        return [sender_id] if sender_id else []
+    mobile = _mobile_for_event(event, mobile_lookup)
+    return [mobile] if mobile else []
+
+
+def _bound_wechat_sender_ids(repo: DutyRepository) -> list[str]:
+    ids = []
+    for person in repo.list_personnel():
+        sender_id = str(person.get("wechat_group_runtime_sender_id") or "").strip()
+        if sender_id and sender_id not in ids:
+            ids.append(sender_id)
+    return ids
+
+
+def _lightagent_room_member_sender_ids(repo: DutyRepository) -> list[str]:
+    config = _notification_config_with_env_defaults(repo.get_notification_config())
+    room_id = str(config.get("lightagent_target") or "").strip()
+    if not room_id:
+        return []
+    try:
+        data = _lightagent_web_request(
+            repo,
+            "GET",
+            "/api/wechat-group/members",
+            params={"stable_room_id": room_id, "limit": "500"},
+        )
+    except HTTPException:
+        return _bound_wechat_sender_ids(repo)
+    ids = []
+    for member in data.get("members") or []:
+        sender_id = str(member.get("runtime_sender_id") or member.get("sender_id") or "").strip()
+        if sender_id and sender_id not in ids:
+            ids.append(sender_id)
+    return ids or _bound_wechat_sender_ids(repo)
+
+
+def _patrol_warning_mentions_for_client(repo: DutyRepository, config: dict[str, Any], client: Any) -> list[str]:
+    if isinstance(client, LightAgentNotifyClient):
+        if bool(config.get("mention_all", True)):
+            return _lightagent_room_member_sender_ids(repo)
+        names_or_ids = [part for part in re.split(r"[\s,，;；]+", str(config.get("mention_mobiles") or "")) if part]
+        lookup = _person_wechat_sender_lookup(repo)
+        mentions = []
+        for item in names_or_ids:
+            sender_id = item if item.startswith("@") else lookup.get(item, "")
+            if sender_id and sender_id not in mentions:
+                mentions.append(sender_id)
+        return mentions
+    return _patrol_warning_mentions(config)
 
 
 async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> dict[str, Any]:
@@ -1676,10 +1841,20 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
             preview_date = _date_from_record(record) or _today_in_tz()
             await client.send_image(render_daily_duty_image(_build_daily_duty_preview(repo, preview_date)))
         elif kind.startswith("patrol_warning_"):
-            await client.send_text(content, ["@all"] if "@所有人" in content else [])
+            await client.send_text(content, _patrol_warning_mentions_for_client(repo, repo.get_patrol_warning_config(), client))
         else:
-            mobile = _person_mobile_lookup(repo).get(target, target if target != "测试消息" else "")
-            await client.send_text(content, [mobile])
+            mobile_lookup = _person_mobile_lookup(repo)
+            fake_event = ReminderEvent(
+                kind=kind,
+                person_name=target,
+                send_at=datetime.now(TZ),
+                content=content,
+                mention_mobile="" if target in mobile_lookup or target == "测试消息" else target,
+            )
+            await client.send_text(
+                content,
+                _mentions_for_event(client, fake_event, mobile_lookup, _person_wechat_sender_lookup(repo)),
+            )
         repo.save_send_record(
             kind=resend_kind,
             target=target,
@@ -1731,6 +1906,7 @@ async def _send_due_reminders(repo: DutyRepository) -> None:
 
     people = {person["name"]: person for person in repo.list_monitored_people(enabled_only=True)}
     mobile_lookup = _person_mobile_lookup(repo)
+    wechat_lookup = _person_wechat_sender_lookup(repo)
     for event in events:
         if not (now - REMINDER_SEND_GRACE <= event.send_at <= now):
             continue
@@ -1747,7 +1923,7 @@ async def _send_due_reminders(repo: DutyRepository) -> None:
             if event.kind == "daily_duty" and webhook_client:
                 await webhook_client.send_image(render_daily_duty_image(_build_daily_duty_preview(repo, now.date())))
             elif webhook_client:
-                await webhook_client.send_text(event.content, [_mobile_for_event(event, mobile_lookup)])
+                await webhook_client.send_text(event.content, _mentions_for_event(webhook_client, event, mobile_lookup, wechat_lookup))
             elif person and app_client:
                 await app_client.send_text(person["wecom_userid"], event.content)
             else:

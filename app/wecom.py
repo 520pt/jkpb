@@ -139,7 +139,11 @@ class LightAgentNotifyClient:
         text: dict[str, object] = {"content": content}
         mentions = [mobile for mobile in (mentioned_mobile_list or []) if mobile]
         if mentions:
-            text["mentioned_mobile_list"] = mentions
+            mention_ids = [mention for mention in mentions if mention.startswith("@")]
+            if mention_ids:
+                text["mention_ids"] = mention_ids
+            else:
+                text["mentioned_mobile_list"] = mentions
         await self._post({"msgtype": "text", "text": text})
 
     async def send_image(self, image_bytes: bytes) -> None:

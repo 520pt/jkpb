@@ -452,7 +452,10 @@ def test_lightagent_notification_config_hides_secret_fields_and_tests_send(tmp_p
         },
     )
     get_response = client.get("/api/notification-config")
-    test_response = client.post("/api/notification-config/test", json={"test_mobile": "10000000000"})
+    test_response = client.post(
+        "/api/notification-config/test",
+        json={"test_mobile": "10000000000", "test_wechat_member_id": "@wechat-member-1"},
+    )
 
     assert save_response.status_code == 200
     public_config = get_response.json()["config"]
@@ -467,7 +470,7 @@ def test_lightagent_notification_config_hides_secret_fields_and_tests_send(tmp_p
         "target": "room-1",
         "token": "push-token",
         "content": "示例甲 2025-09-16 中班",
-        "mobiles": ["10000000000"],
+        "mobiles": ["@wechat-member-1"],
     }
 
 
@@ -506,6 +509,62 @@ def test_lightagent_notification_env_defaults_are_used_for_empty_database(tmp_pa
     assert sent["endpoint_url"] == "http://lightagent:9899/api/push/send"
     assert sent["target"] == "room-1"
     assert sent["token"] == "push-token"
+
+
+def test_lightagent_wechat_proxy_endpoints(tmp_path, monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    def fake_lightagent_web_request(repo, method, path, *, params=None, json_body=None):
+        calls.append({"method": method, "path": path, "params": params, "json_body": json_body})
+        if method == "GET" and path == "/api/wechat_group/qrlogin":
+            return {"status": "success", "login_status": "connected"}
+        if method == "POST" and path == "/api/wechat_group/qrlogin":
+            return {"status": "success", "login_status": "waiting"}
+        if method == "GET" and path == "/api/channels":
+            return {
+                "channels": [
+                    {
+                        "name": "wechat_group",
+                        "connected": True,
+                        "login_status": "connected",
+                        "extra": {
+                            "rooms": [{"id": "room-1", "name": "test-room"}],
+                            "selected_room_ids": ["room-1"],
+                            "selected_room_names": ["test-room"],
+                        },
+                    }
+                ]
+            }
+        if method == "GET" and path == "/api/wechat-group/members":
+            return {"status": "success", "members": [{"runtime_sender_id": "@member-1", "sender_nickname": "Alice"}]}
+        raise AssertionError(f"unexpected LightAgent request: {method} {path}")
+
+    monkeypatch.setattr(main_module, "_lightagent_web_request", fake_lightagent_web_request)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    status_response = client.get("/api/lightagent/wechat/status")
+    refresh_response = client.post("/api/lightagent/wechat/refresh")
+    rooms_response = client.get("/api/lightagent/wechat/rooms")
+    members_response = client.get("/api/lightagent/wechat/members?room_id=room-1")
+
+    assert status_response.json()["login_status"] == "connected"
+    assert refresh_response.json()["login_status"] == "waiting"
+    assert rooms_response.json() == {
+        "status": "success",
+        "connected": True,
+        "login_status": "connected",
+        "rooms": [{"id": "room-1", "name": "test-room"}],
+        "selected_room_ids": ["room-1"],
+        "selected_room_names": ["test-room"],
+    }
+    assert members_response.json()["members"] == [{"runtime_sender_id": "@member-1", "sender_nickname": "Alice"}]
+    assert calls[-1] == {
+        "method": "GET",
+        "path": "/api/wechat-group/members",
+        "params": {"stable_room_id": "room-1", "limit": "500"},
+        "json_body": None,
+    }
 
 
 def test_monitored_person_can_be_updated_and_deleted(tmp_path):

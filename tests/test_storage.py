@@ -3,6 +3,20 @@ from pathlib import Path
 from app.storage import DEFAULT_DAILY_DUTY_TEMPLATE, DutyRepository
 
 
+def _personnel_row(name: str, mention_mobile: str = "", **overrides: str) -> dict[str, str]:
+    row = {
+        "name": name,
+        "mention_mobile": mention_mobile,
+        "wechat_group_room_id": "",
+        "wechat_group_room_name": "",
+        "wechat_group_member_id": "",
+        "wechat_group_runtime_sender_id": "",
+        "wechat_group_member_name": "",
+    }
+    row.update(overrides)
+    return row
+
+
 def test_initializes_sqlite_schema(tmp_path: Path):
     repo = DutyRepository(tmp_path / "duty.db")
 
@@ -122,6 +136,40 @@ def test_personnel_names_preserve_saved_mobile_numbers(tmp_path: Path):
         {"name": "商邱宏", "mention_mobile": "10000000000"},
         {"name": "示例乙", "mention_mobile": ""},
     ]
+
+
+def test_personnel_contacts_save_and_clear_wechat_binding(tmp_path: Path):
+    repo = DutyRepository(tmp_path / "duty.db")
+
+    repo.save_personnel_contacts(
+        [
+            _personnel_row(
+                "Alice",
+                "10000000000",
+                wechat_group_room_id="room-1",
+                wechat_group_room_name="test-room",
+                wechat_group_member_id="stable-member-1",
+                wechat_group_runtime_sender_id="@member-1",
+                wechat_group_member_name="Alice WeChat",
+            )
+        ]
+    )
+
+    assert repo.list_personnel() == [
+        {
+            "name": "Alice",
+            "mention_mobile": "10000000000",
+            "wechat_group_room_id": "room-1",
+            "wechat_group_room_name": "test-room",
+            "wechat_group_member_id": "stable-member-1",
+            "wechat_group_runtime_sender_id": "@member-1",
+            "wechat_group_member_name": "Alice WeChat",
+        }
+    ]
+
+    repo.save_personnel_contacts([_personnel_row("Alice", "10000000000")])
+
+    assert repo.list_personnel() == [{"name": "Alice", "mention_mobile": "10000000000"}]
 
 
 def test_custom_reminder_roundtrip_updates_personnel_contact(tmp_path: Path):

@@ -128,6 +128,11 @@ class DutyRepository:
                 CREATE TABLE IF NOT EXISTS personnel_names (
                     name TEXT PRIMARY KEY,
                     mention_mobile TEXT NOT NULL DEFAULT '',
+                    wechat_group_room_id TEXT NOT NULL DEFAULT '',
+                    wechat_group_room_name TEXT NOT NULL DEFAULT '',
+                    wechat_group_member_id TEXT NOT NULL DEFAULT '',
+                    wechat_group_runtime_sender_id TEXT NOT NULL DEFAULT '',
+                    wechat_group_member_name TEXT NOT NULL DEFAULT '',
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -231,6 +236,16 @@ class DutyRepository:
             personnel_columns = {row["name"] for row in conn.execute("PRAGMA table_info(personnel_names)").fetchall()}
             if "mention_mobile" not in personnel_columns:
                 conn.execute("ALTER TABLE personnel_names ADD COLUMN mention_mobile TEXT NOT NULL DEFAULT ''")
+            if "wechat_group_room_id" not in personnel_columns:
+                conn.execute("ALTER TABLE personnel_names ADD COLUMN wechat_group_room_id TEXT NOT NULL DEFAULT ''")
+            if "wechat_group_room_name" not in personnel_columns:
+                conn.execute("ALTER TABLE personnel_names ADD COLUMN wechat_group_room_name TEXT NOT NULL DEFAULT ''")
+            if "wechat_group_member_id" not in personnel_columns:
+                conn.execute("ALTER TABLE personnel_names ADD COLUMN wechat_group_member_id TEXT NOT NULL DEFAULT ''")
+            if "wechat_group_runtime_sender_id" not in personnel_columns:
+                conn.execute("ALTER TABLE personnel_names ADD COLUMN wechat_group_runtime_sender_id TEXT NOT NULL DEFAULT ''")
+            if "wechat_group_member_name" not in personnel_columns:
+                conn.execute("ALTER TABLE personnel_names ADD COLUMN wechat_group_member_name TEXT NOT NULL DEFAULT ''")
             patrol_state_columns = {row["name"] for row in conn.execute("PRAGMA table_info(patrol_warning_state)").fetchall()}
             if "token" not in patrol_state_columns:
                 conn.execute("ALTER TABLE patrol_warning_state ADD COLUMN token TEXT NOT NULL DEFAULT ''")
@@ -385,28 +400,79 @@ class DutyRepository:
                     (name,),
                 )
 
-    def upsert_personnel_contacts(self, contacts: list[dict[str, str]]) -> None:
-        clean_contacts: dict[str, str] = {}
+    def upsert_personnel_contacts(self, contacts: list[dict[str, Any]]) -> None:
+        clean_contacts: dict[str, dict[str, str]] = {}
         for contact in contacts:
             name = str(contact.get("name") or "").strip()
             if not name:
                 continue
-            mobile = str(contact.get("mention_mobile") or "").strip()
-            if name not in clean_contacts or mobile:
-                clean_contacts[name] = mobile
+            values = {
+                "mention_mobile": str(contact.get("mention_mobile") or "").strip(),
+                "wechat_group_room_id": str(contact.get("wechat_group_room_id") or "").strip(),
+                "wechat_group_room_name": str(contact.get("wechat_group_room_name") or "").strip(),
+                "wechat_group_member_id": str(contact.get("wechat_group_member_id") or "").strip(),
+                "wechat_group_runtime_sender_id": str(contact.get("wechat_group_runtime_sender_id") or "").strip(),
+                "wechat_group_member_name": str(contact.get("wechat_group_member_name") or "").strip(),
+            }
+            existing = clean_contacts.setdefault(
+                name,
+                {
+                    "mention_mobile": "",
+                    "wechat_group_room_id": "",
+                    "wechat_group_room_name": "",
+                    "wechat_group_member_id": "",
+                    "wechat_group_runtime_sender_id": "",
+                    "wechat_group_member_name": "",
+                },
+            )
+            for key, value in values.items():
+                if value:
+                    existing[key] = value
         with self._connect() as conn:
-            for name, mobile in sorted(clean_contacts.items()):
+            for name, values in sorted(clean_contacts.items()):
                 conn.execute(
                     """
-                    INSERT INTO personnel_names (name, mention_mobile) VALUES (?, ?)
+                    INSERT INTO personnel_names (
+                        name, mention_mobile, wechat_group_room_id, wechat_group_room_name,
+                        wechat_group_member_id, wechat_group_runtime_sender_id, wechat_group_member_name
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(name) DO UPDATE SET
                         mention_mobile = CASE
                             WHEN excluded.mention_mobile != '' THEN excluded.mention_mobile
                             ELSE personnel_names.mention_mobile
                         END,
+                        wechat_group_room_id = CASE
+                            WHEN excluded.wechat_group_room_id != '' THEN excluded.wechat_group_room_id
+                            ELSE personnel_names.wechat_group_room_id
+                        END,
+                        wechat_group_room_name = CASE
+                            WHEN excluded.wechat_group_room_name != '' THEN excluded.wechat_group_room_name
+                            ELSE personnel_names.wechat_group_room_name
+                        END,
+                        wechat_group_member_id = CASE
+                            WHEN excluded.wechat_group_member_id != '' THEN excluded.wechat_group_member_id
+                            ELSE personnel_names.wechat_group_member_id
+                        END,
+                        wechat_group_runtime_sender_id = CASE
+                            WHEN excluded.wechat_group_runtime_sender_id != '' THEN excluded.wechat_group_runtime_sender_id
+                            ELSE personnel_names.wechat_group_runtime_sender_id
+                        END,
+                        wechat_group_member_name = CASE
+                            WHEN excluded.wechat_group_member_name != '' THEN excluded.wechat_group_member_name
+                            ELSE personnel_names.wechat_group_member_name
+                        END,
                         updated_at = CURRENT_TIMESTAMP
                     """,
-                    (name, mobile),
+                    (
+                        name,
+                        values["mention_mobile"],
+                        values["wechat_group_room_id"],
+                        values["wechat_group_room_name"],
+                        values["wechat_group_member_id"],
+                        values["wechat_group_runtime_sender_id"],
+                        values["wechat_group_member_name"],
+                    ),
                 )
 
     def save_personnel_names(self, names: list[str]) -> None:
@@ -426,6 +492,39 @@ class DutyRepository:
                     (name,),
                 )
 
+    def save_personnel_contacts(self, contacts: list[dict[str, Any]]) -> None:
+        with self._connect() as conn:
+            for contact in contacts:
+                name = str(contact.get("name") or "").strip()
+                if not name:
+                    continue
+                conn.execute(
+                    """
+                    INSERT INTO personnel_names (
+                        name, mention_mobile, wechat_group_room_id, wechat_group_room_name,
+                        wechat_group_member_id, wechat_group_runtime_sender_id, wechat_group_member_name
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(name) DO UPDATE SET
+                        mention_mobile = excluded.mention_mobile,
+                        wechat_group_room_id = excluded.wechat_group_room_id,
+                        wechat_group_room_name = excluded.wechat_group_room_name,
+                        wechat_group_member_id = excluded.wechat_group_member_id,
+                        wechat_group_runtime_sender_id = excluded.wechat_group_runtime_sender_id,
+                        wechat_group_member_name = excluded.wechat_group_member_name,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (
+                        name,
+                        str(contact.get("mention_mobile") or "").strip(),
+                        str(contact.get("wechat_group_room_id") or "").strip(),
+                        str(contact.get("wechat_group_room_name") or "").strip(),
+                        str(contact.get("wechat_group_member_id") or "").strip(),
+                        str(contact.get("wechat_group_runtime_sender_id") or "").strip(),
+                        str(contact.get("wechat_group_member_name") or "").strip(),
+                    ),
+                )
+
     def list_personnel_names(self) -> list[str]:
         with self._connect() as conn:
             rows = conn.execute("SELECT name FROM personnel_names ORDER BY name").fetchall()
@@ -433,8 +532,29 @@ class DutyRepository:
 
     def list_personnel(self) -> list[dict[str, str]]:
         with self._connect() as conn:
-            rows = conn.execute("SELECT name, mention_mobile FROM personnel_names ORDER BY name").fetchall()
-        return [{"name": row["name"], "mention_mobile": row["mention_mobile"]} for row in rows]
+            rows = conn.execute(
+                """
+                SELECT
+                    name, mention_mobile, wechat_group_room_id, wechat_group_room_name,
+                    wechat_group_member_id, wechat_group_runtime_sender_id, wechat_group_member_name
+                FROM personnel_names
+                ORDER BY name
+                """
+            ).fetchall()
+        people = []
+        for row in rows:
+            item = {"name": row["name"], "mention_mobile": row["mention_mobile"]}
+            wechat_fields = {
+                "wechat_group_room_id": row["wechat_group_room_id"],
+                "wechat_group_room_name": row["wechat_group_room_name"],
+                "wechat_group_member_id": row["wechat_group_member_id"],
+                "wechat_group_runtime_sender_id": row["wechat_group_runtime_sender_id"],
+                "wechat_group_member_name": row["wechat_group_member_name"],
+            }
+            if any(str(value or "").strip() for value in wechat_fields.values()):
+                item.update(wechat_fields)
+            people.append(item)
+        return people
 
     def save_monitored_person(
         self,
