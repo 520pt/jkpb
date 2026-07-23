@@ -567,6 +567,93 @@ def test_lightagent_wechat_proxy_endpoints(tmp_path, monkeypatch):
     }
 
 
+def test_wechat_query_requires_token(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    response = client.post("/api/wechat-query", json={"text": "查询我的监控", "runtime_sender_id": "@member-1"})
+
+    assert response.status_code == 401
+
+
+def test_wechat_query_returns_bound_person_monitor_plan(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/personnel",
+        json={
+            "names": ["Alice"],
+            "people": [
+                {
+                    "name": "Alice",
+                    "wechat_group_room_id": "room-1",
+                    "wechat_group_member_id": "stable-member-1",
+                    "wechat_group_runtime_sender_id": "@member-1",
+                    "wechat_group_member_name": "Alice WeChat",
+                }
+            ],
+        },
+    )
+    client.post(
+        "/api/people",
+        json={
+            "name": "Alice",
+            "daily_time": "07:40",
+            "before_shift_minutes": 10,
+            "enabled": True,
+        },
+    )
+    client.post(
+        "/api/rosters/confirm",
+        json={
+            "year": 2025,
+            "month": 9,
+            "grid": [{"name": "Alice", "days": {"16": "中"}}],
+        },
+    )
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={
+            "text": "查询我的监控",
+            "runtime_sender_id": "@member-1",
+            "stable_member_id": "stable-member-1",
+            "target_date": "2025-09-16",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["person_name"] == "Alice"
+    assert body["target_date"] == "2025-09-16"
+    assert "Alice 2025-09-16" in body["reply"]
+    assert "08:00" in body["reply"]
+    assert "07:40" in body["reply"]
+    assert "07:50" in body["reply"]
+
+
+def test_wechat_query_reports_unbound_sender(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"Authorization": "Bearer unit-token"},
+        json={"text": "查询我的监控", "runtime_sender_id": "@missing-member"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is False
+    assert body["query_type"] == "unbound"
+    assert "@missing-member" in body["reply"]
+
+
 def test_monitored_person_can_be_updated_and_deleted(tmp_path):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)

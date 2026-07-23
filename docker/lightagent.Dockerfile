@@ -34,6 +34,129 @@ COPY . /app
 RUN python - <<'PY'
 from pathlib import Path
 
+plugin_dir = Path("/app/plugins/duty_reminder_query")
+plugin_dir.mkdir(parents=True, exist_ok=True)
+plugin_dir.joinpath("__init__.py").write_text(r'''
+# encoding:utf-8
+
+import os
+import re
+
+import plugins
+import requests
+from bridge.context import ContextType
+from bridge.reply import Reply, ReplyType
+from common.log import logger
+from plugins import Event, EventAction, EventContext, Plugin
+
+
+@plugins.register(
+    name="DutyReminderQuery",
+    desire_priority=950,
+    hidden=False,
+    enabled=True,
+    desc="Query duty-reminder monitor status from WeChat group @ messages",
+    version="0.1",
+    author="520pt",
+)
+class DutyReminderQuery(Plugin):
+    def __init__(self):
+        super().__init__()
+        self.endpoint = os.environ.get("DUTY_REMINDER_QUERY_URL", "http://duty-reminder:8080/api/wechat-query").strip()
+        self.token = os.environ.get("DUTY_REMINDER_QUERY_TOKEN", "520pt").strip()
+        self.timeout = float(os.environ.get("DUTY_REMINDER_QUERY_TIMEOUT", "8") or 8)
+        self.handlers[Event.ON_HANDLE_CONTEXT] = self.on_handle_context
+        logger.info("[DutyReminderQuery] inited, endpoint=%s", self.endpoint)
+
+    def on_handle_context(self, e_context: EventContext):
+        context = e_context["context"]
+        if context.type != ContextType.TEXT:
+            return
+        if not context.get("isgroup", False):
+            return
+        msg = context.get("msg")
+        if not msg or getattr(msg, "is_at", False) is not True:
+            return
+        text = self._clean_text(context.get("wechat_group_user_content") or context.content)
+        if not self._looks_like_duty_query(text):
+            return
+        reply_text = self._query_duty_reminder(context, msg, text)
+        e_context["reply"] = Reply(ReplyType.TEXT, reply_text)
+        e_context.action = EventAction.BREAK_PASS
+
+    def _query_duty_reminder(self, context, msg, text: str) -> str:
+        if not self.endpoint:
+            return "监控查询未配置：缺少 DUTY_REMINDER_QUERY_URL"
+        payload = {
+            "text": text,
+            "room_id": str(context.get("wechat_group_runtime_room_id") or getattr(msg, "runtime_room_id", "") or getattr(msg, "other_user_id", "") or ""),
+            "stable_room_id": str(context.get("wechat_group_stable_room_id") or ""),
+            "sender_id": str(getattr(msg, "actual_user_id", "") or ""),
+            "runtime_sender_id": str(context.get("wechat_group_runtime_sender_id") or getattr(msg, "runtime_sender_id", "") or getattr(msg, "actual_user_id", "") or ""),
+            "stable_member_id": str(context.get("wechat_group_stable_member_id") or ""),
+            "sender_name": str(getattr(msg, "actual_user_nickname", "") or ""),
+        }
+        headers = {"Content-Type": "application/json"}
+        if self.token:
+            headers["X-Duty-Query-Token"] = self.token
+        try:
+            response = requests.post(self.endpoint, json=payload, headers=headers, timeout=self.timeout)
+            data = response.json() if response.content else {}
+            if response.status_code >= 400:
+                return "监控查询失败：{}".format(data.get("detail") or response.status_code)
+            return str(data.get("reply") or "没有查询到结果")
+        except Exception as exc:
+            logger.warning("[DutyReminderQuery] query failed: %s", exc)
+            return "监控查询失败：无法连接 duty-reminder"
+
+    @staticmethod
+    def _clean_text(text: str) -> str:
+        value = re.sub(r"@\S+", "", str(text or ""))
+        return re.sub(r"\s+", "", value).strip("，,。.!！?？：:")
+
+    @staticmethod
+    def _looks_like_duty_query(text: str) -> bool:
+        if text in {
+            "查询我的监控",
+            "查我的监控",
+            "我的监控",
+            "查询我的排班",
+            "我的排班",
+            "查询今日提醒",
+            "今日提醒",
+            "查询今天提醒",
+            "今天提醒",
+            "查询明日监控",
+            "明日监控",
+            "查询明天监控",
+            "明天监控",
+            "查询明日提醒",
+            "明日提醒",
+            "查询明天提醒",
+            "明天提醒",
+            "查询后天监控",
+            "后天监控",
+            "查询我的绑定",
+            "我的绑定",
+            "查我的绑定",
+            "绑定查询",
+            "查询帮助",
+            "监控帮助",
+            "提醒帮助",
+        }:
+            return True
+        if "帮助" in text and any(keyword in text for keyword in ("查询", "监控", "提醒", "绑定")):
+            return True
+        return "查询" in text and any(
+            keyword in text
+            for keyword in ("我的监控", "我的排班", "今日提醒", "今天提醒", "明日监控", "明天监控", "明日提醒", "明天提醒")
+        )
+'''.lstrip(), encoding="utf-8")
+PY
+
+RUN python - <<'PY'
+from pathlib import Path
+
 path = Path("/app/channel/web/web_channel.py")
 text = path.read_text(encoding="utf-8")
 

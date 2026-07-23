@@ -211,6 +211,17 @@ class PatrolWarningImagePreviewRequest(BaseModel):
     window_hours: int = Field(default=48, ge=1, le=720)
 
 
+class WechatQueryRequest(BaseModel):
+    text: str = ""
+    room_id: str = ""
+    stable_room_id: str = ""
+    sender_id: str = ""
+    runtime_sender_id: str = ""
+    stable_member_id: str = ""
+    sender_name: str = ""
+    target_date: date | None = None
+
+
 def create_app(
     *,
     data_dir: str | Path | None = None,
@@ -706,6 +717,11 @@ def create_app(
             params={"stable_room_id": room_text, "limit": "500"},
         )
 
+    @app.post("/api/wechat-query")
+    def wechat_query(http_request: Request, query: WechatQueryRequest):
+        _require_wechat_query_auth(http_request)
+        return _build_wechat_query_response(repo, query)
+
     @app.get("/api/send-records")
     def list_send_records(limit: int = 100):
         return {"records": repo.list_send_records(limit)}
@@ -983,6 +999,205 @@ def _lightagent_web_request(
     if isinstance(data, dict) and data.get("status") == "error":
         raise HTTPException(status_code=502, detail=str(data.get("message") or "LightAgent Web 请求失败"))
     return data if isinstance(data, dict) else {"status": "success", "data": data}
+
+
+def _wechat_query_token() -> str:
+    return (
+        os.getenv("DUTY_REMINDER_QUERY_TOKEN", "").strip()
+        or os.getenv("DUTY_QUERY_TOKEN", "").strip()
+        or "520pt"
+    )
+
+
+def _require_wechat_query_auth(request: Request) -> None:
+    token = _wechat_query_token()
+    if not token:
+        return
+    auth = str(request.headers.get("authorization") or "")
+    bearer = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+    supplied = str(request.headers.get("x-duty-query-token") or bearer).strip()
+    if not supplied or not secrets.compare_digest(supplied, token):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _build_wechat_query_response(repo: DutyRepository, query: WechatQueryRequest) -> dict[str, Any]:
+    text = _normalize_wechat_query_text(query.text)
+    if _is_wechat_query_help(text):
+        return {"success": True, "reply": _wechat_query_help_text(), "query_type": "help"}
+    person = _person_for_wechat_query(repo, query)
+    if _is_wechat_binding_query(text):
+        if not person:
+            return _wechat_query_unbound_response(query)
+        return {
+            "success": True,
+            "query_type": "binding",
+            "person_name": person["name"],
+            "reply": (
+                f"已绑定：{person['name']}\n"
+                f"微信成员：{person.get('wechat_group_member_name') or query.sender_name or '未记录'}\n"
+                f"成员ID：{person.get('wechat_group_runtime_sender_id') or query.runtime_sender_id or query.sender_id}"
+            ),
+        }
+    if not _is_wechat_monitor_query(text):
+        return {"success": False, "reply": _wechat_query_help_text(), "query_type": "unknown"}
+    if not person:
+        return _wechat_query_unbound_response(query)
+    target = query.target_date or _wechat_query_target_date(text)
+    return _build_person_monitor_query_response(repo, str(person["name"]), target)
+
+
+def _normalize_wechat_query_text(text: str) -> str:
+    value = re.sub(r"@\S+", "", str(text or ""))
+    return re.sub(r"\s+", "", value).strip("，,。.!！?？：:")
+
+
+def _is_wechat_query_help(text: str) -> bool:
+    if text in {"帮助", "查询帮助", "监控帮助", "提醒帮助"}:
+        return True
+    return "帮助" in text and any(keyword in text for keyword in ("查询", "监控", "提醒", "绑定"))
+
+
+def _is_wechat_binding_query(text: str) -> bool:
+    return text in {"查询我的绑定", "我的绑定", "查我的绑定", "绑定查询"}
+
+
+def _is_wechat_monitor_query(text: str) -> bool:
+    if text in {
+        "查询我的监控",
+        "查我的监控",
+        "我的监控",
+        "查询我的排班",
+        "我的排班",
+        "查询今日提醒",
+        "今日提醒",
+        "查询今天提醒",
+        "今天提醒",
+        "查询明日监控",
+        "明日监控",
+        "查询明天监控",
+        "明天监控",
+        "查询明日提醒",
+        "明日提醒",
+        "查询明天提醒",
+        "明天提醒",
+        "查询后天监控",
+        "后天监控",
+    }:
+        return True
+    return "查询" in text and any(keyword in text for keyword in ("我的监控", "我的排班", "今日提醒", "今天提醒", "明日监控", "明天监控", "明日提醒", "明天提醒"))
+
+
+def _wechat_query_target_date(text: str) -> date:
+    today = _today_in_tz()
+    if "后天" in text:
+        return today + timedelta(days=2)
+    if "明日" in text or "明天" in text:
+        return today + timedelta(days=1)
+    return today
+
+
+def _wechat_query_help_text() -> str:
+    return (
+        "监控查询可用命令：\n"
+        "查询我的监控\n"
+        "查询今日提醒\n"
+        "查询明日监控\n"
+        "查询我的绑定\n"
+        "说明：普通群成员只能查询自己，需要先在 duty-reminder 设置里绑定微信成员。"
+    )
+
+
+def _wechat_query_unbound_response(query: WechatQueryRequest) -> dict[str, Any]:
+    sender_id = str(query.runtime_sender_id or query.sender_id or query.stable_member_id or "").strip()
+    suffix = f"\n当前微信成员ID：{sender_id}" if sender_id else ""
+    return {
+        "success": False,
+        "query_type": "unbound",
+        "reply": "还没有找到你的微信成员绑定。请先在 duty-reminder 设置 -> 通知发送 -> 微信群通知里同步成员并保存绑定。" + suffix,
+    }
+
+
+def _person_for_wechat_query(repo: DutyRepository, query: WechatQueryRequest) -> dict[str, str] | None:
+    runtime_ids = {
+        str(query.runtime_sender_id or "").strip(),
+        str(query.sender_id or "").strip(),
+    }
+    stable_ids = {str(query.stable_member_id or "").strip()}
+    runtime_ids.discard("")
+    stable_ids.discard("")
+    for person in repo.list_personnel():
+        runtime_id = str(person.get("wechat_group_runtime_sender_id") or "").strip()
+        stable_id = str(person.get("wechat_group_member_id") or "").strip()
+        if runtime_id and runtime_id in runtime_ids:
+            return person
+        if stable_id and stable_id in stable_ids:
+            return person
+    return None
+
+
+def _build_person_monitor_query_response(repo: DutyRepository, person_name: str, target: date) -> dict[str, Any]:
+    monitored = next((person for person in repo.list_monitored_people() if person["name"] == person_name), None)
+    events = [event for event in _plan_all_events(repo, target) if event.person_name == person_name]
+    roster_status = _person_roster_status_text(repo, person_name, target)
+    lines = [
+        f"{person_name} {target:%Y-%m-%d} 监控查询",
+        f"排班：{roster_status}",
+    ]
+    if monitored:
+        enabled_text = "启用" if monitored.get("enabled") else "停用"
+        lines.append(
+            "监控提醒：{}，每日 {}，班前 {} 分钟".format(
+                enabled_text,
+                _coerce_hhmm(str(monitored.get("daily_time") or ""), "07:50"),
+                int(monitored.get("before_shift_minutes") or 0),
+            )
+        )
+        if monitored.get("rest_reminder_enabled"):
+            lines.append(f"休息提醒：{_coerce_hhmm(str(monitored.get('rest_reminder_time') or ''), '08:30')}")
+    else:
+        lines.append("监控提醒：未配置")
+    if events:
+        lines.append("计划提醒：")
+        for event in events[:8]:
+            content = str(event.content or "").splitlines()[0]
+            lines.append(f"- {event.send_at:%H:%M} {_wechat_query_event_label(event.kind)}：{content}")
+        if len(events) > 8:
+            lines.append(f"- 另有 {len(events) - 8} 条提醒未显示")
+    else:
+        lines.append("计划提醒：无")
+    return {
+        "success": True,
+        "query_type": "monitor",
+        "person_name": person_name,
+        "target_date": target.isoformat(),
+        "reply": "\n".join(lines),
+    }
+
+
+def _person_roster_status_text(repo: DutyRepository, person_name: str, target: date) -> str:
+    row = next((item for item in _roster_rows_for_date(repo, target) if item["name"] == person_name), None)
+    if row is None:
+        return "未找到排班"
+    code = str(row.get("code") or "").strip()
+    shift = normalize_shift_code(code)
+    if shift:
+        return f"{shift.label} {shift.start_time:%H:%M}至{shift.end_time:%H:%M}"
+    if _is_rest_code(code):
+        return "休息"
+    if code == "出差":
+        return "出差"
+    if code:
+        return code
+    return "在岗/备勤（未标早中晚班）"
+
+
+def _wechat_query_event_label(kind: str) -> str:
+    return {
+        "daily": "每日提醒",
+        "before_shift": "班前提醒",
+        "rest": "休息提醒",
+        "custom": "自定义提醒",
+    }.get(kind, kind)
 
 
 def _login_page_response(static_dir: Path, *, error: str = "", next_url: str = "/", status_code: int = 200) -> HTMLResponse:
