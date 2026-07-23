@@ -471,6 +471,43 @@ def test_lightagent_notification_config_hides_secret_fields_and_tests_send(tmp_p
     }
 
 
+def test_lightagent_notification_env_defaults_are_used_for_empty_database(tmp_path, monkeypatch):
+    sent: dict[str, object] = {}
+
+    class FakeLightAgentClient:
+        def __init__(self, *, endpoint_url: str, target: str, token: str = ""):
+            sent["endpoint_url"] = endpoint_url
+            sent["target"] = target
+            sent["token"] = token
+
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            sent["content"] = content
+            sent["mobiles"] = mentioned_mobile_list
+
+    monkeypatch.setenv("NOTIFICATION_SENDER_TYPE", "lightagent")
+    monkeypatch.setenv("LIGHTAGENT_NOTIFY_URL", "http://lightagent:9899/api/push/send")
+    monkeypatch.setenv("LIGHTAGENT_PUSH_TOKEN", "push-token")
+    monkeypatch.setenv("LIGHTAGENT_NOTIFY_TARGET", "room-1")
+    monkeypatch.setattr("app.main.LightAgentNotifyClient", FakeLightAgentClient)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(webhook_url="https://example.test/cgi-bin/webhook/send?key=old")
+    client = TestClient(app)
+
+    public_config = client.get("/api/notification-config").json()["config"]
+    test_response = client.post("/api/notification-config/test", json={"test_mobile": "10000000000"})
+
+    assert public_config["sender_type"] == "lightagent"
+    assert public_config["lightagent_url"] == ""
+    assert public_config["lightagent_configured"] is True
+    assert public_config["lightagent_token_configured"] is True
+    assert public_config["lightagent_target"] == "room-1"
+    assert test_response.status_code == 200
+    assert sent["endpoint_url"] == "http://lightagent:9899/api/push/send"
+    assert sent["target"] == "room-1"
+    assert sent["token"] == "push-token"
+
+
 def test_monitored_person_can_be_updated_and_deleted(tmp_path):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)

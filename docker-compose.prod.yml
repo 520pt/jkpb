@@ -34,6 +34,10 @@ services:
       ENABLE_SCHEDULER: "true"
       ADMIN_USERNAME: admin
       ADMIN_PASSWORD: CHANGE_THIS_PASSWORD
+      NOTIFICATION_SENDER_TYPE: lightagent
+      LIGHTAGENT_NOTIFY_URL: http://lightagent:9899/api/push/send
+      LIGHTAGENT_PUSH_TOKEN: CHANGE_THIS_LIGHTAGENT_PUSH_TOKEN
+      LIGHTAGENT_NOTIFY_TARGET: ""
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads

@@ -599,7 +599,7 @@ def create_app(
 
     @app.post("/api/notification-config")
     def save_notification_config(request: NotificationConfigRequest):
-        existing = repo.get_notification_config()
+        existing = _notification_config_with_env_defaults(repo.get_notification_config())
         webhook_url = request.webhook_url.strip() or str(existing.get("webhook_url", "")).strip()
         lightagent_url = request.lightagent_url.strip() or str(existing.get("lightagent_url", "")).strip()
         lightagent_token = request.lightagent_token.strip() or str(existing.get("lightagent_token", "")).strip()
@@ -841,6 +841,49 @@ def _normalize_notification_sender_type(value: str) -> str:
     return normalized if normalized in {"wecom_webhook", "lightagent"} else "wecom_webhook"
 
 
+def _env_notification_config_defaults() -> dict[str, str]:
+    return {
+        "sender_type": os.getenv("NOTIFICATION_SENDER_TYPE", "").strip(),
+        "webhook_url": os.getenv("WECOM_WEBHOOK_URL", "").strip(),
+        "lightagent_url": (
+            os.getenv("LIGHTAGENT_NOTIFY_URL", "").strip()
+            or os.getenv("LIGHTAGENT_PUSH_URL", "").strip()
+        ),
+        "lightagent_token": (
+            os.getenv("LIGHTAGENT_NOTIFY_TOKEN", "").strip()
+            or os.getenv("LIGHTAGENT_PUSH_TOKEN", "").strip()
+        ),
+        "lightagent_target": (
+            os.getenv("LIGHTAGENT_NOTIFY_TARGET", "").strip()
+            or os.getenv("LIGHTAGENT_TARGET", "").strip()
+        ),
+    }
+
+
+def _notification_config_with_env_defaults(config: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(config)
+    env_config = _env_notification_config_defaults()
+    sender_type = _normalize_notification_sender_type(str(merged.get("sender_type") or "wecom_webhook"))
+    has_active_config = (
+        bool(str(merged.get("webhook_url", "")).strip())
+        if sender_type == "wecom_webhook"
+        else bool(str(merged.get("lightagent_url", "")).strip() and str(merged.get("lightagent_target", "")).strip())
+    )
+    env_sender_type = _normalize_notification_sender_type(env_config["sender_type"]) if env_config["sender_type"] else ""
+    has_env_lightagent = bool(env_config["lightagent_url"] or env_config["lightagent_target"])
+    if env_sender_type:
+        sender_type = env_sender_type
+        merged["sender_type"] = sender_type
+    elif not has_active_config and has_env_lightagent:
+        sender_type = env_sender_type or "lightagent"
+        merged["sender_type"] = sender_type
+
+    for key in ("webhook_url", "lightagent_url", "lightagent_token", "lightagent_target"):
+        if not str(merged.get(key, "")).strip() and env_config[key]:
+            merged[key] = env_config[key]
+    return merged
+
+
 def _login_page_response(static_dir: Path, *, error: str = "", next_url: str = "/", status_code: int = 200) -> HTMLResponse:
     template = (static_dir / "login.html").read_text(encoding="utf-8")
     error_html = f'<div class="login-error">{html_lib.escape(error)}</div>' if error else ""
@@ -852,6 +895,7 @@ def _login_page_response(static_dir: Path, *, error: str = "", next_url: str = "
 
 
 def _public_notification_config(config: dict[str, Any]) -> dict[str, Any]:
+    config = _notification_config_with_env_defaults(config)
     webhook_url = str(config.get("webhook_url", "")).strip()
     lightagent_url = str(config.get("lightagent_url", "")).strip()
     lightagent_target = str(config.get("lightagent_target", "")).strip()
@@ -1732,6 +1776,7 @@ def _notification_client_from_repo(repo: DutyRepository):
 
 
 def _notification_client_from_config(config: dict[str, Any]):
+    config = _notification_config_with_env_defaults(config)
     sender_type = _normalize_notification_sender_type(str(config.get("sender_type") or "wecom_webhook"))
     if sender_type == "lightagent":
         endpoint_url = str(config.get("lightagent_url", "")).strip()
