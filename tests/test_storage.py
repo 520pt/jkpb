@@ -31,6 +31,9 @@ def test_initializes_sqlite_schema(tmp_path: Path):
         "daily_duty_config",
         "patrol_warning_config",
         "patrol_warning_state",
+        "tunnel_mechanical_config",
+        "tunnel_mechanical_state",
+        "tunnel_mechanical_template",
         "sent_reminders",
         "send_records",
     } <= tables
@@ -129,12 +132,12 @@ def test_roster_import_syncs_personnel_names(tmp_path: Path):
 def test_personnel_names_preserve_saved_mobile_numbers(tmp_path: Path):
     repo = DutyRepository(tmp_path / "duty.db")
 
-    repo.upsert_personnel_contacts([{"name": "商邱宏", "mention_mobile": "10000000000"}])
-    repo.save_personnel_names(["商邱宏", "示例乙"])
+    repo.upsert_personnel_contacts([{"name": "示例甲", "mention_mobile": "10000000000"}])
+    repo.save_personnel_names(["示例甲", "示例乙"])
 
     assert repo.list_personnel() == [
-        {"name": "商邱宏", "mention_mobile": "10000000000"},
         {"name": "示例乙", "mention_mobile": ""},
+        {"name": "示例甲", "mention_mobile": "10000000000"},
     ]
 
 
@@ -176,7 +179,7 @@ def test_custom_reminder_roundtrip_updates_personnel_contact(tmp_path: Path):
     repo = DutyRepository(tmp_path / "duty.db")
 
     reminder_id = repo.save_custom_reminder(
-        name="商邱宏",
+        name="示例甲",
         mention_mobile="10000000000",
         shift_code="night",
         reminder_time="21:00",
@@ -187,7 +190,7 @@ def test_custom_reminder_roundtrip_updates_personnel_contact(tmp_path: Path):
     assert repo.list_custom_reminders() == [
         {
             "id": reminder_id,
-            "name": "商邱宏",
+            "name": "示例甲",
             "mention_mobile": "10000000000",
             "shift_code": "night",
             "reminder_time": "21:00",
@@ -197,7 +200,7 @@ def test_custom_reminder_roundtrip_updates_personnel_contact(tmp_path: Path):
             "updated_at": repo.list_custom_reminders()[0]["updated_at"],
         }
     ]
-    assert repo.list_personnel() == [{"name": "商邱宏", "mention_mobile": "10000000000"}]
+    assert repo.list_personnel() == [{"name": "示例甲", "mention_mobile": "10000000000"}]
 
 
 def test_daily_duty_config_roundtrip(tmp_path: Path):
@@ -284,6 +287,52 @@ def test_patrol_warning_config_and_state_roundtrip(tmp_path: Path):
     assert repo.get_patrol_warning_state()["failure_count"] == 2
     assert repo.get_patrol_warning_state()["backoff_until"] == "2026-07-22T14:30:00+08:00"
     assert repo.get_patrol_warning_state()["last_error"] == "HTTP 429"
+
+
+def test_tunnel_mechanical_config_and_state_roundtrip(tmp_path: Path):
+    repo = DutyRepository(tmp_path / "duty.db")
+
+    repo.save_tunnel_mechanical_config(
+        base_url="https://example.test",
+        username="station-user",
+        password="secret",
+    )
+    repo.save_tunnel_mechanical_state(
+        access_token="access-token",
+        refresh_token="refresh-token",
+        cookie_header="sid=abc",
+        token_expires_at="2026-07-24T08:00:00+08:00",
+        last_login_at="2026-07-23T08:00:00+08:00",
+        last_error="",
+    )
+
+    assert repo.get_tunnel_mechanical_config() == {
+        "base_url": "https://example.test",
+        "username": "station-user",
+        "password": "secret",
+    }
+    assert repo.get_tunnel_mechanical_state() == {
+        "access_token": "access-token",
+        "refresh_token": "refresh-token",
+        "cookie_header": "sid=abc",
+        "token_expires_at": "2026-07-24T08:00:00+08:00",
+        "last_login_at": "2026-07-23T08:00:00+08:00",
+        "last_error": "",
+    }
+
+
+def test_tunnel_mechanical_template_roundtrip(tmp_path: Path):
+    repo = DutyRepository(tmp_path / "duty.db")
+    template = {
+        "base_url": "https://example.test",
+        "people": [{"id": "1001", "name": "张三"}],
+        "assets": [{"assetId": "asset-1", "assetName": "示例资产"}],
+        "defaults": {"checkerId": "1001"},
+    }
+
+    repo.save_tunnel_mechanical_template(template)
+
+    assert repo.get_tunnel_mechanical_template() == template
 
 
 def test_saving_notification_config_replaces_existing_value(tmp_path: Path):

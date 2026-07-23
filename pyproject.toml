@@ -5,6 +5,7 @@ description = "Monitoring duty reminder service with roster image import and WeC
 requires-python = ">=3.10"
 dependencies = [
   "apscheduler>=3.10,<4",
+  "cryptography>=42,<47",
   "fastapi>=0.116,<1",
   "httpx>=0.28,<1",
   "opencv-python-headless>=4.6,<5",

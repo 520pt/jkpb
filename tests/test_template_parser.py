@@ -171,8 +171,8 @@ def test_template_parser_merges_name_column_ocr_without_full_image_ocr(tmp_path:
     monkeypatch.setattr(
         "app.ocr._read_template_ocr_texts",
         lambda path, template_result: [
-            OcrText(text="罗森", x=105, y=136),
-            OcrText(text="李金雷", x=105, y=169),
+            OcrText(text="示例甲", x=105, y=136),
+            OcrText(text="示例乙", x=105, y=169),
         ],
         raising=False,
     )
@@ -181,8 +181,8 @@ def test_template_parser_merges_name_column_ocr_without_full_image_ocr(tmp_path:
 
     assert result["ocr_status"] == "template_ok"
     assert len(result["grid"]) == 15
-    assert result["grid"][0]["name"] == "罗森"
-    assert result["grid"][1]["name"] == "李金雷"
+    assert result["grid"][0]["name"] == "示例甲"
+    assert result["grid"][1]["name"] == "示例乙"
 
 
 def test_non_template_image_does_not_fall_back_to_ocr(tmp_path: Path, monkeypatch):

@@ -1030,7 +1030,7 @@
       width: 100%;
       color: var(--ink);
     }
-    .tunnel-auth-grid label.wide,
+    .tunnel-auth-grid .wide,
     .tunnel-meta-grid label.wide {
       grid-column: 1 / -1;
     }
@@ -1039,32 +1039,81 @@
       font-family: Consolas, "Microsoft YaHei", monospace;
       font-size: 12px;
     }
-    .tunnel-table-wrap {
-      overflow: auto;
+    .tunnel-template-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .tunnel-asset-list {
+      display: grid;
+      gap: 10px;
+    }
+    .tunnel-empty {
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      color: var(--muted);
+      background: white;
+    }
+    .tunnel-asset-card {
       border: 1px solid var(--line);
       border-radius: 8px;
       background: white;
+      overflow: hidden;
     }
-    .tunnel-table {
-      min-width: 980px;
-      width: 100%;
+    .tunnel-asset-head {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      padding: 10px;
+      border-bottom: 1px solid var(--line);
+      background: #f8fafc;
     }
-    .tunnel-table th,
-    .tunnel-table td {
-      text-align: left;
-      vertical-align: top;
+    .tunnel-asset-title {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
     }
-    .tunnel-table td.center,
-    .tunnel-table th.center {
-      text-align: center;
-    }
-    .tunnel-table input,
-    .tunnel-table textarea {
-      width: 100%;
-    }
-    .tunnel-table textarea {
-      min-height: 52px;
+    .tunnel-asset-title label {
+      display: grid;
+      gap: 4px;
+      color: var(--muted);
       font-size: 12px;
+    }
+    .tunnel-asset-title input {
+      width: 100%;
+      color: var(--ink);
+      font-weight: 600;
+    }
+    .tunnel-asset-meta {
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    .tunnel-asset-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      padding: 10px;
+    }
+    .tunnel-asset-grid label {
+      display: grid;
+      gap: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .tunnel-asset-grid input,
+    .tunnel-asset-grid textarea {
+      width: 100%;
+      color: var(--ink);
+    }
+    .tunnel-asset-grid textarea {
+      min-height: 64px;
+      resize: vertical;
+    }
+    .tunnel-asset-grid .wide {
+      grid-column: span 3;
     }
     .tunnel-result-box {
       min-height: 260px;
@@ -1079,6 +1128,22 @@
       font-size: 12px;
       line-height: 1.55;
       white-space: pre-wrap;
+    }
+    .tunnel-result-image {
+      margin-top: 10px;
+      display: grid;
+      gap: 8px;
+    }
+    .tunnel-result-image a {
+      color: var(--primary);
+      font-size: 13px;
+      text-decoration: none;
+    }
+    .tunnel-result-image img {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: white;
     }
     .daily-duty-visual {
       display: grid;
@@ -1176,7 +1241,9 @@
       .patrol-delivery-row { grid-template-columns: 1fr; }
       .tunnel-mechanical-layout,
       .tunnel-auth-grid,
-      .tunnel-meta-grid { grid-template-columns: 1fr; }
+      .tunnel-meta-grid,
+      .tunnel-asset-grid { grid-template-columns: 1fr; }
+      .tunnel-asset-grid .wide { grid-column: auto; }
     }
   </style>
 </head>
@@ -1352,8 +1419,11 @@
           <p id="tunnelMechanicalStatus" class="status"></p>
         </div>
         <div class="toolbar">
+          <input id="tunnelMechanicalTemplateFile" type="file" accept="application/json,.json" hidden />
+          <button id="importTunnelMechanicalTemplateBtn" type="button">导入模板</button>
           <button id="loadTunnelMechanicalBtn" type="button">刷新模板</button>
           <button id="previewTunnelMechanicalBtn" type="button">预览请求</button>
+          <button id="queryTunnelMechanicalResultBtn" type="button">查询结果图</button>
           <button class="green" id="submitTunnelMechanicalBtn" type="button">提交选中记录</button>
         </div>
       </div>
@@ -1366,7 +1436,19 @@
               </div>
               <div class="body stack">
                 <div class="tunnel-auth-grid">
-                  <label>平台地址 <input id="tunnelMechanicalBaseUrl" value="https://zhyhpt.yciccloud.com" /></label>
+                  <label>平台地址 <input id="tunnelMechanicalBaseUrl" placeholder="导入模板或手动填写" /></label>
+                  <label>账号 <input id="tunnelMechanicalUsername" autocomplete="username" /></label>
+                  <label>密码 <input id="tunnelMechanicalPassword" type="password" autocomplete="current-password" placeholder="已配置时可留空" /></label>
+                  <label>验证码 <input id="tunnelMechanicalCaptchaCode" autocomplete="off" /></label>
+                  <label class="wide">验证码图片
+                    <img id="tunnelMechanicalCaptchaImg" alt="captcha" style="display:none; max-width: 180px; height: 56px; object-fit: contain;" />
+                  </label>
+                  <div class="settings-actions wide">
+                    <button id="saveTunnelMechanicalConfigBtn" type="button">保存账号配置</button>
+                    <button id="loadTunnelMechanicalCaptchaBtn" type="button">获取验证码</button>
+                    <button id="testTunnelMechanicalLoginBtn" type="button">测试登录并缓存</button>
+                  </div>
+                  <p id="tunnelMechanicalLoginState" class="status wide"></p>
                   <label>Authorization <input id="tunnelMechanicalAuthorization" autocomplete="off" placeholder="Bearer 或系统返回的 token" /></label>
                   <label class="wide">Cookie
                     <textarea id="tunnelMechanicalCookie" autocomplete="off" placeholder="可选；如果 Authorization 足够，可留空"></textarea>
@@ -1382,15 +1464,15 @@
               <div class="body stack">
                 <div class="tunnel-meta-grid">
                   <label>检查日期 <input id="tunnelMechanicalCheckTime" type="date" /></label>
-                  <label>天气 <input id="tunnelMechanicalWeather" value="晴" /></label>
+                  <label>天气 <input id="tunnelMechanicalWeather" /></label>
                   <label>检查人
                     <select id="tunnelMechanicalChecker"></select>
                   </label>
                   <label>记录人
                     <select id="tunnelMechanicalRecorder"></select>
                   </label>
-                  <label>车牌 <input id="tunnelMechanicalCarLicense" value="云JJX350" /></label>
-                  <label>数量 <input id="tunnelMechanicalNums" value="1" /></label>
+                  <label>车牌 <input id="tunnelMechanicalCarLicense" /></label>
+                  <label>数量 <input id="tunnelMechanicalNums" /></label>
                 </div>
               </div>
             </section>
@@ -1398,28 +1480,13 @@
             <section>
               <div class="section-head">
                 <h3>隧道模板</h3>
-                <div class="toolbar">
+                <div class="toolbar tunnel-template-actions">
                   <button id="selectAllTunnelMechanicalBtn" type="button">全选</button>
                   <button id="clearTunnelMechanicalBtn" type="button">全不选</button>
                 </div>
               </div>
               <div class="body">
-                <div class="tunnel-table-wrap">
-                  <table class="tunnel-table">
-                    <thead>
-                      <tr>
-                        <th class="center">录入</th>
-                        <th>资产</th>
-                        <th>编码</th>
-                        <th>位置</th>
-                        <th>设备名称</th>
-                        <th>车牌</th>
-                        <th>数量</th>
-                      </tr>
-                    </thead>
-                    <tbody id="tunnelMechanicalRows"></tbody>
-                  </table>
-                </div>
+                <div id="tunnelMechanicalRows" class="tunnel-asset-list"></div>
               </div>
             </section>
           </div>
@@ -1430,6 +1497,7 @@
             </div>
             <div class="body">
               <pre id="tunnelMechanicalResult" class="tunnel-result-box"></pre>
+              <div id="tunnelMechanicalResultImage" class="tunnel-result-image"></div>
             </div>
           </aside>
         </div>
@@ -1787,6 +1855,7 @@
       patrolWarningPanelState: null,
       patrolWarningPanelRefreshInFlight: false,
       tunnelMechanicalTemplates: null,
+      tunnelMechanicalCaptchaUuid: "",
     };
     const BEIJING_TIME_ZONE = "Asia/Shanghai";
     const shiftOptions = ["", "早", "中", "晚", "休", "出差"];
@@ -4156,6 +4225,101 @@
       $("tunnelMechanicalStatus").className = `status ${type}`;
     }
 
+    function setTunnelMechanicalLoginState(text, type = "") {
+      $("tunnelMechanicalLoginState").textContent = text;
+      $("tunnelMechanicalLoginState").className = `status wide ${type}`;
+    }
+
+    function renderTunnelMechanicalConfig(body) {
+      const config = body.config || {};
+      const stateInfo = body.state || {};
+      if (config.base_url) $("tunnelMechanicalBaseUrl").value = config.base_url;
+      $("tunnelMechanicalUsername").value = config.username || "";
+      $("tunnelMechanicalPassword").value = "";
+      $("tunnelMechanicalPassword").placeholder = config.password_configured ? "已配置，如需修改请输入新密码" : "未配置";
+      const tokenText = stateInfo.token_configured
+        ? `token 已缓存，过期时间：${stateInfo.token_expires_at || "未知"}`
+        : "token 未缓存";
+      const cookieText = stateInfo.cookie_configured ? "，Cookie 已缓存" : "";
+      const errorText = stateInfo.last_error ? `；上次错误：${stateInfo.last_error}` : "";
+      setTunnelMechanicalLoginState(`${tokenText}${cookieText}${errorText}`, stateInfo.last_error ? "error" : "");
+    }
+
+    async function loadTunnelMechanicalConfig() {
+      try {
+        const response = await fetch("/api/tunnel-mechanical/config");
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.detail || "加载隧道机电账号配置失败");
+        renderTunnelMechanicalConfig(body);
+      } catch (error) {
+        setTunnelMechanicalLoginState(`加载账号配置失败：${error.message || error}`, "error");
+      }
+    }
+
+    async function saveTunnelMechanicalConfig(showStatus = true) {
+      const payload = {
+        base_url: $("tunnelMechanicalBaseUrl").value.trim(),
+        username: $("tunnelMechanicalUsername").value.trim(),
+        password: $("tunnelMechanicalPassword").value,
+      };
+      const response = await fetch("/api/tunnel-mechanical/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.detail || "保存隧道机电账号配置失败");
+      renderTunnelMechanicalConfig(body);
+      $("tunnelMechanicalPassword").value = "";
+      if (showStatus) setTunnelMechanicalLoginState("账号配置已保存", "ok");
+      return body;
+    }
+
+    async function loadTunnelMechanicalCaptcha() {
+      try {
+        await saveTunnelMechanicalConfig(false);
+        setTunnelMechanicalLoginState("正在获取验证码...");
+        const response = await fetch("/api/tunnel-mechanical/captcha");
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.detail || "获取验证码失败");
+        state.tunnelMechanicalCaptchaUuid = body.uuid || "";
+        $("tunnelMechanicalCaptchaCode").value = "";
+        if (body.img) {
+          $("tunnelMechanicalCaptchaImg").src = `data:image/jpeg;base64,${body.img}`;
+          $("tunnelMechanicalCaptchaImg").style.display = "block";
+        }
+        setTunnelMechanicalLoginState(body.captcha_enabled ? "请输入验证码后测试登录" : "平台未要求验证码，可直接测试登录", "ok");
+      } catch (error) {
+        setTunnelMechanicalLoginState(`获取验证码失败：${error.message || error}`, "error");
+      }
+    }
+
+    async function testTunnelMechanicalLogin() {
+      try {
+        await saveTunnelMechanicalConfig(false);
+        setTunnelMechanicalLoginState("正在登录智慧养护平台...");
+        const response = await fetch("/api/tunnel-mechanical/login-test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            code: $("tunnelMechanicalCaptchaCode").value.trim(),
+            uuid: state.tunnelMechanicalCaptchaUuid,
+          }),
+        });
+        const body = await response.json();
+        if (!response.ok || !body.success) throw new Error(body.detail || "登录失败");
+        $("tunnelMechanicalCaptchaCode").value = "";
+        renderTunnelMechanicalConfig({ config: {
+          base_url: $("tunnelMechanicalBaseUrl").value.trim(),
+          username: $("tunnelMechanicalUsername").value.trim(),
+          password_configured: true,
+        }, state: body.state || {} });
+        setTunnelMechanicalLoginState(`登录成功，token 已缓存，过期时间：${body.state?.token_expires_at || "未知"}`, "ok");
+      } catch (error) {
+        setTunnelMechanicalLoginState(`登录失败：${error.message || error}`, "error");
+      }
+    }
+
     function tunnelMechanicalSelectedPerson(selectId) {
       const select = $(selectId);
       const option = select.options[select.selectedIndex];
@@ -4166,43 +4330,49 @@
     }
 
     function renderTunnelMechanicalPeople(people, defaults = {}) {
-      const options = (people || []).map((person) => (
+      const options = `<option value="" data-name="">请选择</option>` + (people || []).map((person) => (
         `<option value="${escapeHtml(person.id)}" data-name="${escapeHtml(person.name)}">${escapeHtml(person.name)}（${escapeHtml(person.id)}）</option>`
       )).join("");
       $("tunnelMechanicalChecker").innerHTML = options;
       $("tunnelMechanicalRecorder").innerHTML = options;
-      $("tunnelMechanicalChecker").value = defaults.checkerId || "8507";
-      $("tunnelMechanicalRecorder").value = defaults.recorderId || "8587";
+      $("tunnelMechanicalChecker").value = defaults.checkerId || "";
+      $("tunnelMechanicalRecorder").value = defaults.recorderId || "";
     }
 
     function renderTunnelMechanicalRows(assets, defaults = {}) {
+      if (!assets || !assets.length) {
+        $("tunnelMechanicalRows").innerHTML = `<div class="tunnel-empty">尚未导入隧道模板。请点击上方“导入模板”，选择本地 JSON 文件。</div>`;
+        return;
+      }
       $("tunnelMechanicalRows").innerHTML = (assets || []).map((asset) => `
-        <tr data-tunnel-asset-id="${escapeHtml(asset.assetId)}">
-          <td class="center"><input type="checkbox" data-field="enabled" checked /></td>
-          <td>
-            <strong>${escapeHtml(asset.assetName)}</strong>
-            <input data-field="assetName" value="${escapeHtml(asset.assetName)}" />
-            <input data-field="assetId" value="${escapeHtml(asset.assetId)}" />
-            <input type="hidden" data-field="routeName" value="${escapeHtml(asset.routeName || "南景高速[普洱]")}" />
-            <input type="hidden" data-field="maintenanceSectionId" value="${escapeHtml(asset.maintenanceSectionId || "南景高速[普洱]")}" />
-            <input type="hidden" data-field="domainId" value="${escapeHtml(asset.domainId || "987")}" />
-            <input type="hidden" data-field="deptName" value="${escapeHtml(asset.deptName || "云南交投普洱分公司")}" />
-            <input type="hidden" data-field="content" value="${escapeHtml(asset.content || "隧道机电日常检查")}" />
-          </td>
-          <td>
-            <input data-field="assetCode" value="${escapeHtml(asset.assetCode)}" />
-            <input data-field="routeCode" value="${escapeHtml(asset.routeCode || "S41")}" />
-          </td>
-          <td><textarea data-field="location">${escapeHtml(asset.location || "")}</textarea></td>
-          <td><textarea data-field="devName">${escapeHtml(asset.devName || "")}</textarea></td>
-          <td><input data-field="carLicense" value="${escapeHtml(defaults.carLicense || asset.carLicense || "云JJX350")}" /></td>
-          <td><input data-field="nums" value="${escapeHtml(defaults.nums || asset.nums || "1")}" /></td>
-        </tr>
+        <article class="tunnel-asset-card" data-tunnel-asset-id="${escapeHtml(asset.assetId)}">
+          <div class="tunnel-asset-head">
+            <input type="checkbox" data-field="enabled" ${asset.enabled === false ? "" : "checked"} />
+            <div class="tunnel-asset-title">
+              <label>资产名称 <input data-field="assetName" value="${escapeHtml(asset.assetName || "")}" placeholder="未命名资产" /></label>
+              <span class="tunnel-asset-meta">${escapeHtml(asset.assetCode || "无编码")} · ${escapeHtml(asset.location || "无位置")}</span>
+            </div>
+          </div>
+          <div class="tunnel-asset-grid">
+            <label>资产 ID <input data-field="assetId" value="${escapeHtml(asset.assetId || "")}" /></label>
+            <label>资产编码 <input data-field="assetCode" value="${escapeHtml(asset.assetCode || "")}" /></label>
+            <label>路线编码 <input data-field="routeCode" value="${escapeHtml(asset.routeCode || "")}" /></label>
+            <label>路线名称 <input data-field="routeName" value="${escapeHtml(asset.routeName || "")}" /></label>
+            <label>管养段 ID <input data-field="maintenanceSectionId" value="${escapeHtml(asset.maintenanceSectionId || "")}" /></label>
+            <label>域 ID <input data-field="domainId" value="${escapeHtml(asset.domainId || "")}" /></label>
+            <label>部门名称 <input data-field="deptName" value="${escapeHtml(asset.deptName || "")}" /></label>
+            <label>检查内容 <input data-field="content" value="${escapeHtml(asset.content || "")}" /></label>
+            <label>车牌 <input data-field="carLicense" value="${escapeHtml(defaults.carLicense || asset.carLicense || "")}" /></label>
+            <label>数量 <input data-field="nums" value="${escapeHtml(defaults.nums || asset.nums || "")}" /></label>
+            <label class="wide">位置 <textarea data-field="location">${escapeHtml(asset.location || "")}</textarea></label>
+            <label class="wide">设备名称 <textarea data-field="devName">${escapeHtml(asset.devName || "")}</textarea></label>
+          </div>
+        </article>
       `).join("");
     }
 
     function tunnelMechanicalRowsPayload() {
-      return [...document.querySelectorAll("#tunnelMechanicalRows tr")].map((row) => {
+      return [...document.querySelectorAll("#tunnelMechanicalRows [data-tunnel-asset-id]")].map((row) => {
         const value = (field) => row.querySelector(`[data-field="${field}"]`)?.value || "";
         const nums = value("nums").trim();
         return {
@@ -4210,16 +4380,16 @@
           assetId: value("assetId").trim(),
           assetName: value("assetName").trim(),
           assetCode: value("assetCode").trim(),
-          routeCode: value("routeCode").trim() || "S41",
-          routeName: value("routeName").trim() || "南景高速[普洱]",
-          maintenanceSectionId: value("maintenanceSectionId").trim() || "南景高速[普洱]",
-          domainId: value("domainId").trim() || "987",
-          deptName: value("deptName").trim() || "云南交投普洱分公司",
+          routeCode: value("routeCode").trim(),
+          routeName: value("routeName").trim(),
+          maintenanceSectionId: value("maintenanceSectionId").trim(),
+          domainId: value("domainId").trim(),
+          deptName: value("deptName").trim(),
           devName: value("devName").trim(),
           location: value("location").trim(),
-          content: value("content").trim() || "隧道机电日常检查",
+          content: value("content").trim(),
           result: 1,
-          carLicense: value("carLicense").trim() || "云JJX350",
+          carLicense: value("carLicense").trim(),
           nums: nums === "" ? null : nums,
         };
       });
@@ -4229,11 +4399,11 @@
       const checker = tunnelMechanicalSelectedPerson("tunnelMechanicalChecker");
       const recorder = tunnelMechanicalSelectedPerson("tunnelMechanicalRecorder");
       return {
-        base_url: $("tunnelMechanicalBaseUrl").value.trim() || "https://zhyhpt.yciccloud.com",
+        base_url: $("tunnelMechanicalBaseUrl").value.trim(),
         authorization: $("tunnelMechanicalAuthorization").value.trim(),
         cookie: $("tunnelMechanicalCookie").value.trim(),
         checkTime: $("tunnelMechanicalCheckTime").value || beijingDateInputValue(),
-        weather: $("tunnelMechanicalWeather").value.trim() || "晴",
+        weather: $("tunnelMechanicalWeather").value.trim(),
         checkerId: checker.id,
         checker: checker.name,
         recorderId: recorder.id,
@@ -4241,6 +4411,38 @@
         rows: tunnelMechanicalRowsPayload(),
         dry_run: dryRun,
       };
+    }
+
+    async function importTunnelMechanicalTemplate(file) {
+      if (!file) return;
+      setTunnelMechanicalStatus("正在导入隧道模板...");
+      const form = new FormData();
+      form.append("file", file);
+      try {
+        const response = await fetch("/api/tunnel-mechanical/templates/import", {
+          method: "POST",
+          body: form,
+        });
+        const body = await response.json();
+        if (!response.ok || !body.success) throw new Error(body.detail || "导入模板失败");
+        state.tunnelMechanicalTemplates = null;
+        const template = body.template || {};
+        state.tunnelMechanicalTemplates = template;
+        $("tunnelMechanicalBaseUrl").value = template.base_url || "";
+        $("tunnelMechanicalCheckTime").value = template.defaults?.checkTime || beijingDateInputValue();
+        $("tunnelMechanicalWeather").value = template.defaults?.weather || "";
+        $("tunnelMechanicalCarLicense").value = template.defaults?.carLicense || "";
+        $("tunnelMechanicalNums").value = template.defaults?.nums || "";
+        renderTunnelMechanicalPeople(template.people || [], template.defaults || {});
+        renderTunnelMechanicalRows(template.assets || [], template.defaults || {});
+        $("tunnelMechanicalResult").textContent = "";
+        $("tunnelMechanicalResultImage").innerHTML = "";
+        setTunnelMechanicalStatus(`导入完成：${template.assets?.length || 0} 条隧道模板`, "ok");
+      } catch (error) {
+        setTunnelMechanicalStatus(`导入失败：${error.message || error}`, "error");
+      } finally {
+        $("tunnelMechanicalTemplateFile").value = "";
+      }
     }
 
     async function loadTunnelMechanicalTemplates(force = false) {
@@ -4251,15 +4453,16 @@
         const body = await response.json();
         if (!response.ok) throw new Error(body.detail || "加载模板失败");
         state.tunnelMechanicalTemplates = body;
-        $("tunnelMechanicalBaseUrl").value = body.base_url || "https://zhyhpt.yciccloud.com";
+        $("tunnelMechanicalBaseUrl").value = body.base_url || "";
         $("tunnelMechanicalCheckTime").value = body.defaults?.checkTime || beijingDateInputValue();
-        $("tunnelMechanicalWeather").value = body.defaults?.weather || "晴";
-        $("tunnelMechanicalCarLicense").value = body.defaults?.carLicense || "云JJX350";
-        $("tunnelMechanicalNums").value = body.defaults?.nums || "1";
+        $("tunnelMechanicalWeather").value = body.defaults?.weather || "";
+        $("tunnelMechanicalCarLicense").value = body.defaults?.carLicense || "";
+        $("tunnelMechanicalNums").value = body.defaults?.nums || "";
         renderTunnelMechanicalPeople(body.people || [], body.defaults || {});
         renderTunnelMechanicalRows(body.assets || [], body.defaults || {});
         $("tunnelMechanicalResult").textContent = "";
-        setTunnelMechanicalStatus(`已加载 ${body.assets?.length || 0} 条隧道模板`, "ok");
+        $("tunnelMechanicalResultImage").innerHTML = "";
+        setTunnelMechanicalStatus(body.imported ? `已加载 ${body.assets?.length || 0} 条隧道模板` : "尚未导入隧道模板", body.imported ? "ok" : "");
       } catch (error) {
         setTunnelMechanicalStatus(`加载失败：${error.message || error}`, "error");
       }
@@ -4268,12 +4471,19 @@
     function applyTunnelMechanicalBatchDefaults() {
       const carLicense = $("tunnelMechanicalCarLicense").value.trim();
       const nums = $("tunnelMechanicalNums").value.trim();
-      document.querySelectorAll("#tunnelMechanicalRows tr").forEach((row) => {
+      document.querySelectorAll("#tunnelMechanicalRows [data-tunnel-asset-id]").forEach((row) => {
         const carInput = row.querySelector('[data-field="carLicense"]');
         const numsInput = row.querySelector('[data-field="nums"]');
         if (carInput && carLicense) carInput.value = carLicense;
         if (numsInput) numsInput.value = nums;
       });
+    }
+
+    function renderTunnelMechanicalResultImage(body) {
+      const imageUrl = body.result_image_url || "";
+      $("tunnelMechanicalResultImage").innerHTML = imageUrl
+        ? `<a href="${escapeHtml(imageUrl)}" target="_blank" rel="noopener">打开查询结果图</a><img src="${escapeHtml(imageUrl)}" alt="隧道机电查询结果图" loading="lazy" />`
+        : "";
     }
 
     async function submitTunnelMechanical(dryRun) {
@@ -4294,6 +4504,7 @@
         });
         const body = await response.json();
         $("tunnelMechanicalResult").textContent = JSON.stringify(body, null, 2);
+        renderTunnelMechanicalResultImage(body);
         if (!response.ok || !body.success) throw new Error(body.detail || "提交失败");
         setTunnelMechanicalStatus(dryRun ? `已生成 ${selectedCount} 条请求预览` : `提交完成，成功 ${selectedCount} 条`, "ok");
       } catch (error) {
@@ -4301,9 +4512,48 @@
       }
     }
 
+    async function queryTunnelMechanicalResultImage() {
+      applyTunnelMechanicalBatchDefaults();
+      const payload = tunnelMechanicalPayload(false);
+      const selectedCount = payload.rows.filter((row) => row.enabled).length;
+      if (!selectedCount) {
+        setTunnelMechanicalStatus("请至少选择一条隧道记录", "error");
+        return;
+      }
+      setTunnelMechanicalStatus("正在查询录入结果并生成图片...");
+      try {
+        const response = await fetch("/api/tunnel-mechanical/result-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const body = await response.json();
+        $("tunnelMechanicalResult").textContent = JSON.stringify(body, null, 2);
+        renderTunnelMechanicalResultImage(body);
+        if (!response.ok || !body.success) throw new Error(body.detail || body.result_query_error || "查询失败");
+        setTunnelMechanicalStatus(`查询完成，生成 ${body.result_rows?.length || 0} 条结果图`, "ok");
+      } catch (error) {
+        setTunnelMechanicalStatus(`查询结果图失败：${error.message || error}`, "error");
+      }
+    }
+
+    $("importTunnelMechanicalTemplateBtn").addEventListener("click", () => $("tunnelMechanicalTemplateFile").click());
+    $("tunnelMechanicalTemplateFile").addEventListener("change", (event) => {
+      importTunnelMechanicalTemplate(event.target.files && event.target.files[0]);
+    });
     $("loadTunnelMechanicalBtn").addEventListener("click", () => loadTunnelMechanicalTemplates(true));
     $("previewTunnelMechanicalBtn").addEventListener("click", () => submitTunnelMechanical(true));
+    $("queryTunnelMechanicalResultBtn").addEventListener("click", queryTunnelMechanicalResultImage);
     $("submitTunnelMechanicalBtn").addEventListener("click", () => submitTunnelMechanical(false));
+    $("saveTunnelMechanicalConfigBtn").addEventListener("click", async () => {
+      try {
+        await saveTunnelMechanicalConfig(true);
+      } catch (error) {
+        setTunnelMechanicalLoginState(`保存失败：${error.message || error}`, "error");
+      }
+    });
+    $("loadTunnelMechanicalCaptchaBtn").addEventListener("click", loadTunnelMechanicalCaptcha);
+    $("testTunnelMechanicalLoginBtn").addEventListener("click", testTunnelMechanicalLogin);
     $("selectAllTunnelMechanicalBtn").addEventListener("click", () => {
       document.querySelectorAll('#tunnelMechanicalRows [data-field="enabled"]').forEach((input) => { input.checked = true; });
     });
@@ -4361,6 +4611,7 @@
     loadSavedDutyChart();
     loadNotificationConfig();
     loadPatrolWarningConfig();
+    loadTunnelMechanicalConfig();
     loadTunnelMechanicalTemplates();
     loadPersonnel().then(loadCustomReminders);
     loadDailyDutyConfig();

@@ -1,5 +1,5 @@
 import asyncio
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from urllib.parse import quote
 
@@ -10,6 +10,55 @@ from app.main import create_app
 from app.patrol_warning import warning_from_dict
 from app.storage import DutyRepository
 from tests.test_template_parser import _write_synthetic_roster
+
+
+TEST_TUNNEL_TEMPLATE = {
+    "base_url": "",
+    "submit_path": "/prod-api/patrol/deviceCheck/add",
+    "list_path": "",
+    "people": [{"id": "1001", "name": "张三"}, {"id": "1002", "name": "李四"}],
+    "assets": [
+        {
+            "assetId": "asset-1",
+            "assetName": "示例隧道上行",
+            "assetCode": "ASSET001",
+            "routeCode": "R1",
+            "routeName": "示例路线",
+            "maintenanceSectionId": "section-1",
+            "domainId": "domain-1",
+            "deptName": "示例部门",
+            "devName": "示例设备",
+            "location": "K1+000-K2+000示例隧道",
+            "content": "示例检查",
+            "result": 1,
+            "carLicense": "示例车牌",
+            "nums": "1",
+        }
+    ],
+    "defaults": {
+        "checkerId": "1001",
+        "checker": "张三",
+        "recorderId": "1002",
+        "recorder": "李四",
+        "checkTime": "",
+        "weather": "晴",
+        "carLicense": "示例车牌",
+        "nums": "1",
+    },
+}
+
+
+def _import_tunnel_template(client: TestClient, template: dict | None = None):
+    return client.post(
+        "/api/tunnel-mechanical/templates/import",
+        files={"file": ("template.json", json_bytes(template or TEST_TUNNEL_TEMPLATE), "application/json")},
+    )
+
+
+def json_bytes(value: dict) -> bytes:
+    import json
+
+    return json.dumps(value, ensure_ascii=False).encode("utf-8")
 
 
 def test_static_page_uses_synthetic_placeholders(tmp_path):
@@ -39,7 +88,15 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'data-tab="tunnelMechanical">隧道机电每日录入' in html
     assert 'id="tunnelMechanicalPage"' in html
     assert 'id="submitTunnelMechanicalBtn"' in html
+    assert 'id="tunnelMechanicalUsername"' in html
+    assert 'id="importTunnelMechanicalTemplateBtn"' in html
+    assert 'id="tunnelMechanicalTemplateFile"' in html
+    assert 'id="queryTunnelMechanicalResultBtn"' in html
+    assert 'id="loadTunnelMechanicalCaptchaBtn"' in html
+    assert 'id="testTunnelMechanicalLoginBtn"' in html
+    assert "tunnel-asset-card" in html
     assert 'loadTunnelMechanicalTemplates' in html
+    assert 'loadTunnelMechanicalConfig' in html
     assert "refreshPatrolWarningPanel" in html
     assert "loadTodayReminders" in html
     assert "todayReminderGroupKey" in html
@@ -62,7 +119,7 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert "event-collapsed" in html
 
 
-def test_tunnel_mechanical_templates_and_dry_run_payload(tmp_path):
+def test_tunnel_mechanical_templates_are_empty_until_imported(tmp_path):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
 
@@ -70,22 +127,37 @@ def test_tunnel_mechanical_templates_and_dry_run_payload(tmp_path):
 
     assert templates_response.status_code == 200
     templates = templates_response.json()
-    assert templates["base_url"] == "https://zhyhpt.yciccloud.com"
-    assert len(templates["assets"]) == 4
-    assert {"id": "8647", "name": "罗富耀"} in templates["people"]
+    assert templates["base_url"] == ""
+    assert templates["assets"] == []
+    assert templates["people"] == []
+    assert templates["defaults"]["checkerId"] == ""
+    assert templates["imported"] is False
+
+
+def test_tunnel_mechanical_template_import_and_dry_run_payload(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    import_response = _import_tunnel_template(client)
+    templates = client.get("/api/tunnel-mechanical/templates").json()
+
+    assert import_response.status_code == 200
+    assert templates["base_url"] == ""
+    assert len(templates["assets"]) == 1
+    assert {"id": "1001", "name": "张三"} in templates["people"]
 
     asset = templates["assets"][0]
     response = client.post(
         "/api/tunnel-mechanical/submit",
         json={
-            "base_url": "https://zhyhpt.yciccloud.com",
+            "base_url": "",
             "authorization": "Bearer test-token",
             "checkTime": "2026-07-24",
             "weather": "晴",
-            "checkerId": "8647",
-            "checker": "罗富耀",
-            "recorderId": "8587",
-            "recorder": "易国兵",
+            "checkerId": "1001",
+            "checker": "张三",
+            "recorderId": "1002",
+            "recorder": "李四",
             "dry_run": True,
             "rows": [asset],
         },
@@ -96,16 +168,17 @@ def test_tunnel_mechanical_templates_and_dry_run_payload(tmp_path):
     payload = body["submissions"][0]["payload"]
     assert body["success"] is True
     assert body["dry_run"] is True
-    assert payload["assetId"] == "723"
-    assert payload["checker"] == "罗富耀"
-    assert payload["recorder"] == "易国兵"
+    assert payload["assetId"] == "asset-1"
+    assert payload["checker"] == "张三"
+    assert payload["recorder"] == "李四"
     assert payload["checkTime"] == "2026-07-24"
-    assert payload["domains"][0]["location"] == "K86+660-K87+351三宝厂隧道"
+    assert payload["domains"][0]["location"] == "K1+000-K2+000示例隧道"
 
 
 def test_tunnel_mechanical_submit_rejects_unexpected_host(tmp_path):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
+    _import_tunnel_template(client)
     asset = client.get("/api/tunnel-mechanical/templates").json()["assets"][0]
 
     response = client.post(
@@ -114,16 +187,286 @@ def test_tunnel_mechanical_submit_rejects_unexpected_host(tmp_path):
             "base_url": "https://example.com",
             "checkTime": "2026-07-24",
             "weather": "晴",
-            "checkerId": "8647",
-            "checker": "罗富耀",
-            "recorderId": "8587",
-            "recorder": "易国兵",
+            "checkerId": "1001",
+            "checker": "张三",
+            "recorderId": "1002",
+            "recorder": "李四",
             "dry_run": False,
             "rows": [asset],
         },
     )
 
     assert response.status_code == 400
+
+
+def test_tunnel_mechanical_config_preserves_password_and_hides_it(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    repo: DutyRepository = app.state.repo
+
+    response = client.post(
+        "/api/tunnel-mechanical/config",
+        json={
+            "base_url": "",
+            "username": "station-user",
+            "password": "secret",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["config"]["password"] == ""
+    assert response.json()["config"]["password_configured"] is True
+
+    response = client.post(
+        "/api/tunnel-mechanical/config",
+        json={
+            "base_url": "",
+            "username": "station-user",
+            "password": "",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["config"]["password"] == ""
+    assert repo.get_tunnel_mechanical_config()["password"] == "secret"
+
+
+def test_tunnel_mechanical_submit_uses_cached_login_state(tmp_path, monkeypatch):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    repo: DutyRepository = app.state.repo
+    repo.save_tunnel_mechanical_config(
+        base_url="https://example.test",
+        username="station-user",
+        password="secret",
+    )
+    repo.save_tunnel_mechanical_state(
+        access_token="cached-token",
+        cookie_header="sid=abc",
+        token_expires_at=(datetime.now(main_module.TZ) + timedelta(hours=1)).isoformat(),
+    )
+    _import_tunnel_template(client)
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"code": 200, "msg": "ok"}
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, headers=None, json=None):
+            captured["url"] = url
+            captured["headers"] = headers or {}
+            captured["payload"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(main_module.httpx, "AsyncClient", FakeAsyncClient)
+    asset = client.get("/api/tunnel-mechanical/templates").json()["assets"][0]
+
+    response = client.post(
+        "/api/tunnel-mechanical/submit",
+        json={
+            "base_url": "https://example.test",
+            "checkTime": "2026-07-24",
+            "weather": "sunny",
+            "checkerId": "8647",
+            "checker": "checker",
+            "recorderId": "8587",
+            "recorder": "recorder",
+            "dry_run": False,
+            "rows": [asset],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert captured["url"] == "https://example.test/prod-api/patrol/deviceCheck/add"
+    assert captured["headers"]["Authorization"] == "Bearer cached-token"
+    assert captured["headers"]["Cookie"] == "sid=abc"
+    assert captured["payload"]["checker"] == "checker"
+
+
+def test_tunnel_mechanical_submit_generates_result_image(tmp_path, monkeypatch):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    repo: DutyRepository = app.state.repo
+    repo.save_tunnel_mechanical_config(
+        base_url="https://example.test",
+        username="station-user",
+        password="secret",
+    )
+    repo.save_tunnel_mechanical_state(
+        access_token="cached-token",
+        cookie_header="sid=abc",
+        token_expires_at=(datetime.now(main_module.TZ) + timedelta(hours=1)).isoformat(),
+    )
+    template = {
+        **TEST_TUNNEL_TEMPLATE,
+        "base_url": "https://example.test",
+        "list_path": "/prod-api/patrol/deviceCheck/list",
+    }
+    _import_tunnel_template(client, template)
+
+    class FakeSubmitResponse:
+        status_code = 200
+
+        def json(self):
+            return {"code": 200, "msg": "ok"}
+
+    class FakeListResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "code": 200,
+                "data": {
+                    "rows": [
+                        {
+                            "routeCode": "R1",
+                            "assetName": "示例隧道上行",
+                            "deptName": "示例部门",
+                            "checkTime": "2026-07-24",
+                            "weather": "晴",
+                            "checker": "张三",
+                            "recorder": "李四",
+                            "devName": "示例设备",
+                            "location": "K1+000-K2+000示例隧道",
+                            "content": "示例检查",
+                            "result": 1,
+                            "carLicense": "示例车牌",
+                            "nums": "1",
+                        }
+                    ]
+                },
+            }
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, headers=None, json=None):
+            return FakeSubmitResponse()
+
+        async def get(self, url, headers=None, params=None):
+            assert url == "https://example.test/prod-api/patrol/deviceCheck/list"
+            assert params["checkTime"] == "2026-07-24"
+            return FakeListResponse()
+
+    monkeypatch.setattr(main_module.httpx, "AsyncClient", FakeAsyncClient)
+    asset = client.get("/api/tunnel-mechanical/templates").json()["assets"][0]
+
+    response = client.post(
+        "/api/tunnel-mechanical/submit",
+        json={
+            "base_url": "https://example.test",
+            "checkTime": "2026-07-24",
+            "weather": "晴",
+            "checkerId": "1001",
+            "checker": "张三",
+            "recorderId": "1002",
+            "recorder": "李四",
+            "dry_run": False,
+            "rows": [asset],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["result_rows"][0]["resultText"] == "正常"
+    assert body["result_image_url"].startswith("/api/uploads/tunnel-mechanical-result-2026-07-24-")
+    image_response = client.get(body["result_image_url"])
+    assert image_response.status_code == 200
+    assert image_response.content.startswith(b"\x89PNG")
+
+
+def test_tunnel_mechanical_result_image_endpoint_queries_without_submit(tmp_path, monkeypatch):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    repo: DutyRepository = app.state.repo
+    repo.save_tunnel_mechanical_config(base_url="https://example.test", username="station-user", password="secret")
+    repo.save_tunnel_mechanical_state(
+        access_token="cached-token",
+        cookie_header="sid=abc",
+        token_expires_at=(datetime.now(main_module.TZ) + timedelta(hours=1)).isoformat(),
+    )
+    _import_tunnel_template(
+        client,
+        {**TEST_TUNNEL_TEMPLATE, "base_url": "https://example.test", "list_path": "/prod-api/patrol/deviceCheck/list"},
+    )
+    calls = {"get": 0, "post": 0}
+
+    class FakeListResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "code": 200,
+                "rows": [
+                    {
+                        "assetName": "示例隧道上行",
+                        "checkTime": "2026-07-24",
+                        "checker": "张三",
+                        "recorder": "李四",
+                        "result": 1,
+                    }
+                ],
+            }
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url, headers=None, params=None):
+            calls["get"] += 1
+            return FakeListResponse()
+
+        async def post(self, url, headers=None, json=None):
+            calls["post"] += 1
+            raise AssertionError("result image endpoint must not submit records")
+
+    monkeypatch.setattr(main_module.httpx, "AsyncClient", FakeAsyncClient)
+    asset = client.get("/api/tunnel-mechanical/templates").json()["assets"][0]
+
+    response = client.post(
+        "/api/tunnel-mechanical/result-image",
+        json={
+            "base_url": "https://example.test",
+            "checkTime": "2026-07-24",
+            "weather": "晴",
+            "checkerId": "1001",
+            "checker": "张三",
+            "recorderId": "1002",
+            "recorder": "李四",
+            "dry_run": False,
+            "rows": [asset],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert response.json()["result_image_url"].startswith("/api/uploads/tunnel-mechanical-result-2026-07-24-")
+    assert calls == {"get": 1, "post": 0}
 
 
 def test_today_reminders_endpoint_returns_today_plan(tmp_path):
@@ -402,13 +745,13 @@ def test_custom_reminder_crud_personnel_contact_and_preview(tmp_path):
             "year": 2025,
             "month": 9,
             "source_image_path": "uploads/month.png",
-            "grid": [{"name": "商邱宏", "days": {"16": "晚"}}],
+            "grid": [{"name": "示例甲", "days": {"16": "晚"}}],
         },
     )
     reminder_response = client.post(
         "/api/custom-reminders",
         json={
-            "name": "商邱宏",
+            "name": "示例甲",
             "mention_mobile": "10000000000",
             "shift_code": "night",
             "reminder_time": "21:00",
@@ -422,13 +765,13 @@ def test_custom_reminder_crud_personnel_contact_and_preview(tmp_path):
     assert confirm_response.status_code == 200
     assert reminder_response.status_code == 200
     assert reminder_response.json()["reminders"][0]["message"] == "{name} 需要关闭隧道灯"
-    assert personnel_response.json()["people"] == [{"name": "商邱宏", "mention_mobile": "10000000000"}]
+    assert personnel_response.json()["people"] == [{"name": "示例甲", "mention_mobile": "10000000000"}]
     events = preview_response.json()["events"]
     assert any(
         event["kind"] == "custom"
-        and event["person_name"] == "商邱宏"
+        and event["person_name"] == "示例甲"
         and event["send_at"] == "2025-09-16T21:00:00+08:00"
-        and event["content"] == "商邱宏 需要关闭隧道灯"
+        and event["content"] == "示例甲 需要关闭隧道灯"
         for event in events
     )
 
@@ -676,6 +1019,7 @@ def test_wechat_query_requires_token(tmp_path, monkeypatch):
     monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
+    _import_tunnel_template(client)
 
     response = client.post("/api/wechat-query", json={"text": "查询我的监控", "runtime_sender_id": "@member-1"})
 
@@ -686,6 +1030,7 @@ def test_wechat_query_help_returns_numbered_menu(tmp_path, monkeypatch):
     monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
+    _import_tunnel_template(client)
 
     response = client.post(
         "/api/wechat-query",
@@ -701,6 +1046,105 @@ def test_wechat_query_help_returns_numbered_menu(tmp_path, monkeypatch):
     assert "1. 查询我的监控" in body["reply"]
     assert "7. 查询我的绑定" in body["reply"]
     assert "回复序号即可执行" in body["reply"]
+
+
+def test_wechat_query_tunnel_mechanical_returns_fill_template(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2026, 7, 23))
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    _import_tunnel_template(client)
+
+    async def fail_submit(repo, request, **kwargs):
+        raise AssertionError("template request must not submit")
+
+    monkeypatch.setattr(main_module, "_submit_tunnel_mechanical", fail_submit)
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "@登录账号 隧道机电"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["query_type"] == "tunnel_mechanical_template"
+    assert "隧道机电每日录入模板" in body["reply"]
+    assert "隧道机电录入 日期2026-07-23 负责人张三 记录人李四 天气晴" in body["reply"]
+    assert "当前模板资产：1 条" in body["reply"]
+
+
+def test_wechat_query_triggers_tunnel_mechanical_submit(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    _import_tunnel_template(client)
+    captured = {}
+
+    async def fake_submit(repo, request, **kwargs):
+        captured["checkTime"] = request.checkTime.isoformat()
+        captured["checkerId"] = request.checkerId
+        captured["checker"] = request.checker
+        captured["recorderId"] = request.recorderId
+        captured["recorder"] = request.recorder
+        captured["weather"] = request.weather
+        captured["dry_run"] = request.dry_run
+        captured["row_count"] = len(request.rows)
+        return {"success": True, "dry_run": request.dry_run, "results": [], "result_image_url": "/api/uploads/result.png"}
+
+    monkeypatch.setattr(main_module, "_submit_tunnel_mechanical", fake_submit)
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "隧道机电录入 日期2026-07-24 负责人张三 记录人李四 天气晴"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["query_type"] == "tunnel_mechanical"
+    assert body["checkTime"] == "2026-07-24"
+    assert body["checkerId"] == "1001"
+    assert body["recorderId"] == "1002"
+    assert body["weather"] == "晴"
+    assert body["count"] == 1
+    assert body["image_url"] == "/api/uploads/result.png"
+    assert "查询结果图片：/api/uploads/result.png" in body["reply"]
+    assert captured == {
+        "checkTime": "2026-07-24",
+        "checkerId": "1001",
+        "checker": "张三",
+        "recorderId": "1002",
+        "recorder": "李四",
+        "weather": "晴",
+        "dry_run": False,
+        "row_count": 1,
+    }
+    records = client.get("/api/send-records").json()["records"]
+    assert records[0]["kind"] == "tunnel_mechanical_wechat"
+    assert records[0]["status"] == "success"
+
+
+def test_wechat_query_tunnel_mechanical_missing_person_returns_help(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    _import_tunnel_template(client)
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "隧道机电录入 日期2026-07-24 天气晴"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is False
+    assert body["query_type"] == "tunnel_mechanical"
+    assert "负责人/检查人" in body["reply"]
+    assert "记录人" in body["reply"]
 
 
 def test_wechat_roster_import_requires_token(tmp_path, monkeypatch):
@@ -1835,11 +2279,11 @@ def test_due_custom_reminder_sends_with_saved_personnel_mobile(tmp_path, monkeyp
     repo.save_roster_month(
         2025,
         9,
-        [{"name": "商邱宏", "days": {"16": "晚"}}],
+        [{"name": "示例甲", "days": {"16": "晚"}}],
         "uploads/month.png",
     )
     repo.save_custom_reminder(
-        name="商邱宏",
+        name="示例甲",
         mention_mobile="10000000000",
         shift_code="night",
         reminder_time="21:00",
@@ -1855,7 +2299,7 @@ def test_due_custom_reminder_sends_with_saved_personnel_mobile(tmp_path, monkeyp
     assert sent["mobiles"] == ["10000000000"]
     records = repo.list_send_records()
     assert records[0]["kind"] == "custom"
-    assert records[0]["target"] == "商邱宏"
+    assert records[0]["target"] == "示例甲"
     assert records[0]["status"] == "success"
 
 

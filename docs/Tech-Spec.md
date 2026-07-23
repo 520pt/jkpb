@@ -34,7 +34,7 @@
 
 ### Goals
 - Add a custom reminder settings view for person-specific, shift-specific reminder rules.
-- Support examples such as reminding 商邱宏 at 21:00 on night shift to close tunnel lights, and at 07:50 on early shift to open tunnel lights.
+- Support examples such as reminding 示例甲 at 21:00 on night shift to close tunnel lights, and at 07:50 on early shift to open tunnel lights.
 - Store a person's mobile number with the shared personnel list after any reminder configuration saves a name and mobile.
 - Reuse one combo-style text input for name selection and manual entry instead of separate dropdown and manual inputs.
 

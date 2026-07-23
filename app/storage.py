@@ -211,6 +211,31 @@ class DutyRepository:
                     last_error TEXT NOT NULL DEFAULT '',
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+
+                CREATE TABLE IF NOT EXISTS tunnel_mechanical_config (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    base_url TEXT NOT NULL DEFAULT '',
+                    username TEXT NOT NULL DEFAULT '',
+                    password TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS tunnel_mechanical_state (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    access_token TEXT NOT NULL DEFAULT '',
+                    refresh_token TEXT NOT NULL DEFAULT '',
+                    cookie_header TEXT NOT NULL DEFAULT '',
+                    token_expires_at TEXT NOT NULL DEFAULT '',
+                    last_login_at TEXT NOT NULL DEFAULT '',
+                    last_error TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS tunnel_mechanical_template (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    template_json TEXT NOT NULL DEFAULT '{}',
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
                 """
             )
             columns = {row["name"] for row in conn.execute("PRAGMA table_info(monitored_people)").fetchall()}
@@ -268,6 +293,11 @@ class DutyRepository:
                 conn.execute("ALTER TABLE patrol_warning_config ADD COLUMN start_message_template TEXT NOT NULL DEFAULT ''")
             if "end_message_template" not in patrol_config_columns:
                 conn.execute("ALTER TABLE patrol_warning_config ADD COLUMN end_message_template TEXT NOT NULL DEFAULT ''")
+            tunnel_state_columns = {row["name"] for row in conn.execute("PRAGMA table_info(tunnel_mechanical_state)").fetchall()}
+            if "refresh_token" not in tunnel_state_columns:
+                conn.execute("ALTER TABLE tunnel_mechanical_state ADD COLUMN refresh_token TEXT NOT NULL DEFAULT ''")
+            if "cookie_header" not in tunnel_state_columns:
+                conn.execute("ALTER TABLE tunnel_mechanical_state ADD COLUMN cookie_header TEXT NOT NULL DEFAULT ''")
 
     def table_names(self) -> set[str]:
         with self._connect() as conn:
@@ -1053,6 +1083,133 @@ class DutyRepository:
                     next_last_error,
                 ),
             )
+
+    def save_tunnel_mechanical_config(
+        self,
+        *,
+        base_url: str = "",
+        username: str = "",
+        password: str = "",
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO tunnel_mechanical_config (id, base_url, username, password)
+                VALUES (1, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    base_url = excluded.base_url,
+                    username = excluded.username,
+                    password = excluded.password,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    str(base_url or "").strip(),
+                    username.strip(),
+                    password,
+                ),
+            )
+
+    def get_tunnel_mechanical_config(self) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM tunnel_mechanical_config WHERE id = 1").fetchone()
+        if row is None:
+            return {
+                "base_url": "",
+                "username": "",
+                "password": "",
+            }
+        return {
+            "base_url": row["base_url"],
+            "username": row["username"],
+            "password": row["password"],
+        }
+
+    def save_tunnel_mechanical_state(
+        self,
+        *,
+        access_token: str | None = None,
+        refresh_token: str | None = None,
+        cookie_header: str | None = None,
+        token_expires_at: str | None = None,
+        last_login_at: str | None = None,
+        last_error: str | None = None,
+    ) -> None:
+        current = self.get_tunnel_mechanical_state()
+        next_access_token = current["access_token"] if access_token is None else access_token
+        next_refresh_token = current["refresh_token"] if refresh_token is None else refresh_token
+        next_cookie_header = current["cookie_header"] if cookie_header is None else cookie_header
+        next_token_expires_at = current["token_expires_at"] if token_expires_at is None else token_expires_at
+        next_last_login_at = current["last_login_at"] if last_login_at is None else last_login_at
+        next_last_error = current["last_error"] if last_error is None else last_error
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO tunnel_mechanical_state
+                    (id, access_token, refresh_token, cookie_header, token_expires_at, last_login_at, last_error)
+                VALUES (1, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    access_token = excluded.access_token,
+                    refresh_token = excluded.refresh_token,
+                    cookie_header = excluded.cookie_header,
+                    token_expires_at = excluded.token_expires_at,
+                    last_login_at = excluded.last_login_at,
+                    last_error = excluded.last_error,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    next_access_token,
+                    next_refresh_token,
+                    next_cookie_header,
+                    next_token_expires_at,
+                    next_last_login_at,
+                    next_last_error,
+                ),
+            )
+
+    def get_tunnel_mechanical_state(self) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM tunnel_mechanical_state WHERE id = 1").fetchone()
+        if row is None:
+            return {
+                "access_token": "",
+                "refresh_token": "",
+                "cookie_header": "",
+                "token_expires_at": "",
+                "last_login_at": "",
+                "last_error": "",
+            }
+        return {
+            "access_token": row["access_token"],
+            "refresh_token": row["refresh_token"],
+            "cookie_header": row["cookie_header"],
+            "token_expires_at": row["token_expires_at"],
+            "last_login_at": row["last_login_at"],
+            "last_error": row["last_error"],
+        }
+
+    def save_tunnel_mechanical_template(self, template: dict[str, Any]) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO tunnel_mechanical_template (id, template_json)
+                VALUES (1, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    template_json = excluded.template_json,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (json.dumps(template, ensure_ascii=False),),
+            )
+
+    def get_tunnel_mechanical_template(self) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM tunnel_mechanical_template WHERE id = 1").fetchone()
+        if row is None:
+            return {}
+        try:
+            template = json.loads(row["template_json"] or "{}")
+        except json.JSONDecodeError:
+            return {}
+        return template if isinstance(template, dict) else {}
 
     def mark_sent_once(self, reminder_key: str) -> bool:
         try:

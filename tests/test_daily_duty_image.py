@@ -16,14 +16,14 @@ def test_daily_duty_image_renders_long_standby_names():
         {
             "send_at": "2026-07-22T07:50:00+08:00",
             "details": {
-                "early": "李文杰",
-                "middle": "赵光振",
-                "night": "沐春宇",
-                "big_drivers": "赵光振，杞文江",
-                "small_drivers": "商邱宏，易国兵",
-                "standby": "罗森，罗越，张铭文，刘显坤",
+                "early": "示例甲",
+                "middle": "示例乙",
+                "night": "示例丙",
+                "big_drivers": "示例乙，示例丁",
+                "small_drivers": "示例戊，示例己",
+                "standby": "示例庚，示例辛，示例壬，示例癸",
                 "afternoon_rest": "无",
-                "resting": "罗富耀，王德刚，杨伦，罗照云，陈刚",
+                "resting": "示例子，示例丑，示例寅，示例卯，示例辰",
                 "afternoon_return": "无",
             },
         }

@@ -6,6 +6,7 @@ import calendar
 import hashlib
 import hmac
 import html as html_lib
+import json
 import logging
 import os
 import re
@@ -47,6 +48,7 @@ from app.storage import (
     DEFAULT_REST_MESSAGE_TEMPLATE,
     DutyRepository,
 )
+from app.tunnel_mechanical_image import render_tunnel_mechanical_result_image
 from app.wecom import LightAgentNotifyClient, WeComClient, WeComError, WeComWebhookClient
 
 
@@ -217,31 +219,42 @@ class TunnelMechanicalAssetRequest(BaseModel):
     assetId: str
     assetName: str
     assetCode: str
-    routeCode: str = "S41"
-    routeName: str = "南景高速[普洱]"
-    maintenanceSectionId: str = "南景高速[普洱]"
-    domainId: str = "987"
-    deptName: str = "云南交投普洱分公司"
+    routeCode: str = ""
+    routeName: str = ""
+    maintenanceSectionId: str = ""
+    domainId: str = ""
+    deptName: str = ""
     devName: str
     location: str
-    content: str = "隧道机电日常检查"
+    content: str = ""
     result: int = 1
-    carLicense: str = "云JJX350"
-    nums: str | None = "1"
+    carLicense: str = ""
+    nums: str | None = ""
 
 
 class TunnelMechanicalSubmitRequest(BaseModel):
-    base_url: str = "https://zhyhpt.yciccloud.com"
+    base_url: str = ""
     authorization: str = ""
     cookie: str = ""
     checkTime: date
-    weather: str = "晴"
+    weather: str = ""
     checkerId: str
     checker: str
     recorderId: str
     recorder: str
     rows: list[TunnelMechanicalAssetRequest]
     dry_run: bool = False
+
+
+class TunnelMechanicalConfigRequest(BaseModel):
+    base_url: str = ""
+    username: str = ""
+    password: str = ""
+
+
+class TunnelMechanicalLoginRequest(BaseModel):
+    code: str = ""
+    uuid: str = ""
 
 
 class WechatQueryRequest(BaseModel):
@@ -263,101 +276,7 @@ class WechatRosterConfirmRequest(BaseModel):
     overwrite: bool = False
 
 
-TUNNEL_MECHANICAL_ALLOWED_HOSTS = {"zhyhpt.yciccloud.com"}
-TUNNEL_MECHANICAL_SHORT_DEVICES = (
-    "变压器、高压配电柜、低压配电柜、隧道灯具、车道指示器、交通信号灯、节能装置、"
-    "PLC、EPS、消防设施、主动发光轮廓标、人行横洞、监控设施、隧道光电标志"
-)
-TUNNEL_MECHANICAL_LONG_DEVICES = (
-    "变压器、高压配电柜、低压配电柜、隧道灯具、车道指示器、 交通信号灯、节能装置PLC、"
-    "EPS、消防设施、主动发光轮廓标、 紧急电话、车行横洞、人行横洞、通风设施、监控设施、"
-    "情报板、 一氧化碳检测仪、隧道光电标志"
-)
-TUNNEL_MECHANICAL_PERSONNEL = [
-    {"id": "8363", "name": "景东隧管站"},
-    {"id": "8476", "name": "赵光振"},
-    {"id": "8496", "name": "罗越"},
-    {"id": "8507", "name": "商邱宏"},
-    {"id": "8513", "name": "杞文江"},
-    {"id": "8519", "name": "罗森"},
-    {"id": "8584", "name": "王德刚"},
-    {"id": "8585", "name": "杨伦"},
-    {"id": "8587", "name": "易国兵"},
-    {"id": "8588", "name": "李华兰"},
-    {"id": "8591", "name": "罗熙云"},
-    {"id": "8603", "name": "李金雷"},
-    {"id": "8646", "name": "沐春宇"},
-    {"id": "8647", "name": "罗富耀"},
-    {"id": "8648", "name": "张铭文"},
-    {"id": "8649", "name": "卢景玉"},
-    {"id": "8695", "name": "李文杰"},
-]
-TUNNEL_MECHANICAL_ASSETS = [
-    {
-        "assetId": "723",
-        "assetName": "南景（普洱）-三宝厂隧道(上行)",
-        "assetCode": "S41530823U0050",
-        "routeCode": "S41",
-        "routeName": "南景高速[普洱]",
-        "maintenanceSectionId": "南景高速[普洱]",
-        "domainId": "987",
-        "deptName": "云南交投普洱分公司",
-        "devName": TUNNEL_MECHANICAL_SHORT_DEVICES,
-        "location": "K86+660-K87+351三宝厂隧道",
-        "content": "隧道机电日常检查",
-        "result": 1,
-        "carLicense": "云JJX350",
-        "nums": "1",
-    },
-    {
-        "assetId": "884",
-        "assetName": "南景（普洱）-三宝厂隧道（下行）",
-        "assetCode": "T41530823U9020",
-        "routeCode": "S41",
-        "routeName": "南景高速[普洱]",
-        "maintenanceSectionId": "南景高速[普洱]",
-        "domainId": "987",
-        "deptName": "云南交投普洱分公司",
-        "devName": TUNNEL_MECHANICAL_SHORT_DEVICES,
-        "location": "K87+360-K86+667三宝厂隧道",
-        "content": "隧道机电日常检查",
-        "result": 1,
-        "carLicense": "云JJX350",
-        "nums": "1",
-    },
-    {
-        "assetId": "885",
-        "assetName": "南景（普洱）-景东隧道（下行）",
-        "assetCode": "T41530823U9030",
-        "routeCode": "S41",
-        "routeName": "南景高速[普洱]",
-        "maintenanceSectionId": "南景高速[普洱]",
-        "domainId": "987",
-        "deptName": "云南交投普洱分公司",
-        "devName": TUNNEL_MECHANICAL_LONG_DEVICES,
-        "location": "K88+790-K91+272景东隧道",
-        "content": "隧道机电日常检查",
-        "result": 1,
-        "carLicense": "云JJX350",
-        "nums": "1",
-    },
-    {
-        "assetId": "724",
-        "assetName": "南景（普洱）-景东隧道(上行)",
-        "assetCode": "S41530823U0020",
-        "routeCode": "S41",
-        "routeName": "南景高速[普洱]",
-        "maintenanceSectionId": "南景高速[普洱]",
-        "domainId": "987",
-        "deptName": "云南交投普洱分公司",
-        "devName": TUNNEL_MECHANICAL_LONG_DEVICES,
-        "location": "K88+820-K91+288景东隧道",
-        "content": "隧道机电日常检查",
-        "result": 1,
-        "carLicense": "云JJX350",
-        "nums": "1",
-    },
-]
+TUNNEL_MECHANICAL_AES_KEY_TEXT = "vEjLXJ/VMOFJyS6lP6s3hw=="
 
 
 def create_app(
@@ -746,26 +665,87 @@ def create_app(
 
     @app.get("/api/tunnel-mechanical/templates")
     def get_tunnel_mechanical_templates():
+        return _public_tunnel_mechanical_template(repo.get_tunnel_mechanical_template())
+
+    @app.post("/api/tunnel-mechanical/templates/import")
+    async def import_tunnel_mechanical_templates(file: UploadFile = File(...)):
+        if not file.filename.lower().endswith(".json"):
+            raise HTTPException(status_code=400, detail="请上传 JSON 模板文件")
+        raw = await file.read()
+        if len(raw) > 1024 * 1024:
+            raise HTTPException(status_code=400, detail="模板文件不能超过 1MB")
+        try:
+            data = json.loads(raw.decode("utf-8-sig"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=400, detail="模板 JSON 格式不正确") from exc
+        template = _normalize_tunnel_mechanical_template(data)
+        repo.save_tunnel_mechanical_template(template)
         return {
-            "base_url": "https://zhyhpt.yciccloud.com",
-            "submit_path": "/prod-api/patrol/deviceCheck/add",
-            "people": TUNNEL_MECHANICAL_PERSONNEL,
-            "assets": TUNNEL_MECHANICAL_ASSETS,
-            "defaults": {
-                "checkerId": "8507",
-                "checker": "商邱宏",
-                "recorderId": "8587",
-                "recorder": "易国兵",
-                "checkTime": _today_in_tz().isoformat(),
-                "weather": "晴",
-                "carLicense": "云JJX350",
-                "nums": "1",
-            },
+            "success": True,
+            "template": _public_tunnel_mechanical_template(repo.get_tunnel_mechanical_template()),
+        }
+
+    @app.get("/api/tunnel-mechanical/config")
+    def get_tunnel_mechanical_config():
+        return {
+            "config": _public_tunnel_mechanical_config(repo.get_tunnel_mechanical_config()),
+            "state": _public_tunnel_mechanical_state(repo.get_tunnel_mechanical_state()),
+        }
+
+    @app.post("/api/tunnel-mechanical/config")
+    def save_tunnel_mechanical_config(request: TunnelMechanicalConfigRequest):
+        existing = repo.get_tunnel_mechanical_config()
+        base_url = request.base_url.strip() or str(existing.get("base_url") or "")
+        if base_url:
+            _tunnel_mechanical_base_url(base_url)
+        username = request.username.strip()
+        password = request.password if request.password else str(existing.get("password") or "")
+        credentials_changed = (
+            base_url != str(existing.get("base_url") or "")
+            or username != str(existing.get("username") or "")
+            or bool(request.password)
+        )
+        repo.save_tunnel_mechanical_config(base_url=base_url, username=username, password=password)
+        if credentials_changed:
+            repo.save_tunnel_mechanical_state(
+                access_token="",
+                refresh_token="",
+                cookie_header="",
+                token_expires_at="",
+                last_login_at="",
+                last_error="",
+            )
+        return {
+            "success": True,
+            "config": _public_tunnel_mechanical_config(repo.get_tunnel_mechanical_config()),
+            "state": _public_tunnel_mechanical_state(repo.get_tunnel_mechanical_state()),
+        }
+
+    @app.get("/api/tunnel-mechanical/captcha")
+    async def get_tunnel_mechanical_captcha():
+        config = repo.get_tunnel_mechanical_config()
+        return await _fetch_tunnel_mechanical_captcha(str(config.get("base_url") or ""))
+
+    @app.post("/api/tunnel-mechanical/login-test")
+    async def test_tunnel_mechanical_login(request: TunnelMechanicalLoginRequest):
+        await _login_tunnel_mechanical(
+            repo,
+            repo.get_tunnel_mechanical_config(),
+            code=request.code,
+            uuid=request.uuid,
+        )
+        return {
+            "success": True,
+            "state": _public_tunnel_mechanical_state(repo.get_tunnel_mechanical_state()),
         }
 
     @app.post("/api/tunnel-mechanical/submit")
     async def submit_tunnel_mechanical(request: TunnelMechanicalSubmitRequest):
-        return await _submit_tunnel_mechanical(request)
+        return await _submit_tunnel_mechanical(repo, request, result_upload_dir=uploads)
+
+    @app.post("/api/tunnel-mechanical/result-image")
+    async def tunnel_mechanical_result_image(request: TunnelMechanicalSubmitRequest):
+        return await _query_tunnel_mechanical_result_image(repo, request, uploads)
 
     @app.get("/api/notification-config")
     def get_notification_config():
@@ -877,9 +857,9 @@ def create_app(
         return data
 
     @app.post("/api/wechat-query")
-    def wechat_query(http_request: Request, query: WechatQueryRequest):
+    async def wechat_query(http_request: Request, query: WechatQueryRequest):
         _require_wechat_query_auth(http_request)
-        return _build_wechat_query_response(repo, query)
+        return await _build_wechat_query_response(repo, query, uploads=uploads)
 
     @app.post("/api/wechat-roster/import")
     def wechat_roster_import(
@@ -1418,8 +1398,16 @@ def _build_wechat_roster_confirm_response(
     }
 
 
-def _build_wechat_query_response(repo: DutyRepository, query: WechatQueryRequest) -> dict[str, Any]:
+async def _build_wechat_query_response(
+    repo: DutyRepository,
+    query: WechatQueryRequest,
+    *,
+    uploads: Path | None = None,
+) -> dict[str, Any]:
     text = _normalize_wechat_query_text(query.text)
+    tunnel_response = await _build_tunnel_mechanical_wechat_response(repo, query, text, uploads=uploads)
+    if tunnel_response is not None:
+        return tunnel_response
     if _is_wechat_query_help(text):
         return {"success": True, "reply": _wechat_query_help_text(), "query_type": "help"}
     person = _person_for_wechat_query(repo, query)
@@ -1449,6 +1437,227 @@ def _build_wechat_query_response(repo: DutyRepository, query: WechatQueryRequest
         return _build_person_monitor_range_query_response(repo, str(person["name"]), start, days)
     target = start
     return _build_person_monitor_query_response(repo, str(person["name"]), target)
+
+
+async def _build_tunnel_mechanical_wechat_response(
+    repo: DutyRepository,
+    query: WechatQueryRequest,
+    text: str,
+    *,
+    uploads: Path | None = None,
+) -> dict[str, Any] | None:
+    if not _is_tunnel_mechanical_wechat_request(text):
+        return None
+    template = _public_tunnel_mechanical_template(repo.get_tunnel_mechanical_template())
+    if not _is_tunnel_mechanical_wechat_submit_command(text):
+        return {
+            "success": True,
+            "query_type": "tunnel_mechanical_template",
+            "reply": _tunnel_mechanical_wechat_template_reply(template, query.target_date),
+        }
+    if not template["assets"] or not template["people"]:
+        return {
+            "success": False,
+            "query_type": "tunnel_mechanical",
+            "reply": "还没有导入隧道机电模板，请先在页面点击“导入模板”。",
+        }
+    params = _parse_tunnel_mechanical_wechat_params(text, template["people"], query.target_date)
+    missing = []
+    if not params.get("checker"):
+        missing.append("负责人/检查人")
+    if not params.get("recorder"):
+        missing.append("记录人")
+    if missing:
+        return {
+            "success": False,
+            "query_type": "tunnel_mechanical",
+            "reply": (
+                "隧道机电录入参数不完整：缺少" + "、".join(missing) + "。\n"
+                "示例：隧道机电录入 日期2026-07-24 负责人张三 记录人李四 天气晴"
+            ),
+        }
+    dry_run = "预览" in text
+    config = repo.get_tunnel_mechanical_config()
+    request = TunnelMechanicalSubmitRequest(
+        base_url=str(config.get("base_url") or "") or str(template.get("base_url") or ""),
+        checkTime=params["checkTime"],
+        weather=str(params.get("weather") or ""),
+        checkerId=str(params["checker"]["id"]),
+        checker=str(params["checker"]["name"]),
+        recorderId=str(params["recorder"]["id"]),
+        recorder=str(params["recorder"]["name"]),
+        rows=[TunnelMechanicalAssetRequest(**asset) for asset in template["assets"]],
+        dry_run=dry_run,
+    )
+    try:
+        result = await _submit_tunnel_mechanical(repo, request, result_upload_dir=uploads)
+    except HTTPException as exc:
+        detail = str(exc.detail)
+        repo.save_send_record(
+            kind="tunnel_mechanical_wechat",
+            target=f"{request.checkTime.isoformat()} {request.checker}/{request.recorder}",
+            status="failed",
+            content=str(query.text or ""),
+            error=detail,
+        )
+        return {"success": False, "query_type": "tunnel_mechanical", "reply": f"隧道机电录入失败：{detail}"}
+    except Exception as exc:
+        repo.save_send_record(
+            kind="tunnel_mechanical_wechat",
+            target=f"{request.checkTime.isoformat()} {request.checker}/{request.recorder}",
+            status="failed",
+            content=str(query.text or ""),
+            error=str(exc),
+        )
+        return {"success": False, "query_type": "tunnel_mechanical", "reply": f"隧道机电录入失败：{exc}"}
+    selected_count = len([row for row in request.rows if row.enabled])
+    result_image_url = _public_app_url(str(result.get("result_image_url") or ""))
+    repo.save_send_record(
+        kind="tunnel_mechanical_wechat",
+        target=f"{request.checkTime.isoformat()} {request.checker}/{request.recorder}",
+        status="success" if result.get("success") else "failed",
+        content=str(query.text or ""),
+        error="" if result.get("success") else "平台返回部分记录失败",
+    )
+    return {
+        "success": bool(result.get("success")),
+        "query_type": "tunnel_mechanical",
+        "dry_run": dry_run,
+        "status": "preview" if dry_run else ("success" if result.get("success") else "failed"),
+        "checkTime": request.checkTime.isoformat(),
+        "checkerId": request.checkerId,
+        "checker": request.checker,
+        "recorderId": request.recorderId,
+        "recorder": request.recorder,
+        "weather": request.weather,
+        "count": selected_count,
+        "reply": (
+            f"隧道机电{'预览' if dry_run else '录入'}完成：{request.checkTime.isoformat()}，"
+            f"负责人{request.checker}，记录人{request.recorder}，天气{request.weather}，共{selected_count}条。"
+            + (f"\n查询结果图片：{result_image_url}" if result_image_url else "")
+            + (f"\n查询结果生成失败：{result.get('result_query_error')}" if result.get("result_query_error") else "")
+            if result.get("success")
+            else "隧道机电录入未全部成功，请到页面查看提交结果。"
+        ),
+        "image_url": result.get("result_image_url") or "",
+        "image_full_url": result_image_url,
+        "result": result,
+    }
+
+
+def _is_tunnel_mechanical_wechat_request(text: str) -> bool:
+    return "隧道机电" in text or "机电日常检查" in text
+
+
+def _public_app_url(path: str) -> str:
+    text = str(path or "").strip()
+    if not text or text.startswith("http://") or text.startswith("https://"):
+        return text
+    base_url = os.getenv("DUTY_REMINDER_PUBLIC_URL", "").strip().rstrip("/")
+    return f"{base_url}{text}" if base_url and text.startswith("/") else text
+
+
+def _is_tunnel_mechanical_wechat_submit_command(text: str) -> bool:
+    return _is_tunnel_mechanical_wechat_request(text) and any(
+        keyword in text for keyword in ("录入", "提交", "新增", "添加", "预览")
+    )
+
+
+def _tunnel_mechanical_wechat_template_reply(template: dict[str, Any], target_date: date | None = None) -> str:
+    defaults = template.get("defaults") if isinstance(template.get("defaults"), dict) else {}
+    check_time = (target_date or _today_in_tz()).isoformat()
+    checker = str(defaults.get("checker") or "").strip() or "张三"
+    recorder = str(defaults.get("recorder") or "").strip() or "李四"
+    weather = str(defaults.get("weather") or "").strip() or "晴"
+    asset_count = len(template.get("assets") or [])
+    people = [str(person.get("name") or "").strip() for person in (template.get("people") or []) if person.get("name")]
+    people_line = f"\n可用人员：{'、'.join(people[:20])}" if people else ""
+    asset_line = f"\n当前模板资产：{asset_count} 条" if asset_count else "\n当前还没有导入隧道模板，请先在页面导入模板。"
+    return (
+        "隧道机电每日录入模板\n"
+        "复制下面一行，把负责人、记录人、天气改好后发送：\n"
+        f"隧道机电录入 日期{check_time} 负责人{checker} 记录人{recorder} 天气{weather}\n"
+        f"只想预览请求，把“录入”改成“预览”。"
+        f"{asset_line}"
+        f"{people_line}"
+    )
+
+
+def _parse_tunnel_mechanical_wechat_params(
+    text: str,
+    people: list[dict[str, Any]],
+    requested_date: date | None = None,
+) -> dict[str, Any]:
+    return {
+        "checkTime": _tunnel_mechanical_wechat_date(text, requested_date),
+        "weather": _tunnel_mechanical_wechat_weather(text),
+        "checker": _tunnel_mechanical_wechat_person(text, people, ("负责人", "检查人", "checker")),
+        "recorder": _tunnel_mechanical_wechat_person(text, people, ("记录人", "recorder")),
+    }
+
+
+def _tunnel_mechanical_wechat_date(text: str, requested_date: date | None = None) -> date:
+    if requested_date:
+        return requested_date
+    today = _today_in_tz()
+    if "后天" in text:
+        return today + timedelta(days=2)
+    if "明天" in text or "明日" in text:
+        return today + timedelta(days=1)
+    if "昨天" in text or "昨日" in text:
+        return today - timedelta(days=1)
+    match = re.search(r"(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})(?:日|号)?", text)
+    if match:
+        try:
+            return date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        except ValueError:
+            return today
+    match = re.search(r"(?<!\d)(\d{1,2})[-/.月](\d{1,2})(?:日|号)?", text)
+    if match:
+        parsed = _wechat_query_month_day(today, int(match.group(1)), int(match.group(2)))
+        if parsed:
+            return parsed
+    return today
+
+
+def _tunnel_mechanical_wechat_person(
+    text: str,
+    people: list[dict[str, Any]],
+    labels: tuple[str, ...],
+) -> dict[str, str] | None:
+    sorted_people = sorted(people, key=lambda person: len(str(person["name"])), reverse=True)
+    boundary_labels = ("负责人", "检查人", "checker", "记录人", "recorder", "日期", "时间", "天气", "weather")
+    for label in labels:
+        index = text.lower().find(label.lower())
+        if index < 0:
+            continue
+        after_label = text[index + len(label):]
+        boundary = min(
+            [next_index for marker in boundary_labels if (next_index := after_label.lower().find(marker.lower())) > 0],
+            default=len(after_label),
+        )
+        segment = after_label[:boundary]
+        for person in sorted_people:
+            name = str(person["name"])
+            if name and name in segment:
+                return {"id": str(person["id"]), "name": name}
+    return None
+
+
+def _tunnel_mechanical_wechat_weather(text: str) -> str:
+    weather_words = ["雷阵雨", "暴雨", "大雨", "中雨", "小雨", "阵雨", "多云", "阴", "晴", "雨", "雪", "雾"]
+    for label in ("天气", "weather"):
+        index = text.lower().find(label.lower())
+        if index < 0:
+            continue
+        after_label = text[index + len(label):].lstrip(":：= ")
+        for word in weather_words:
+            if after_label.startswith(word):
+                return word
+    for word in weather_words:
+        if word in text:
+            return word
+    return ""
 
 
 def _normalize_wechat_query_text(text: str) -> str:
@@ -1628,6 +1837,7 @@ def _wechat_query_help_text() -> str:
         "5. 查询未来7天\n"
         "6. 查询下次提醒\n"
         "7. 查询我的绑定\n"
+        "8. 隧道机电录入 日期2026-07-24 负责人张三 记录人李四 天气晴\n"
         "回复序号即可执行，菜单 3 分钟内有效。\n"
         "也可以问：我今天什么班、明天我上班吗、查询7月24日监控。\n"
         "说明：普通群成员只能查询自己，需要先在 duty-reminder 设置里绑定微信成员。"
@@ -1871,14 +2081,398 @@ def _public_patrol_warning_state(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _tunnel_mechanical_base_url(base_url: str) -> str:
-    parsed = urlparse((base_url or "https://zhyhpt.yciccloud.com").strip())
+def _public_tunnel_mechanical_config(config: dict[str, Any]) -> dict[str, Any]:
+    password = str(config.get("password") or "")
+    return {
+        "base_url": str(config.get("base_url") or ""),
+        "username": str(config.get("username") or ""),
+        "password": "",
+        "password_configured": bool(password),
+        "password_display": "已配置" if password else "未配置",
+    }
+
+
+def _public_tunnel_mechanical_state(state: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "token_configured": bool(str(state.get("access_token") or "").strip()),
+        "cookie_configured": bool(str(state.get("cookie_header") or "").strip()),
+        "token_expires_at": str(state.get("token_expires_at") or ""),
+        "last_login_at": str(state.get("last_login_at") or ""),
+        "last_error": str(state.get("last_error") or ""),
+    }
+
+
+def _empty_tunnel_mechanical_template() -> dict[str, Any]:
+    return {
+        "imported": False,
+        "base_url": "",
+        "submit_path": "",
+        "list_path": "",
+        "people": [],
+        "assets": [],
+        "defaults": {
+            "checkerId": "",
+            "checker": "",
+            "recorderId": "",
+            "recorder": "",
+            "checkTime": "",
+            "weather": "",
+            "carLicense": "",
+            "nums": "",
+        },
+    }
+
+
+def _public_tunnel_mechanical_template(template: dict[str, Any]) -> dict[str, Any]:
+    normalized = _normalize_tunnel_mechanical_template(template, require_assets=False)
+    normalized["imported"] = bool(normalized["people"] or normalized["assets"])
+    return normalized
+
+
+def _normalize_tunnel_mechanical_template(data: Any, *, require_assets: bool = True) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="模板必须是 JSON 对象")
+    template = _empty_tunnel_mechanical_template()
+    template["base_url"] = str(data.get("base_url") or "").strip()
+    if template["base_url"]:
+        _tunnel_mechanical_base_url(template["base_url"])
+    template["submit_path"] = str(data.get("submit_path") or "").strip()
+    template["list_path"] = str(data.get("list_path") or "").strip()
+    people = []
+    for person in data.get("people") or []:
+        if not isinstance(person, dict):
+            continue
+        person_id = str(person.get("id") or "").strip()
+        name = str(person.get("name") or "").strip()
+        if person_id and name:
+            people.append({"id": person_id, "name": name})
+    assets = []
+    for asset in data.get("assets") or []:
+        if not isinstance(asset, dict):
+            continue
+        normalized_asset = {
+            "enabled": bool(asset.get("enabled", True)),
+            "assetId": str(asset.get("assetId") or "").strip(),
+            "assetName": str(asset.get("assetName") or "").strip(),
+            "assetCode": str(asset.get("assetCode") or "").strip(),
+            "routeCode": str(asset.get("routeCode") or "").strip(),
+            "routeName": str(asset.get("routeName") or "").strip(),
+            "maintenanceSectionId": str(asset.get("maintenanceSectionId") or "").strip(),
+            "domainId": str(asset.get("domainId") or "").strip(),
+            "deptName": str(asset.get("deptName") or "").strip(),
+            "devName": str(asset.get("devName") or "").strip(),
+            "location": str(asset.get("location") or "").strip(),
+            "content": str(asset.get("content") or "").strip(),
+            "result": int(asset.get("result") or 1),
+            "carLicense": str(asset.get("carLicense") or "").strip(),
+            "nums": None if asset.get("nums") is None else str(asset.get("nums") or "").strip(),
+        }
+        if normalized_asset["assetId"] and normalized_asset["assetName"] and normalized_asset["assetCode"]:
+            assets.append(normalized_asset)
+    defaults_data = data.get("defaults") if isinstance(data.get("defaults"), dict) else {}
+    template["people"] = people
+    template["assets"] = assets
+    template["defaults"] = {
+        "checkerId": str(defaults_data.get("checkerId") or "").strip(),
+        "checker": str(defaults_data.get("checker") or "").strip(),
+        "recorderId": str(defaults_data.get("recorderId") or "").strip(),
+        "recorder": str(defaults_data.get("recorder") or "").strip(),
+        "checkTime": str(defaults_data.get("checkTime") or "").strip(),
+        "weather": str(defaults_data.get("weather") or "").strip(),
+        "carLicense": str(defaults_data.get("carLicense") or "").strip(),
+        "nums": str(defaults_data.get("nums") or "").strip(),
+    }
+    if require_assets and (not people or not assets):
+        raise HTTPException(status_code=400, detail="模板至少需要 people 和 assets")
+    return template
+
+
+def _tunnel_mechanical_allowed_hosts(*base_urls: str) -> set[str]:
+    hosts = set()
+    for base_url in base_urls:
+        parsed = urlparse(str(base_url or "").strip())
+        if parsed.scheme in {"http", "https"} and parsed.hostname:
+            hosts.add(parsed.hostname.lower())
+    return hosts
+
+
+def _tunnel_mechanical_base_url(base_url: str, *, allowed_hosts: set[str] | None = None) -> str:
+    text = str(base_url or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="请先配置或导入平台地址")
+    parsed = urlparse(text)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise HTTPException(status_code=400, detail="目标地址格式不正确")
-    if parsed.hostname.lower() not in TUNNEL_MECHANICAL_ALLOWED_HOSTS:
-        raise HTTPException(status_code=400, detail="隧道机电录入只允许提交到已配置的智慧养护平台域名")
+    if allowed_hosts is not None:
+        if not allowed_hosts:
+            raise HTTPException(status_code=400, detail="请先保存账号平台地址或导入带平台地址的模板")
+        if parsed.hostname.lower() not in allowed_hosts:
+            raise HTTPException(status_code=400, detail="隧道机电录入只允许提交到已配置或已导入的平台地址")
     port = f":{parsed.port}" if parsed.port else ""
     return f"{parsed.scheme}://{parsed.hostname}{port}"
+
+
+def _tunnel_mechanical_api_path(path: str, *, fallback: str = "") -> str:
+    text = str(path or fallback or "").strip()
+    if not text:
+        return ""
+    if not text.startswith("/") or text.startswith("//"):
+        raise HTTPException(status_code=400, detail="隧道机电接口路径必须以 / 开头")
+    return text
+
+
+def _tunnel_mechanical_password_cipher(text: str) -> str:
+    try:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    except ImportError as exc:
+        raise HTTPException(status_code=500, detail="服务缺少 cryptography 依赖，无法加密登录密码") from exc
+    key = TUNNEL_MECHANICAL_AES_KEY_TEXT.encode("utf-8")
+    data = str(text or "").encode("utf-8")
+    pad_size = 16 - (len(data) % 16)
+    padded = data + bytes([pad_size]) * pad_size
+    encryptor = Cipher(algorithms.AES(key), modes.ECB()).encryptor()
+    return base64.b64encode(encryptor.update(padded) + encryptor.finalize()).decode("ascii")
+
+
+def _tunnel_mechanical_decrypt_text(text: str) -> str:
+    try:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    except ImportError as exc:
+        raise HTTPException(status_code=500, detail="服务缺少 cryptography 依赖，无法解密验证码") from exc
+    try:
+        encrypted = base64.b64decode(str(text or ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail="验证码图片格式不正确") from exc
+    key = TUNNEL_MECHANICAL_AES_KEY_TEXT.encode("utf-8")
+    decryptor = Cipher(algorithms.AES(key), modes.ECB()).decryptor()
+    padded = decryptor.update(encrypted) + decryptor.finalize()
+    if not padded:
+        return ""
+    pad_size = padded[-1]
+    data = padded[:-pad_size] if 1 <= pad_size <= 16 else padded
+    return data.decode("utf-8")
+
+
+def _tunnel_mechanical_auth_value(token: str) -> str:
+    text = str(token or "").strip()
+    if not text:
+        return ""
+    return text if text.lower().startswith("bearer ") else f"Bearer {text}"
+
+
+def _tunnel_mechanical_token_valid(state: dict[str, Any], now: datetime | None = None) -> bool:
+    token = str(state.get("access_token") or "").strip()
+    if not token:
+        return False
+    expires_at = _state_datetime(str(state.get("token_expires_at") or ""))
+    return expires_at is not None and (now or datetime.now(TZ)) < expires_at
+
+
+def _tunnel_mechanical_cookie_header(cookies: httpx.Cookies) -> str:
+    return "; ".join(f"{cookie.name}={cookie.value}" for cookie in cookies.jar)
+
+
+async def _fetch_tunnel_mechanical_captcha(base_url: str) -> dict[str, Any]:
+    base_url = _tunnel_mechanical_base_url(base_url)
+    try:
+        async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
+            response = await client.get(
+                f"{base_url}/prod-api/code",
+                headers={
+                    "Accept": "application/json, text/plain, */*",
+                    "Origin": base_url,
+                    "Referer": f"{base_url}/login",
+                },
+            )
+            body = response.json()
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"获取智慧养护验证码失败：{exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail="获取智慧养护验证码失败：平台返回的不是 JSON") from exc
+    if response.status_code != 200 or str(body.get("code") or "") not in {"200", "0"}:
+        raise HTTPException(status_code=502, detail=str(body.get("msg") or "获取智慧养护验证码失败"))
+    return {
+        "success": True,
+        "captcha_enabled": bool(body.get("captchaEnabled", True)),
+        "img": _tunnel_mechanical_decrypt_text(str(body.get("img") or "")) if body.get("img") else "",
+        "uuid": str(body.get("uuid") or ""),
+    }
+
+
+def _tunnel_mechanical_login_payload(config: dict[str, Any], *, code: str = "", uuid: str = "") -> dict[str, str]:
+    username = str(config.get("username") or "").strip()
+    password = str(config.get("password") or "")
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="请先配置智慧养护平台账号和密码")
+    return {
+        "username": _tunnel_mechanical_password_cipher(username),
+        "password": _tunnel_mechanical_password_cipher(password),
+        "code": str(code or "").strip(),
+        "uuid": str(uuid or "").strip(),
+    }
+
+
+def _tunnel_mechanical_token_data(body: dict[str, Any]) -> tuple[str, str, int]:
+    data = body.get("data") if isinstance(body.get("data"), dict) else body
+    access_token = str(
+        data.get("access_token")
+        or data.get("accessToken")
+        or data.get("token")
+        or data.get("ACCESS_TOKEN")
+        or ""
+    ).strip()
+    refresh_token = str(data.get("refresh_token") or data.get("refreshToken") or "").strip()
+    expires_in = data.get("expires_in") or data.get("expiresIn") or 7200
+    try:
+        expires_seconds = max(60, int(float(expires_in)))
+    except (TypeError, ValueError):
+        expires_seconds = 7200
+    return access_token, refresh_token, expires_seconds
+
+
+def _save_tunnel_mechanical_token_state(
+    repo: DutyRepository,
+    *,
+    body: dict[str, Any],
+    cookie_header: str,
+    now: datetime,
+    fallback_refresh_token: str = "",
+) -> dict[str, Any]:
+    access_token, refresh_token, expires_seconds = _tunnel_mechanical_token_data(body)
+    if not access_token:
+        repo.save_tunnel_mechanical_state(last_error="登录成功但平台没有返回 access_token")
+        raise HTTPException(status_code=502, detail="登录成功但平台没有返回 access_token")
+    token_expires_at = (now + timedelta(seconds=max(30, expires_seconds - 60))).isoformat()
+    repo.save_tunnel_mechanical_state(
+        access_token=access_token,
+        refresh_token=refresh_token or fallback_refresh_token,
+        cookie_header=cookie_header,
+        token_expires_at=token_expires_at,
+        last_login_at=now.isoformat(),
+        last_error="",
+    )
+    return repo.get_tunnel_mechanical_state()
+
+
+async def _refresh_tunnel_mechanical_token(
+    repo: DutyRepository,
+    base_url: str,
+    state: dict[str, Any],
+) -> dict[str, Any] | None:
+    refresh_token = str(state.get("refresh_token") or "").strip()
+    if not refresh_token:
+        return None
+    now = datetime.now(TZ)
+    try:
+        async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
+            response = await client.post(
+                f"{base_url}/prod-api/auth/refresh",
+                headers={
+                    "Accept": "application/json, text/plain, */*",
+                    "Authorization": _tunnel_mechanical_auth_value(refresh_token),
+                    "Content-Type": "application/json;charset=UTF-8",
+                    "Origin": base_url,
+                    "Referer": f"{base_url}/login",
+                },
+            )
+            try:
+                body: Any = response.json()
+            except ValueError:
+                body = {"msg": response.text[:500]}
+            cookie_header = _tunnel_mechanical_cookie_header(client.cookies) or str(state.get("cookie_header") or "")
+    except httpx.HTTPError as exc:
+        repo.save_tunnel_mechanical_state(last_error=f"刷新 token 失败：{exc}")
+        return None
+    if response.status_code != 200 or not isinstance(body, dict) or str(body.get("code") or "") not in {"200", "0"}:
+        message = str(body.get("msg") if isinstance(body, dict) else body) or "刷新 token 失败"
+        repo.save_tunnel_mechanical_state(last_error=message)
+        return None
+    return _save_tunnel_mechanical_token_state(
+        repo,
+        body=body,
+        cookie_header=cookie_header,
+        now=now,
+        fallback_refresh_token=refresh_token,
+    )
+
+
+async def _login_tunnel_mechanical(
+    repo: DutyRepository,
+    config: dict[str, Any],
+    *,
+    code: str = "",
+    uuid: str = "",
+) -> dict[str, Any]:
+    base_url = _tunnel_mechanical_base_url(str(config.get("base_url") or ""))
+    if not uuid and not code:
+        captcha = await _fetch_tunnel_mechanical_captcha(base_url)
+        if captcha.get("captcha_enabled"):
+            raise HTTPException(status_code=400, detail="平台已启用验证码，请先获取验证码并填写后再测试登录")
+        uuid = str(captcha.get("uuid") or "")
+    payload = _tunnel_mechanical_login_payload(config, code=code, uuid=uuid)
+    now = datetime.now(TZ)
+    try:
+        async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
+            response = await client.post(
+                f"{base_url}/prod-api/auth/login",
+                headers={
+                    "Accept": "application/json, text/plain, */*",
+                    "Content-Type": "application/json;charset=UTF-8",
+                    "Origin": base_url,
+                    "Referer": f"{base_url}/login",
+                },
+                json=payload,
+            )
+            try:
+                body: Any = response.json()
+            except ValueError:
+                body = {"msg": response.text[:500]}
+            cookie_header = _tunnel_mechanical_cookie_header(client.cookies)
+    except httpx.HTTPError as exc:
+        repo.save_tunnel_mechanical_state(last_error=f"登录请求失败：{exc}")
+        raise HTTPException(status_code=502, detail=f"登录智慧养护平台失败：{exc}") from exc
+    if response.status_code != 200 or not isinstance(body, dict) or str(body.get("code") or "") not in {"200", "0"}:
+        message = str(body.get("msg") if isinstance(body, dict) else body) or "账号、密码或验证码不正确"
+        repo.save_tunnel_mechanical_state(
+            access_token="",
+            refresh_token="",
+            cookie_header="",
+            token_expires_at="",
+            last_error=message,
+        )
+        raise HTTPException(status_code=400, detail=message)
+    return _save_tunnel_mechanical_token_state(repo, body=body, cookie_header=cookie_header, now=now)
+
+
+
+async def _tunnel_mechanical_auth_headers(
+    repo: DutyRepository,
+    request: TunnelMechanicalSubmitRequest,
+    base_url: str,
+) -> dict[str, str]:
+    if request.authorization.strip() or request.cookie.strip():
+        headers: dict[str, str] = {}
+        if request.authorization.strip():
+            headers["Authorization"] = request.authorization.strip()
+        if request.cookie.strip():
+            headers["Cookie"] = request.cookie.strip()
+        return headers
+
+    state = repo.get_tunnel_mechanical_state()
+    if not _tunnel_mechanical_token_valid(state):
+        refreshed_state = await _refresh_tunnel_mechanical_token(repo, base_url, state)
+        state = refreshed_state or await _login_tunnel_mechanical(
+            repo,
+            {**repo.get_tunnel_mechanical_config(), "base_url": base_url},
+        )
+    token = str(state.get("access_token") or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="没有可用的智慧养护登录 token，请先在页面完成登录测试")
+    headers = {"Authorization": _tunnel_mechanical_auth_value(token)}
+    cookie_header = str(state.get("cookie_header") or "").strip()
+    if cookie_header:
+        headers["Cookie"] = cookie_header
+    return headers
 
 
 def _build_tunnel_mechanical_payload(request: TunnelMechanicalSubmitRequest, row: TunnelMechanicalAssetRequest) -> dict[str, Any]:
@@ -1918,7 +2512,12 @@ def _build_tunnel_mechanical_payload(request: TunnelMechanicalSubmitRequest, row
     }
 
 
-async def _submit_tunnel_mechanical(request: TunnelMechanicalSubmitRequest) -> dict[str, Any]:
+async def _submit_tunnel_mechanical(
+    repo: DutyRepository,
+    request: TunnelMechanicalSubmitRequest,
+    *,
+    result_upload_dir: Path | None = None,
+) -> dict[str, Any]:
     rows = [row for row in request.rows if row.enabled]
     if not rows:
         raise HTTPException(status_code=400, detail="请至少选择一条隧道记录")
@@ -1929,18 +2528,9 @@ async def _submit_tunnel_mechanical(request: TunnelMechanicalSubmitRequest) -> d
     if request.dry_run:
         return {"success": True, "dry_run": True, "submissions": submissions}
 
-    base_url = _tunnel_mechanical_base_url(request.base_url)
-    submit_url = f"{base_url}/prod-api/patrol/deviceCheck/add"
-    headers = {
-        "Accept": "application/json, text/plain, */*",
-        "Content-Type": "application/json;charset=UTF-8",
-        "Origin": base_url,
-        "Referer": f"{base_url}/patrol/deviceCheck/dailyInfo",
-    }
-    if request.authorization.strip():
-        headers["Authorization"] = request.authorization.strip()
-    if request.cookie.strip():
-        headers["Cookie"] = request.cookie.strip()
+    base_url, headers, template = await _tunnel_mechanical_request_context(repo, request)
+    submit_path = _tunnel_mechanical_api_path(str(template.get("submit_path") or ""), fallback="/prod-api/patrol/deviceCheck/add")
+    submit_url = f"{base_url}{submit_path}"
 
     results = []
     try:
@@ -1963,7 +2553,238 @@ async def _submit_tunnel_mechanical(request: TunnelMechanicalSubmitRequest) -> d
                 )
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"提交到智慧养护平台失败：{exc}") from exc
-    return {"success": all(item["ok"] for item in results), "dry_run": False, "results": results}
+    response_body: dict[str, Any] = {"success": all(item["ok"] for item in results), "dry_run": False, "results": results}
+    if response_body["success"] and result_upload_dir is not None:
+        query_result = await _save_tunnel_mechanical_result_image(
+            repo,
+            request,
+            base_url=base_url,
+            headers=headers,
+            upload_dir=result_upload_dir,
+        )
+        response_body.update(query_result)
+    return response_body
+
+
+async def _query_tunnel_mechanical_result_image(
+    repo: DutyRepository,
+    request: TunnelMechanicalSubmitRequest,
+    upload_dir: Path,
+) -> dict[str, Any]:
+    if not [row for row in request.rows if row.enabled]:
+        raise HTTPException(status_code=400, detail="请至少选择一条隧道记录")
+    base_url, headers, _ = await _tunnel_mechanical_request_context(repo, request)
+    result = await _save_tunnel_mechanical_result_image(
+        repo,
+        request,
+        base_url=base_url,
+        headers=headers,
+        upload_dir=upload_dir,
+    )
+    return {"success": bool(result.get("result_image_url")), **result}
+
+
+async def _tunnel_mechanical_request_context(
+    repo: DutyRepository,
+    request: TunnelMechanicalSubmitRequest,
+) -> tuple[str, dict[str, str], dict[str, Any]]:
+    template = repo.get_tunnel_mechanical_template()
+    config = repo.get_tunnel_mechanical_config()
+    allowed_hosts = _tunnel_mechanical_allowed_hosts(
+        str(config.get("base_url") or ""),
+        str(template.get("base_url") or ""),
+    )
+    base_url = _tunnel_mechanical_base_url(
+        request.base_url or str(config.get("base_url") or "") or str(template.get("base_url") or ""),
+        allowed_hosts=allowed_hosts,
+    )
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "Content-Type": "application/json;charset=UTF-8",
+        "Origin": base_url,
+        "Referer": f"{base_url}/patrol/deviceCheck/dailyInfo",
+    }
+    headers.update(await _tunnel_mechanical_auth_headers(repo, request, base_url))
+    return base_url, headers, template
+
+
+async def _save_tunnel_mechanical_result_image(
+    repo: DutyRepository,
+    request: TunnelMechanicalSubmitRequest,
+    *,
+    base_url: str,
+    headers: dict[str, str],
+    upload_dir: Path,
+) -> dict[str, Any]:
+    template = repo.get_tunnel_mechanical_template()
+    list_path = _tunnel_mechanical_api_path(str(template.get("list_path") or ""))
+    if not list_path:
+        return {"result_query_error": "模板未配置 list_path，无法自动查询录入结果"}
+    try:
+        rows = await _query_tunnel_mechanical_records(request, base_url=base_url, headers=headers, list_path=list_path)
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        _cleanup_old_uploads(upload_dir)
+        filename = f"tunnel-mechanical-result-{request.checkTime.isoformat()}-{uuid.uuid4().hex}.png"
+        target = upload_dir / filename
+        target.write_bytes(
+            render_tunnel_mechanical_result_image(
+                rows,
+                check_time=request.checkTime,
+                checker=request.checker,
+                recorder=request.recorder,
+            )
+        )
+        return {"result_rows": rows, "result_image_url": f"/api/uploads/{filename}"}
+    except HTTPException as exc:
+        return {"result_query_error": str(exc.detail)}
+    except Exception as exc:
+        LOGGER.exception("生成隧道机电录入结果图片失败")
+        return {"result_query_error": str(exc)}
+
+
+async def _query_tunnel_mechanical_records(
+    request: TunnelMechanicalSubmitRequest,
+    *,
+    base_url: str,
+    headers: dict[str, str],
+    list_path: str,
+) -> list[dict[str, Any]]:
+    url = f"{base_url}{list_path}"
+    date_text = request.checkTime.isoformat()
+    attempts = [
+        {"pageNum": "1", "pageSize": "50", "checkTime": date_text},
+        {"pageNum": "1", "pageSize": "50", "beginCheckTime": date_text, "endCheckTime": date_text},
+        {"pageNum": "1", "pageSize": "50", "params[beginCheckTime]": date_text, "params[endCheckTime]": date_text},
+    ]
+    last_error = ""
+    unmatched_rows: list[dict[str, Any]] = []
+    async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
+        for params in attempts:
+            try:
+                response = await client.get(url, headers=headers, params=params)
+                body: Any = response.json()
+            except httpx.HTTPError as exc:
+                last_error = str(exc)
+                continue
+            except ValueError:
+                last_error = "平台查询接口返回的不是 JSON"
+                continue
+            if response.status_code != 200 or not isinstance(body, dict):
+                last_error = f"HTTP {response.status_code}"
+                continue
+            rows = _normalize_tunnel_mechanical_result_rows(_extract_tunnel_mechanical_rows(body))
+            filtered = _filter_tunnel_mechanical_result_rows(rows, request)
+            if filtered:
+                return filtered
+            if rows:
+                unmatched_rows = rows
+            else:
+                last_error = "平台查询接口没有返回记录"
+    if unmatched_rows:
+        return []
+    raise HTTPException(status_code=502, detail=f"查询隧道机电录入结果失败：{last_error or '平台没有返回有效数据'}")
+
+
+def _extract_tunnel_mechanical_rows(body: Any) -> list[Any]:
+    if isinstance(body, list):
+        return body
+    if not isinstance(body, dict):
+        return []
+    candidates: list[Any] = [body]
+    for key in ("data", "Data", "result", "rows"):
+        value = body.get(key)
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict):
+            candidates.append(value)
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        for key in ("rows", "list", "records", "items"):
+            value = candidate.get(key)
+            if isinstance(value, list):
+                return value
+    return []
+
+
+def _normalize_tunnel_mechanical_result_rows(rows: list[Any]) -> list[dict[str, Any]]:
+    normalized = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        domain = _first_tunnel_mechanical_domain(row)
+        result_value = _first_present(row, domain, "result", "checkResult", "checkResultName")
+        normalized.append(
+            {
+                "routeCode": _first_present(row, domain, "routeCode", "route_code"),
+                "assetName": _first_present(row, domain, "assetName", "tunnelName", "name"),
+                "deptName": _first_present(row, domain, "deptName", "dept_name", "maintenanceSectionName", "orgName"),
+                "checkTime": _date_text(_first_present(row, domain, "checkTime", "checkDate", "createTime")),
+                "weather": _first_present(row, domain, "weather"),
+                "checker": _first_present(row, domain, "checker", "checkerName"),
+                "recorder": _first_present(row, domain, "recorder", "recorderName"),
+                "devName": _first_present(row, domain, "devName", "deviceName", "facilitiesName"),
+                "location": _first_present(row, domain, "location", "checkLocation"),
+                "content": _first_present(row, domain, "content", "checkContent"),
+                "resultText": _tunnel_mechanical_result_text(result_value),
+                "carLicense": _first_present(row, domain, "carLicense", "carNo"),
+                "nums": _first_present(row, domain, "nums", "number"),
+            }
+        )
+    return normalized
+
+
+def _first_tunnel_mechanical_domain(row: dict[str, Any]) -> dict[str, Any]:
+    domains = row.get("domains") or row.get("domainList") or row.get("deviceCheckDomainList")
+    if isinstance(domains, list) and domains and isinstance(domains[0], dict):
+        return domains[0]
+    return {}
+
+
+def _first_present(*sources_and_keys: Any) -> str:
+    sources = [item for item in sources_and_keys if isinstance(item, dict)]
+    keys = [item for item in sources_and_keys if isinstance(item, str)]
+    for key in keys:
+        for source in sources:
+            value = source.get(key)
+            if value not in (None, ""):
+                return str(value)
+    return ""
+
+
+def _date_text(value: str) -> str:
+    text = str(value or "")
+    return text[:10] if len(text) >= 10 else text
+
+
+def _tunnel_mechanical_result_text(value: Any) -> str:
+    text = str(value if value is not None else "").strip()
+    if text in {"1", "正常", "true", "True"}:
+        return "正常"
+    if text in {"0", "异常", "false", "False"}:
+        return "异常"
+    return text or "-"
+
+
+def _filter_tunnel_mechanical_result_rows(
+    rows: list[dict[str, Any]],
+    request: TunnelMechanicalSubmitRequest,
+) -> list[dict[str, Any]]:
+    date_text = request.checkTime.isoformat()
+    asset_names = {row.assetName for row in request.rows if row.enabled}
+    filtered = []
+    for row in rows:
+        row_date = str(row.get("checkTime") or "")
+        if row_date and row_date != date_text:
+            continue
+        if request.checker and row.get("checker") and str(row["checker"]) != request.checker:
+            continue
+        if request.recorder and row.get("recorder") and str(row["recorder"]) != request.recorder:
+            continue
+        if asset_names and row.get("assetName") and str(row["assetName"]) not in asset_names:
+            continue
+        filtered.append(row)
+    return filtered
 
 
 def _reminder_events_response(repo: DutyRepository, target: date, *, now: datetime) -> dict[str, Any]:
