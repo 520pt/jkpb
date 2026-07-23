@@ -186,11 +186,17 @@ class PushSendHandler:
             group_channel = _get_running_channel(const.WECHAT_GROUP)
             if group_channel is None:
                 return json.dumps({"success": False, "error": "wechat_group channel is not running"}, ensure_ascii=False)
+            runtime_target = _resolve_push_target_room_id(group_channel, target)
+            if not runtime_target:
+                return json.dumps(
+                    {"success": False, "error": "target room is not active or could not be resolved: {}".format(target)},
+                    ensure_ascii=False,
+                )
             msgtype = str(body.get("msgtype") or "text").lower()
             if msgtype == "image":
                 image = body.get("image") if isinstance(body.get("image"), dict) else {}
                 image_path = _write_push_image_file(image)
-                group_channel.client.send_image(target, image_path)
+                group_channel.client.send_image(runtime_target, image_path)
             else:
                 text_payload = body.get("text") if isinstance(body.get("text"), dict) else {}
                 content = str(text_payload.get("content") or body.get("content") or "")
@@ -199,8 +205,8 @@ class PushSendHandler:
                 mention_ids = text_payload.get("mention_ids") or body.get("mention_ids") or []
                 if not isinstance(mention_ids, list):
                     mention_ids = []
-                group_channel.client.send_text(target, content, mention_ids=mention_ids)
-            return json.dumps({"success": True}, ensure_ascii=False)
+                group_channel.client.send_text(runtime_target, content, mention_ids=mention_ids)
+            return json.dumps({"success": True, "target": target, "runtime_target": runtime_target}, ensure_ascii=False)
         except web.HTTPError:
             raise
         except Exception as e:
@@ -235,6 +241,39 @@ def _get_running_channel(channel_type):
         if channel is not None:
             return channel
     return None
+
+
+def _resolve_push_target_room_id(group_channel, target):
+    room_id = str(target or "").strip()
+    if not room_id:
+        return ""
+    if not room_id.startswith("wgr_"):
+        return room_id
+    service = getattr(group_channel, "identity_service", None)
+    if service is None:
+        try:
+            from channel.wechat_group.wechat_group_identity_service import WechatGroupIdentityService
+
+            service = WechatGroupIdentityService()
+        except Exception:
+            service = None
+    if service is not None:
+        try:
+            runtime_id = str(service.get_active_runtime_room_id(room_id) or "").strip()
+            if runtime_id:
+                return runtime_id
+        except Exception:
+            pass
+    try:
+        rooms = group_channel.get_rooms() if hasattr(group_channel, "get_rooms") else getattr(group_channel, "rooms", [])
+    except Exception:
+        rooms = []
+    for room in rooms or []:
+        stable_id = str(room.get("stable_room_id") or room.get("id") or "").strip()
+        runtime_id = str(room.get("runtime_room_id") or room.get("room_id") or "").strip()
+        if stable_id == room_id and runtime_id:
+            return runtime_id
+    return ""
 
 
 def _write_push_image_file(image):
