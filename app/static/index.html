@@ -1145,6 +1145,56 @@
       border-radius: 8px;
       background: white;
     }
+    .date-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 1900;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      background: rgba(15, 23, 42, 0.56);
+    }
+    .date-modal[hidden] {
+      display: none;
+    }
+    .date-modal-card {
+      width: min(420px, 100%);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: white;
+      box-shadow: 0 22px 58px rgba(15, 23, 42, 0.24);
+    }
+    .date-modal-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 50px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    .date-modal-body {
+      display: grid;
+      gap: 8px;
+      padding: 14px;
+    }
+    .date-modal-body label {
+      display: grid;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .date-modal-body input {
+      width: 100%;
+      color: var(--ink);
+    }
+    .date-modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      padding: 0 14px 14px;
+    }
     .daily-duty-visual {
       display: grid;
       gap: 8px;
@@ -1265,6 +1315,25 @@
     </div>
     <div class="image-viewer-stage">
       <img id="imageViewerImage" class="image-viewer-image" alt="" />
+    </div>
+  </div>
+
+  <div id="tunnelMechanicalResultDateModal" class="date-modal" hidden>
+    <div class="date-modal-card" role="dialog" aria-modal="true" aria-labelledby="tunnelMechanicalResultDateTitle">
+      <div class="date-modal-head">
+        <h3 id="tunnelMechanicalResultDateTitle">选择查询日期</h3>
+        <button id="tunnelMechanicalResultDateCloseBtn" type="button">关闭</button>
+      </div>
+      <div class="date-modal-body">
+        <label>查询日期
+          <input id="tunnelMechanicalResultDateInput" type="date" />
+        </label>
+        <p id="tunnelMechanicalResultDateStatus" class="status"></p>
+      </div>
+      <div class="date-modal-actions">
+        <button id="tunnelMechanicalResultDateCancelBtn" type="button">取消</button>
+        <button class="primary" id="tunnelMechanicalResultDateConfirmBtn" type="button">查询</button>
+      </div>
     </div>
   </div>
 
@@ -1509,6 +1578,7 @@
         <nav class="settings-nav">
           <h3>配置目录</h3>
           <button class="active" data-settings-target="wecomSettings">通知通道</button>
+          <button data-settings-target="featureChannelSettings">功能通道</button>
           <button data-settings-target="monitorSettings">监控班提醒</button>
           <button data-settings-target="patrolWarningSettings">公路巡查预警</button>
           <button data-settings-target="customReminderSettings">自定义提醒</button>
@@ -1569,6 +1639,41 @@
                   <button id="testNotificationBtn">测试发送</button>
                 </div>
                 <p id="notificationStatus" class="status"></p>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-panel single" id="featureChannelSettings">
+            <div class="side-block wide">
+              <h3>功能通道</h3>
+              <div class="stack">
+                <label class="checkbox-label"><input id="featureChannelEnabled" type="checkbox" /> 启用微信群功能通道</label>
+                <div class="field-grid">
+                  <label>LightAgent Web 地址 <input id="featureLightAgentWebUrl" placeholder="例如 http://127.0.0.1:9899" /></label>
+                  <label>Web 密码 <input id="featureLightAgentWebPassword" type="password" placeholder="已配置时可留空" /></label>
+                </div>
+                <div class="field-grid">
+                  <label>功能微信群
+                    <select id="featureChannelRoomSelect"></select>
+                  </label>
+                  <label>功能群 ID <input id="featureChannelRoomId" placeholder="选择群后自动填入，也可手动输入 wgr_..." /></label>
+                </div>
+                <input id="featureChannelRoomName" type="hidden" />
+                <div class="settings-actions">
+                  <button type="button" id="addFeatureChannelRoomBtn">添加功能群</button>
+                </div>
+                <div id="featureChannelRoomList" class="list"></div>
+                <div class="field-grid">
+                  <label class="checkbox-label"><input id="featureAllowTunnelMechanical" type="checkbox" /> 隧道机电查询/录入</label>
+                  <label class="checkbox-label"><input id="featureAllowDutyQuery" type="checkbox" /> 监控班和值班查询</label>
+                  <label class="checkbox-label"><input id="featureAllowRosterImport" type="checkbox" /> 微信群排班导入</label>
+                </div>
+                <div class="settings-actions">
+                  <button type="button" id="refreshFeatureWechatRoomsBtn">同步微信群</button>
+                  <button class="primary" type="button" id="saveFeatureChannelBtn">保存功能通道</button>
+                  <button type="button" id="testFeatureChannelBtn">测试功能通道</button>
+                </div>
+                <p id="featureChannelStatus" class="status"></p>
               </div>
             </div>
           </section>
@@ -1759,7 +1864,7 @@
                   <label class="checkbox-label"><input id="dailyDutyEnabled" type="checkbox" checked /> 启用今日在岗提醒</label>
                   <label>提醒时间 <input id="dailyDutyTime" type="time" value="07:50" /></label>
                 </div>
-                <label>今日在岗提醒文案 <textarea id="dailyDutyTemplate" placeholder="今日在岗人员&#10;监控班：早班：{early}，中班：{middle}，晚班：{night}&#10;驾驶员：大车：{big_drivers} 小车：{small_drivers}&#10;备勤人员：{standby}&#10;今日下午休息：{afternoon_rest}&#10;正在休息：{resting}&#10;今日下午到岗：{afternoon_return}"></textarea></label>
+                <label>今日在岗提醒文案 <textarea id="dailyDutyTemplate" placeholder="今日在岗人员&#10;监控班：今日早班：{early}，明日早班：{tomorrow_early}，中班：{middle}，晚班：{night}&#10;驾驶员：大车：{big_drivers} 小车：{small_drivers}&#10;备勤人员：{standby}&#10;今日下午休息：{afternoon_rest}&#10;正在休息：{resting}&#10;今日下午到岗：{afternoon_return}"></textarea></label>
                 <div class="settings-actions">
                   <input id="dailyDutyPreviewDate" type="date" />
                   <button class="primary" id="saveDailyDutyBtn">保存今日在岗配置</button>
@@ -1846,6 +1951,8 @@
       lightAgentRooms: [],
       lightAgentMembers: [],
       lightAgentWechatStatusTimer: null,
+      featureChannelConfig: null,
+      featureChannelRooms: [],
       todayReminderEvents: [],
       todayReminderGroupStatuses: [],
       todayReminderDate: "",
@@ -3121,13 +3228,80 @@
 
     function renderLightAgentRooms() {
       const select = $("lightAgentRoomSelect");
-      if (!select) return;
+      const featureSelect = $("featureChannelRoomSelect");
+      if (!select) {
+        if (featureSelect) renderFeatureChannelRooms();
+        return;
+      }
       const current = $("lightAgentTarget").value.trim();
       select.innerHTML = `<option value="">请选择微信群</option>` + (state.lightAgentRooms || []).map((room) => {
         const id = String(room.id || room.stable_room_id || room.runtime_room_id || "").trim();
         const name = String(room.name || id).trim();
         return `<option value="${escapeHtml(id)}" data-room-name="${escapeHtml(name)}" ${id && id === current ? "selected" : ""}>${escapeHtml(name)} · ${escapeHtml(id)}</option>`;
       }).join("");
+    }
+
+    function renderFeatureChannelRooms() {
+      const select = $("featureChannelRoomSelect");
+      if (!select) return;
+      const current = $("featureChannelRoomId").value.trim();
+      select.innerHTML = `<option value="">请选择功能微信群</option>` + (state.lightAgentRooms || []).map((room) => {
+        const id = String(room.id || room.stable_room_id || room.runtime_room_id || "").trim();
+        const name = String(room.name || id).trim();
+        return `<option value="${escapeHtml(id)}" data-room-name="${escapeHtml(name)}" ${id && id === current ? "selected" : ""}>${escapeHtml(name)} · ${escapeHtml(id)}</option>`;
+      }).join("");
+    }
+
+    function normalizeFeatureChannelRooms(rooms) {
+      const seen = new Set();
+      const result = [];
+      (rooms || []).forEach((room) => {
+        const id = String((room && (room.id || room.room_id || room.stable_room_id || room.wechat_group_room_id)) || "").trim();
+        if (!id || seen.has(id)) return;
+        seen.add(id);
+        result.push({
+          id,
+          name: String((room && (room.name || room.room_name || room.wechat_group_room_name)) || "").trim()
+        });
+      });
+      return result;
+    }
+
+    function renderFeatureChannelRoomList() {
+      const box = $("featureChannelRoomList");
+      if (!box) return;
+      const rooms = normalizeFeatureChannelRooms(state.featureChannelRooms || []);
+      state.featureChannelRooms = rooms;
+      box.innerHTML = rooms.map((room) => {
+        const label = room.name || room.id;
+        return `<div class="item">
+          <strong>${escapeHtml(label)}</strong>
+          <small>${escapeHtml(room.id)}</small>
+          <button type="button" data-remove-feature-room="${escapeHtml(room.id)}">移除</button>
+        </div>`;
+      }).join("") || `<div class="item"><small>还没有添加功能微信群</small></div>`;
+      box.querySelectorAll("[data-remove-feature-room]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const id = String(button.dataset.removeFeatureRoom || "").trim();
+          state.featureChannelRooms = normalizeFeatureChannelRooms(state.featureChannelRooms || []).filter((room) => room.id !== id);
+          renderFeatureChannelRoomList();
+        });
+      });
+    }
+
+    function addFeatureChannelRoomFromInputs() {
+      const option = $("featureChannelRoomSelect").selectedOptions[0];
+      const id = $("featureChannelRoomId").value.trim() || (option ? String(option.value || "").trim() : "");
+      const name = $("featureChannelRoomName").value.trim() || (option ? String(option.dataset.roomName || "").trim() : "");
+      if (!id) {
+        $("featureChannelStatus").textContent = "请先选择或输入功能群 ID";
+        $("featureChannelStatus").className = "status error";
+        return;
+      }
+      state.featureChannelRooms = normalizeFeatureChannelRooms([...(state.featureChannelRooms || []), { id, name }]);
+      renderFeatureChannelRoomList();
+      $("featureChannelStatus").textContent = `已添加功能群：${name || id}`;
+      $("featureChannelStatus").className = "status ok";
     }
 
     function renderLightAgentMembers() {
@@ -3239,6 +3413,7 @@
         $("lightAgentTarget").value = String(state.lightAgentRooms[0].id || state.lightAgentRooms[0].stable_room_id || "").trim();
       }
       renderLightAgentRooms();
+      renderFeatureChannelRooms();
       $("lightAgentWechatStatus").textContent = state.lightAgentRooms.length ? `已同步 ${state.lightAgentRooms.length} 个群聊` : "未读取到群聊，请先扫码登录微信";
       $("lightAgentWechatStatus").className = `status ${state.lightAgentRooms.length ? "ok" : ""}`;
     }
@@ -3405,8 +3580,12 @@
           <section class="saved-duty-card monitor">
             <h4>监控班</h4>
             <div class="saved-duty-item">
-              <strong>早班</strong>
+              <strong>今日早班</strong>
               <div class="saved-duty-list">${renderDutyChipList(details.early)}</div>
+            </div>
+            <div class="saved-duty-item">
+              <strong>明日早班</strong>
+              <div class="saved-duty-list">${renderDutyChipList(details.tomorrow_early)}</div>
             </div>
             <div class="saved-duty-item">
               <strong>中班</strong>
@@ -3590,6 +3769,110 @@
         }).catch(() => null);
       }
     }
+
+    function featureChannelPayload() {
+      const roomOption = $("featureChannelRoomSelect").selectedOptions[0];
+      const rooms = normalizeFeatureChannelRooms(state.featureChannelRooms || []);
+      const primaryRoom = rooms[0] || {
+        id: $("featureChannelRoomId").value.trim(),
+        name: $("featureChannelRoomName").value.trim() || (roomOption ? String(roomOption.dataset.roomName || "").trim() : "")
+      };
+      return {
+        enabled: $("featureChannelEnabled").checked,
+        lightagent_web_url: $("featureLightAgentWebUrl").value.trim(),
+        lightagent_web_password: $("featureLightAgentWebPassword").value,
+        wechat_group_room_id: String(primaryRoom.id || "").trim(),
+        wechat_group_room_name: String(primaryRoom.name || "").trim(),
+        wechat_group_rooms: rooms,
+        allow_tunnel_mechanical: $("featureAllowTunnelMechanical").checked,
+        allow_duty_query: $("featureAllowDutyQuery").checked,
+        allow_roster_import: $("featureAllowRosterImport").checked
+      };
+    }
+
+    async function saveFeatureChannelConfig(showStatus = true) {
+      if (showStatus) $("featureChannelStatus").textContent = "正在保存功能通道...";
+      const response = await fetch("/api/feature-channel-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(featureChannelPayload())
+      });
+      const body = await response.json();
+      if (!response.ok || !body.success) throw new Error(body.detail || "保存功能通道失败");
+      state.featureChannelConfig = body.config || {};
+      renderFeatureChannelConfig(state.featureChannelConfig);
+      if (showStatus) {
+        $("featureChannelStatus").textContent = "功能通道已保存";
+        $("featureChannelStatus").className = "status ok";
+      }
+      return true;
+    }
+
+    function renderFeatureChannelConfig(config) {
+      config = config || {};
+      $("featureChannelEnabled").checked = config.enabled !== false;
+      $("featureLightAgentWebUrl").value = config.lightagent_web_url || "";
+      $("featureLightAgentWebPassword").value = "";
+      $("featureLightAgentWebPassword").placeholder = config.lightagent_web_password_configured ? "已配置，如需修改请输入新密码" : "未配置";
+      state.featureChannelRooms = normalizeFeatureChannelRooms(config.wechat_group_rooms || (config.wechat_group_room_id ? [{ id: config.wechat_group_room_id, name: config.wechat_group_room_name || "" }] : []));
+      const primaryRoom = state.featureChannelRooms[0] || {};
+      $("featureChannelRoomId").value = primaryRoom.id || "";
+      $("featureChannelRoomName").value = primaryRoom.name || "";
+      $("featureAllowTunnelMechanical").checked = config.allow_tunnel_mechanical !== false;
+      $("featureAllowDutyQuery").checked = config.allow_duty_query !== false;
+      $("featureAllowRosterImport").checked = config.allow_roster_import !== false;
+      renderFeatureChannelRooms();
+      const selected = $("featureChannelRoomSelect").selectedOptions[0];
+      if (selected && !primaryRoom.name) {
+        $("featureChannelRoomName").value = String(selected.dataset.roomName || "").trim();
+      }
+      renderFeatureChannelRoomList();
+    }
+
+    async function loadFeatureChannelConfig() {
+      const response = await fetch("/api/feature-channel-config");
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.detail || "读取功能通道失败");
+      state.featureChannelConfig = body.config || {};
+      renderFeatureChannelConfig(state.featureChannelConfig);
+    }
+
+    $("featureChannelRoomSelect").addEventListener("change", () => {
+      const option = $("featureChannelRoomSelect").selectedOptions[0];
+      $("featureChannelRoomId").value = option ? String(option.value || "").trim() : "";
+      $("featureChannelRoomName").value = option ? String(option.dataset.roomName || "").trim() : "";
+    });
+    $("addFeatureChannelRoomBtn").addEventListener("click", addFeatureChannelRoomFromInputs);
+    $("refreshFeatureWechatRoomsBtn").addEventListener("click", async () => {
+      try {
+        await saveFeatureChannelConfig(false);
+        await loadLightAgentRooms(true);
+        $("featureChannelStatus").textContent = `已同步 ${state.lightAgentRooms.length} 个微信群`;
+        $("featureChannelStatus").className = `status ${state.lightAgentRooms.length ? "ok" : ""}`;
+      } catch (error) {
+        $("featureChannelStatus").textContent = `同步微信群失败：${error.message || error}`;
+        $("featureChannelStatus").className = "status error";
+      }
+    });
+    $("saveFeatureChannelBtn").addEventListener("click", async () => {
+      try { await saveFeatureChannelConfig(true); } catch (error) {
+        $("featureChannelStatus").textContent = `保存功能通道失败：${error.message || error}`;
+        $("featureChannelStatus").className = "status error";
+      }
+    });
+    $("testFeatureChannelBtn").addEventListener("click", async () => {
+      try {
+        await saveFeatureChannelConfig(false);
+        const response = await fetch("/api/feature-channel-config/test", { method: "POST" });
+        const body = await response.json();
+        if (!response.ok || !body.success) throw new Error(body.detail || "测试失败");
+        $("featureChannelStatus").textContent = body.result && body.result.reply ? `测试完成：${body.result.reply}` : "功能通道测试完成";
+        $("featureChannelStatus").className = "status ok";
+      } catch (error) {
+        $("featureChannelStatus").textContent = `功能通道测试失败：${error.message || error}`;
+        $("featureChannelStatus").className = "status error";
+      }
+    });
 
     function patrolWarningPayload() {
       const mentionTarget = $("patrolMentionTarget").value.trim() || "@所有人";
@@ -4288,7 +4571,13 @@
           $("tunnelMechanicalCaptchaImg").src = `data:image/jpeg;base64,${body.img}`;
           $("tunnelMechanicalCaptchaImg").style.display = "block";
         }
-        setTunnelMechanicalLoginState(body.captcha_enabled ? "请输入验证码后测试登录" : "平台未要求验证码，可直接测试登录", "ok");
+        if (body.code) $("tunnelMechanicalCaptchaCode").value = body.code;
+        setTunnelMechanicalLoginState(
+          body.captcha_enabled
+            ? (body.code ? `已自动计算验证码：${body.code}，可直接测试登录` : "请输入验证码后测试登录")
+            : "平台未要求验证码，可直接测试登录",
+          "ok"
+        );
       } catch (error) {
         setTunnelMechanicalLoginState(`获取验证码失败：${error.message || error}`, "error");
       }
@@ -4486,6 +4775,32 @@
         : "";
     }
 
+    function openTunnelMechanicalResultDateModal() {
+      $("tunnelMechanicalResultDateStatus").textContent = "";
+      $("tunnelMechanicalResultDateStatus").className = "status";
+      $("tunnelMechanicalResultDateInput").value = beijingDateInputValue();
+      $("tunnelMechanicalResultDateModal").hidden = false;
+      setTimeout(() => $("tunnelMechanicalResultDateInput").focus(), 0);
+    }
+
+    function closeTunnelMechanicalResultDateModal() {
+      $("tunnelMechanicalResultDateModal").hidden = true;
+      $("tunnelMechanicalResultDateStatus").textContent = "";
+      $("tunnelMechanicalResultDateStatus").className = "status";
+    }
+
+    async function confirmTunnelMechanicalResultDateQuery() {
+      const selectedDate = $("tunnelMechanicalResultDateInput").value;
+      if (!selectedDate) {
+        $("tunnelMechanicalResultDateStatus").textContent = "请选择查询日期";
+        $("tunnelMechanicalResultDateStatus").className = "status error";
+        $("tunnelMechanicalResultDateInput").focus();
+        return;
+      }
+      closeTunnelMechanicalResultDateModal();
+      await queryTunnelMechanicalResultImage(selectedDate);
+    }
+
     async function submitTunnelMechanical(dryRun) {
       applyTunnelMechanicalBatchDefaults();
       const payload = tunnelMechanicalPayload(dryRun);
@@ -4512,15 +4827,16 @@
       }
     }
 
-    async function queryTunnelMechanicalResultImage() {
+    async function queryTunnelMechanicalResultImage(queryDate) {
       applyTunnelMechanicalBatchDefaults();
       const payload = tunnelMechanicalPayload(false);
+      payload.checkTime = queryDate || beijingDateInputValue();
       const selectedCount = payload.rows.filter((row) => row.enabled).length;
       if (!selectedCount) {
         setTunnelMechanicalStatus("请至少选择一条隧道记录", "error");
         return;
       }
-      setTunnelMechanicalStatus("正在查询录入结果并生成图片...");
+      setTunnelMechanicalStatus(`正在查询 ${payload.checkTime} 的录入结果并生成图片...`);
       try {
         const response = await fetch("/api/tunnel-mechanical/result-image", {
           method: "POST",
@@ -4543,7 +4859,17 @@
     });
     $("loadTunnelMechanicalBtn").addEventListener("click", () => loadTunnelMechanicalTemplates(true));
     $("previewTunnelMechanicalBtn").addEventListener("click", () => submitTunnelMechanical(true));
-    $("queryTunnelMechanicalResultBtn").addEventListener("click", queryTunnelMechanicalResultImage);
+    $("queryTunnelMechanicalResultBtn").addEventListener("click", openTunnelMechanicalResultDateModal);
+    $("tunnelMechanicalResultDateConfirmBtn").addEventListener("click", confirmTunnelMechanicalResultDateQuery);
+    $("tunnelMechanicalResultDateCancelBtn").addEventListener("click", closeTunnelMechanicalResultDateModal);
+    $("tunnelMechanicalResultDateCloseBtn").addEventListener("click", closeTunnelMechanicalResultDateModal);
+    $("tunnelMechanicalResultDateModal").addEventListener("click", (event) => {
+      if (event.target === $("tunnelMechanicalResultDateModal")) closeTunnelMechanicalResultDateModal();
+    });
+    $("tunnelMechanicalResultDateInput").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") confirmTunnelMechanicalResultDateQuery();
+      if (event.key === "Escape") closeTunnelMechanicalResultDateModal();
+    });
     $("submitTunnelMechanicalBtn").addEventListener("click", () => submitTunnelMechanical(false));
     $("saveTunnelMechanicalConfigBtn").addEventListener("click", async () => {
       try {
@@ -4610,6 +4936,7 @@
     loadSavedRosters();
     loadSavedDutyChart();
     loadNotificationConfig();
+    loadFeatureChannelConfig().catch(() => null);
     loadPatrolWarningConfig();
     loadTunnelMechanicalConfig();
     loadTunnelMechanicalTemplates();

@@ -1,4 +1,5 @@
 import asyncio
+import os
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from urllib.parse import quote
@@ -92,9 +93,21 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'id="importTunnelMechanicalTemplateBtn"' in html
     assert 'id="tunnelMechanicalTemplateFile"' in html
     assert 'id="queryTunnelMechanicalResultBtn"' in html
+    assert 'id="tunnelMechanicalResultDateModal"' in html
+    assert 'id="tunnelMechanicalResultDateInput" type="date"' in html
+    assert 'id="tunnelMechanicalResultDateConfirmBtn"' in html
+    assert '$("queryTunnelMechanicalResultBtn").addEventListener("click", openTunnelMechanicalResultDateModal);' in html
+    assert "async function queryTunnelMechanicalResultImage(queryDate)" in html
+    assert "payload.checkTime = queryDate || beijingDateInputValue();" in html
     assert 'id="loadTunnelMechanicalCaptchaBtn"' in html
     assert 'id="testTunnelMechanicalLoginBtn"' in html
     assert "tunnel-asset-card" in html
+    assert 'data-settings-target="featureChannelSettings"' in html
+    assert 'id="featureChannelSettings"' in html
+    assert 'id="featureChannelRoomSelect"' in html
+    assert 'id="addFeatureChannelRoomBtn"' in html
+    assert 'id="featureChannelRoomList"' in html
+    assert 'id="saveFeatureChannelBtn"' in html
     assert 'loadTunnelMechanicalTemplates' in html
     assert 'loadTunnelMechanicalConfig' in html
     assert "refreshPatrolWarningPanel" in html
@@ -105,6 +118,8 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert "right-column" in html
     assert "daily-duty-column" in html
     assert "patrol-warning-column" in html
+    assert "明日早班：{tomorrow_early}" in html
+    assert "details.tomorrow_early" in html
     assert "has-image" in html
     assert 'id="imageViewer"' in html
     assert "openImageViewer" in html
@@ -227,6 +242,114 @@ def test_tunnel_mechanical_config_preserves_password_and_hides_it(tmp_path):
     assert response.status_code == 200
     assert response.json()["config"]["password"] == ""
     assert repo.get_tunnel_mechanical_config()["password"] == "secret"
+
+
+def test_tunnel_mechanical_login_auto_solves_captcha(tmp_path, monkeypatch):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    repo: DutyRepository = app.state.repo
+    repo.save_tunnel_mechanical_config(
+        base_url="https://example.test",
+        username="station-user",
+        password="secret",
+    )
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def __init__(self, body):
+            self._body = body
+            self.text = ""
+
+        def json(self):
+            return self._body
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            self.cookies = main_module.httpx.Cookies()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url, headers=None):
+            captured["captcha_url"] = url
+            return FakeResponse({"code": 200, "captchaEnabled": True, "img": "encrypted-img", "uuid": "uuid-1"})
+
+        async def post(self, url, headers=None, json=None):
+            captured["login_url"] = url
+            captured["login_payload"] = json
+            return FakeResponse({"code": 200, "data": {"access_token": "token-1", "expires_in": 7200}})
+
+    monkeypatch.setattr(main_module.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(main_module, "_tunnel_mechanical_decrypt_text", lambda text: "captcha-image")
+    monkeypatch.setattr(main_module, "_solve_tunnel_mechanical_captcha", lambda image: "8")
+
+    state = asyncio.run(main_module._login_tunnel_mechanical(repo, repo.get_tunnel_mechanical_config()))
+
+    assert captured["captcha_url"] == "https://example.test/prod-api/code"
+    assert captured["login_url"] == "https://example.test/prod-api/auth/login"
+    assert captured["login_payload"]["code"] == "8"
+    assert captured["login_payload"]["uuid"] == "uuid-1"
+    assert state["access_token"] == "token-1"
+
+
+def test_tunnel_mechanical_login_retries_when_auto_captcha_is_wrong(tmp_path, monkeypatch):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    repo: DutyRepository = app.state.repo
+    repo.save_tunnel_mechanical_config(
+        base_url="https://example.test",
+        username="station-user",
+        password="secret",
+    )
+    calls = {"captcha": 0, "login": 0}
+
+    async def fake_captcha(base_url):
+        calls["captcha"] += 1
+        return {"success": True, "captcha_enabled": True, "code": f"code-{calls['captcha']}", "uuid": f"uuid-{calls['captcha']}"}
+
+    class FakeResponse:
+        status_code = 200
+
+        def __init__(self, body):
+            self._body = body
+            self.text = ""
+
+        def json(self):
+            return self._body
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            self.cookies = main_module.httpx.Cookies()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, headers=None, json=None):
+            calls["login"] += 1
+            if calls["login"] == 1:
+                assert json["code"] == "code-1"
+                return FakeResponse({"code": 500, "msg": "验证码错误"})
+            assert json["code"] == "code-2"
+            return FakeResponse({"code": 200, "data": {"access_token": "token-2", "expires_in": 7200}})
+
+    monkeypatch.setattr(main_module, "_fetch_tunnel_mechanical_captcha", fake_captcha)
+    monkeypatch.setattr(main_module.httpx, "AsyncClient", FakeAsyncClient)
+
+    state = asyncio.run(main_module._login_tunnel_mechanical(repo, repo.get_tunnel_mechanical_config()))
+
+    assert state["access_token"] == "token-2"
+    assert calls == {"captcha": 2, "login": 2}
+
+
+def test_tunnel_mechanical_captcha_text_solver_calculates_math():
+    assert main_module._solve_tunnel_mechanical_captcha_text("1*8=?") == "8"
+    assert main_module._solve_tunnel_mechanical_captcha_text("9 - 4 = ?") == "5"
 
 
 def test_tunnel_mechanical_submit_uses_cached_login_state(tmp_path, monkeypatch):
@@ -469,6 +592,93 @@ def test_tunnel_mechanical_result_image_endpoint_queries_without_submit(tmp_path
     assert calls == {"get": 1, "post": 0}
 
 
+def test_tunnel_mechanical_result_image_relogs_in_when_cached_token_expired(tmp_path, monkeypatch):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    repo: DutyRepository = app.state.repo
+    repo.save_tunnel_mechanical_config(base_url="https://example.test", username="station-user", password="secret")
+    repo.save_tunnel_mechanical_state(
+        access_token="expired-token",
+        cookie_header="sid=old",
+        token_expires_at=(datetime.now(main_module.TZ) + timedelta(hours=1)).isoformat(),
+    )
+    _import_tunnel_template(
+        client,
+        {**TEST_TUNNEL_TEMPLATE, "base_url": "https://example.test", "list_path": "/prod-api/patrol/deviceCheck/list"},
+    )
+    calls = {"list": 0, "captcha": 0, "login": 0}
+    seen_authorizations = []
+
+    class FakeResponse:
+        def __init__(self, body, status_code=200):
+            self._body = body
+            self.status_code = status_code
+            self.text = ""
+
+        def json(self):
+            return self._body
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            self.cookies = main_module.httpx.Cookies()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url, headers=None, params=None):
+            if url == "https://example.test/prod-api/code":
+                calls["captcha"] += 1
+                return FakeResponse({"code": 200, "captchaEnabled": False, "uuid": "uuid-1"})
+            assert url == "https://example.test/prod-api/patrol/deviceCheck/list"
+            calls["list"] += 1
+            seen_authorizations.append(headers.get("Authorization"))
+            if calls["list"] == 1:
+                return FakeResponse({"code": 401, "msg": "登录状态已过期"})
+            return FakeResponse(
+                {
+                    "code": 200,
+                    "rows": [
+                        {
+                            "assetName": "示例隧道上行",
+                            "checkTime": "2026-07-24",
+                            "result": 1,
+                        }
+                    ],
+                }
+            )
+
+        async def post(self, url, headers=None, json=None):
+            assert url == "https://example.test/prod-api/auth/login"
+            calls["login"] += 1
+            return FakeResponse({"code": 200, "data": {"access_token": "fresh-token", "expires_in": 7200}})
+
+    monkeypatch.setattr(main_module.httpx, "AsyncClient", FakeAsyncClient)
+    asset = client.get("/api/tunnel-mechanical/templates").json()["assets"][0]
+
+    response = client.post(
+        "/api/tunnel-mechanical/result-image",
+        json={
+            "base_url": "https://example.test",
+            "checkTime": "2026-07-24",
+            "weather": "晴",
+            "checkerId": "",
+            "checker": "",
+            "recorderId": "",
+            "recorder": "",
+            "dry_run": False,
+            "rows": [asset],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert calls == {"list": 2, "captcha": 1, "login": 1}
+    assert seen_authorizations == ["Bearer expired-token", "Bearer fresh-token"]
+
+
 def test_today_reminders_endpoint_returns_today_plan(tmp_path):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
@@ -696,6 +906,23 @@ def test_upload_rejects_non_image_and_oversized_file(tmp_path, monkeypatch):
 
     assert bad_type.status_code == 400
     assert too_large.status_code == 413
+
+
+def test_cleanup_old_uploads_removes_expired_files(tmp_path, monkeypatch):
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    expired = upload_dir / "expired.png"
+    fresh = upload_dir / "fresh.png"
+    expired.write_bytes(b"old")
+    fresh.write_bytes(b"new")
+    old_timestamp = (datetime.now(main_module.TZ) - timedelta(days=91)).timestamp()
+    os.utime(expired, (old_timestamp, old_timestamp))
+    monkeypatch.setattr(main_module, "UPLOAD_KEEP_DAYS", 90)
+
+    main_module._cleanup_old_uploads(upload_dir)
+
+    assert not expired.exists()
+    assert fresh.exists()
 
 
 def test_confirm_roster_and_preview_reminders(tmp_path):
@@ -1026,6 +1253,100 @@ def test_wechat_query_requires_token(tmp_path, monkeypatch):
     assert response.status_code == 401
 
 
+def test_feature_channel_config_hides_password_and_restricts_wechat_room(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    save_response = client.post(
+        "/api/feature-channel-config",
+        json={
+            "enabled": True,
+            "lightagent_web_url": "http://lightagent.test",
+            "lightagent_web_password": "secret",
+            "wechat_group_room_id": "wgr_feature",
+            "wechat_group_room_name": "功能群",
+            "wechat_group_rooms": [
+                {"id": "wgr_feature", "name": "功能群"},
+                {"id": "wgr_second", "name": "第二功能群"},
+            ],
+            "allow_tunnel_mechanical": True,
+            "allow_duty_query": True,
+            "allow_roster_import": True,
+        },
+    )
+    get_response = client.get("/api/feature-channel-config")
+    wrong_room = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "隧道机电", "stable_room_id": "wgr_other", "room_id": "room@@other"},
+    )
+    second_room = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "隧道机电", "stable_room_id": "wgr_second", "room_id": "room@@second"},
+    )
+
+    assert save_response.status_code == 200
+    config = get_response.json()["config"]
+    assert config["lightagent_web_url"] == "http://lightagent.test"
+    assert config["lightagent_web_password_configured"] is True
+    assert config["wechat_group_room_id"] == "wgr_feature"
+    assert [room["id"] for room in config["wechat_group_rooms"]] == ["wgr_feature", "wgr_second"]
+    assert second_room.status_code == 200
+    assert wrong_room.status_code == 403
+    assert "功能群" in wrong_room.json()["detail"]
+
+
+def test_feature_channel_can_disable_tunnel_mechanical_query(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/feature-channel-config",
+        json={
+            "enabled": True,
+            "wechat_group_room_id": "wgr_feature",
+            "allow_tunnel_mechanical": False,
+            "allow_duty_query": True,
+            "allow_roster_import": True,
+        },
+    )
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "隧道机电", "stable_room_id": "wgr_feature"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "该功能未在功能通道启用"
+
+
+def test_feature_channel_can_be_disabled(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/feature-channel-config",
+        json={
+            "enabled": False,
+            "wechat_group_room_id": "wgr_feature",
+            "allow_tunnel_mechanical": True,
+            "allow_duty_query": True,
+            "allow_roster_import": True,
+        },
+    )
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "闅ч亾鏈虹數", "stable_room_id": "wgr_feature"},
+    )
+
+    assert response.status_code == 403
+
+
 def test_wechat_query_help_returns_numbered_menu(tmp_path, monkeypatch):
     monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
@@ -1070,9 +1391,80 @@ def test_wechat_query_tunnel_mechanical_returns_fill_template(tmp_path, monkeypa
     body = response.json()
     assert body["success"] is True
     assert body["query_type"] == "tunnel_mechanical_template"
-    assert "隧道机电每日录入模板" in body["reply"]
+    assert "隧道机电功能" in body["reply"]
+    assert "查询今日机电" in body["reply"]
     assert "隧道机电录入 日期2026-07-23 负责人张三 记录人李四 天气晴" in body["reply"]
     assert "当前模板资产：1 条" in body["reply"]
+
+
+def test_wechat_query_tunnel_mechanical_accepts_bot_name_starting_with_at(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2026, 7, 23))
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    _import_tunnel_template(client)
+
+    async def fail_submit(repo, request, **kwargs):
+        raise AssertionError("template request must not submit")
+
+    monkeypatch.setattr(main_module, "_submit_tunnel_mechanical", fail_submit)
+
+    for text in ("@@\u2005隧道机电", "@@隧道机电\u2005隧道机电"):
+        response = client.post(
+            "/api/wechat-query",
+            headers={"X-Duty-Query-Token": "unit-token"},
+            json={"text": text},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["success"] is True
+        assert body["query_type"] == "tunnel_mechanical_template"
+        assert "隧道机电功能" in body["reply"]
+
+
+def test_wechat_query_tunnel_mechanical_result_sends_image(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2026, 7, 23))
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    _import_tunnel_template(client)
+    captured = []
+
+    async def fake_query(repo, request, uploads):
+        captured.append(request.checkTime.isoformat())
+        return {
+            "success": True,
+            "result_rows": [{"assetName": "示例隧道上行"}],
+            "result_image_url": f"/api/uploads/result-{request.checkTime.isoformat()}.png",
+        }
+
+    monkeypatch.setattr(main_module, "_query_tunnel_mechanical_result_image", fake_query)
+
+    today_response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "查询今日机电"},
+    )
+    date_response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "查询2026-07-22机电"},
+    )
+
+    assert today_response.status_code == 200
+    assert date_response.status_code == 200
+    today_body = today_response.json()
+    date_body = date_response.json()
+    assert today_body["success"] is True
+    assert today_body["query_type"] == "tunnel_mechanical_result"
+    assert today_body["checkTime"] == "2026-07-23"
+    assert today_body["image_url"] == "/api/uploads/result-2026-07-23.png"
+    assert today_body["image_full_url"] == "/api/uploads/result-2026-07-23.png"
+    assert "图片已发送" in today_body["reply"]
+    assert date_body["checkTime"] == "2026-07-22"
+    assert date_body["image_url"] == "/api/uploads/result-2026-07-22.png"
+    assert captured == ["2026-07-23", "2026-07-22"]
 
 
 def test_wechat_query_triggers_tunnel_mechanical_submit(tmp_path, monkeypatch):
@@ -1111,7 +1503,8 @@ def test_wechat_query_triggers_tunnel_mechanical_submit(tmp_path, monkeypatch):
     assert body["weather"] == "晴"
     assert body["count"] == 1
     assert body["image_url"] == "/api/uploads/result.png"
-    assert "查询结果图片：/api/uploads/result.png" in body["reply"]
+    assert body["image_full_url"] == "/api/uploads/result.png"
+    assert "/api/uploads/result.png" not in body["reply"]
     assert captured == {
         "checkTime": "2026-07-24",
         "checkerId": "1001",
@@ -2055,6 +2448,7 @@ def test_daily_duty_preview_summarizes_on_duty_people_and_drivers(tmp_path):
                 {"name": "示例壬", "days": {"16": "休", "17": ""}},
                 {"name": "示例戊", "days": {"16": "", "17": "休"}},
                 {"name": "示例癸", "days": {"16": "休", "17": "休", "18": ""}},
+                {"name": "示例辛", "days": {"17": "早"}},
             ],
         },
     )
@@ -2072,19 +2466,21 @@ def test_daily_duty_preview_summarizes_on_duty_people_and_drivers(tmp_path):
     names_response = client.get("/api/personnel")
 
     assert config_response.status_code == 200
-    assert names_response.json()["names"] == sorted(["示例甲", "示例乙", "示例丙", "示例丁", "示例戊", "示例己", "示例庚", "示例癸", "示例壬"])
+    assert names_response.json()["names"] == sorted(["示例甲", "示例乙", "示例丙", "示例丁", "示例戊", "示例己", "示例庚", "示例癸", "示例壬", "示例辛"])
     assert preview_response.status_code == 200
     body = preview_response.json()
     assert body["send_at"] == "2025-09-16T07:20:00+08:00"
     assert body["content"] == (
         "今日在岗人员\n"
-        "监控班：早班：示例丁，中班：示例己，晚班：示例甲\n"
+        "监控班：今日早班：示例丁，明日早班：示例辛，中班：示例己，晚班：示例甲\n"
         "驾驶员：大车：示例庚 小车：示例丙\n"
         "备勤人员：示例乙\n"
         "今日下午休息：示例戊\n"
         "正在休息：示例癸\n"
         "今日下午到岗：示例壬"
     )
+    assert body["details"]["early"] == "示例丁"
+    assert body["details"]["tomorrow_early"] == "示例辛"
     assert body["details"]["afternoon_rest"] == "示例戊"
     assert body["details"]["resting"] == "示例癸"
     assert body["details"]["afternoon_return"] == "示例壬"

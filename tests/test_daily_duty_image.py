@@ -1,3 +1,7 @@
+from io import BytesIO
+
+from PIL import Image
+
 from app.daily_duty_image import _font, _text_width, _wrap_text, render_daily_duty_image
 
 
@@ -17,6 +21,7 @@ def test_daily_duty_image_renders_long_standby_names():
             "send_at": "2026-07-22T07:50:00+08:00",
             "details": {
                 "early": "示例甲",
+                "tomorrow_early": "示例子",
                 "middle": "示例乙",
                 "night": "示例丙",
                 "big_drivers": "示例乙，示例丁",
@@ -30,3 +35,5 @@ def test_daily_duty_image_renders_long_standby_names():
     )
 
     assert image_bytes.startswith(b"\x89PNG")
+    image = Image.open(BytesIO(image_bytes)).convert("RGB")
+    assert image.getpixel((50, 24)) == (15, 63, 58)

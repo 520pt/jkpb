@@ -89,7 +89,7 @@ class DutyReminderQuery(Plugin):
         self.roster_import_endpoint = os.environ.get("DUTY_REMINDER_ROSTER_IMPORT_URL", "http://duty-reminder:8080/api/wechat-roster/import").strip()
         self.roster_confirm_endpoint = os.environ.get("DUTY_REMINDER_ROSTER_CONFIRM_URL", "http://duty-reminder:8080/api/wechat-roster/confirm").strip()
         self.token = os.environ.get("DUTY_REMINDER_QUERY_TOKEN", "520pt").strip()
-        self.timeout = float(os.environ.get("DUTY_REMINDER_QUERY_TIMEOUT", "8") or 8)
+        self.timeout = float(os.environ.get("DUTY_REMINDER_QUERY_TIMEOUT", "30") or 30)
         self.menu_ttl = int(os.environ.get("DUTY_REMINDER_QUERY_MENU_TTL", "180") or 180)
         self.roster_ttl = int(os.environ.get("DUTY_REMINDER_ROSTER_IMPORT_TTL", "300") or 300)
         self.menu_sessions = {}
@@ -113,7 +113,6 @@ class DutyReminderQuery(Plugin):
         text = self._clean_text(context.get("wechat_group_user_content") or context.content)
         if not text:
             return
-        is_at = getattr(msg, "is_at", False) is True
         session_key = self._session_key(context, msg)
         menu_selection = self._normalize_menu_selection(text)
 
@@ -141,7 +140,11 @@ class DutyReminderQuery(Plugin):
             e_context.action = EventAction.BREAK_PASS
             return
 
-        if not is_at:
+        if (
+            getattr(msg, "is_at", False) is not True
+            and context.get("wechat_group_visible_at") is not True
+            and not self._has_visible_wechat_mention(context.get("wechat_group_user_content") or context.content)
+        ):
             return
 
         if self._is_roster_import_start(text):
@@ -221,11 +224,11 @@ class DutyReminderQuery(Plugin):
         if not self._has_active_roster_session(session_key):
             return
         image_path = str(context.content or getattr(msg, "media_path", "") or "").strip()
-        reply_text = self._import_roster_image(session_key, image_path)
+        reply_text = self._import_roster_image(session_key, image_path, context)
         e_context["reply"] = Reply(ReplyType.TEXT, reply_text)
         e_context.action = EventAction.BREAK_PASS
 
-    def _import_roster_image(self, session_key: str, image_path: str) -> str:
+    def _import_roster_image(self, session_key: str, image_path: str, context=None) -> str:
         if not self.roster_import_endpoint:
             return "排班表导入未配置：缺少 DUTY_REMINDER_ROSTER_IMPORT_URL"
         if not image_path or not os.path.exists(image_path):
@@ -236,7 +239,17 @@ class DutyReminderQuery(Plugin):
         try:
             with open(image_path, "rb") as handle:
                 files = {"file": (os.path.basename(image_path) or "roster.png", handle, self._image_content_type(image_path))}
-                response = requests.post(self.roster_import_endpoint, files=files, data={"overwrite": "false"}, headers=headers, timeout=max(self.timeout, 30))
+                response = requests.post(
+                    self.roster_import_endpoint,
+                    files=files,
+                    data={
+                        "overwrite": "false",
+                        "room_id": str((context or {}).get("wechat_group_runtime_room_id") or ""),
+                        "stable_room_id": str((context or {}).get("wechat_group_stable_room_id") or ""),
+                    },
+                    headers=headers,
+                    timeout=max(self.timeout, 30),
+                )
             data = response.json() if response.content else {}
             if response.status_code >= 400:
                 return "排班表导入失败：{}".format(data.get("detail") or response.status_code)
@@ -249,6 +262,8 @@ class DutyReminderQuery(Plugin):
                         "source_image_path": data.get("source_image_path") or "",
                         "grid": data.get("grid") or [],
                         "overwrite": True,
+                        "room_id": str((context or {}).get("wechat_group_runtime_room_id") or ""),
+                        "stable_room_id": str((context or {}).get("wechat_group_stable_room_id") or ""),
                     },
                 }
                 self._store_roster_session(session_key)
@@ -351,8 +366,37 @@ class DutyReminderQuery(Plugin):
 
     @staticmethod
     def _clean_text(text: str) -> str:
-        value = re.sub(r"@\S+", "", str(text or ""))
+        value = DutyReminderQuery._strip_leading_wechat_mentions(str(text or ""))
         return re.sub(r"\s+", "", value).strip("，,。.!！?？：:、；;")
+
+    @staticmethod
+    def _strip_leading_wechat_mentions(text: str) -> str:
+        value = str(text or "").strip()
+        mention_separator = r"[\s\u2005\u2006\u2007\u2008\u2009\u200a]+"
+        for _ in range(5):
+            empty_name = re.match(rf"^@{{2,}}{mention_separator}(?P<rest>.*)$", value, re.DOTALL)
+            if empty_name:
+                value = str(empty_name.group("rest") or "").strip()
+                continue
+            match = re.match(rf"^@(?P<name>.*?){mention_separator}(?P<rest>.*)$", value, re.DOTALL)
+            if not match:
+                break
+            name = str(match.group("name") or "").strip()
+            if not name:
+                break
+            value = str(match.group("rest") or "").strip()
+        return value
+
+    @staticmethod
+    def _has_visible_wechat_mention(text: str) -> bool:
+        value = str(text or "").strip()
+        if not value.startswith("@"):
+            return False
+        mention_separator = r"[\s\u2005\u2006\u2007\u2008\u2009\u200a]+"
+        return bool(
+            re.match(rf"^@{{2,}}{mention_separator}.+", value, re.DOTALL)
+            or re.match(rf"^@.+?{mention_separator}.+", value, re.DOTALL)
+        )
 
     @classmethod
     def _normalize_menu_selection(cls, text: str) -> str:
@@ -450,9 +494,17 @@ class DutyReminderQuery(Plugin):
             "查询帮助",
             "监控帮助",
             "提醒帮助",
+            "隧道机电",
+            "查询今日机电",
+            "查询今天机电",
+            "机电日常检查",
         }:
             return True
         if "帮助" in text and any(keyword in text for keyword in ("查询", "监控", "提醒", "绑定")):
+            return True
+        if "隧道机电" in text or "机电日常检查" in text:
+            return True
+        if "机电" in text and any(keyword in text for keyword in ("查询", "查", "今日", "今天", "昨日", "昨天", "明日", "明天")):
             return True
         if re.search(r"\d{4}-\d{1,2}-\d{1,2}|\d{1,2}月\d{1,2}[日号]?|\d{1,2}/\d{1,2}", text):
             return any(keyword in text for keyword in ("查询", "监控", "排班", "提醒", "值班", "什么班", "上班吗"))
@@ -625,6 +677,287 @@ def _write_push_image_file(image):
 
 group_path = Path("/app/channel/wechat_group/wechat_group_channel.py")
 group_text = group_path.read_text(encoding="utf-8")
+if "_handle_duty_reminder_fast_path" not in group_text:
+    if "\nimport os\n" not in group_text:
+        group_text = group_text.replace("\nimport re\n", "\nimport os\nimport re\n", 1)
+    if "from urllib.parse import urljoin, urlparse" not in group_text:
+        group_text = group_text.replace(
+            "from pathlib import Path\n",
+            "from pathlib import Path\nfrom urllib.parse import urljoin, urlparse\n\nimport requests\n",
+            1,
+        )
+    group_text = group_text.replace(
+        '        is_pat_self = getattr(msg, "is_pat_self", False) is True\n'
+        '        direct_reply = (\n'
+        '            getattr(msg, "is_at", False) is True\n'
+        '            or getattr(msg, "is_quote_self", False) is True\n'
+        '            or is_pat_self\n'
+        '        )\n',
+        '        is_pat_self = getattr(msg, "is_pat_self", False) is True\n'
+        '        visible_at_content = self._visible_bot_mention_content(msg)\n'
+        '        visible_at = visible_at_content is not None\n'
+        '        direct_reply = (\n'
+        '            getattr(msg, "is_at", False) is True\n'
+        '            or getattr(msg, "is_quote_self", False) is True\n'
+        '            or is_pat_self\n'
+        '            or visible_at\n'
+        '        )\n',
+        1,
+    )
+    group_text = group_text.replace(
+        '        if self._should_suppress_at_during_free_reply_mute(msg):\n'
+        '            return\n'
+        '        if msg.ctype == ContextType.IMAGE:\n',
+        '        if self._should_suppress_at_during_free_reply_mute(msg):\n'
+        '            return\n'
+        '        if direct_reply and msg.ctype == ContextType.TEXT:\n'
+        '            if self._handle_duty_reminder_fast_path(msg, visible_at_content):\n'
+        '                return\n'
+        '        if msg.ctype == ContextType.IMAGE:\n',
+        1,
+    )
+    group_text = group_text.replace(
+        '        trigger_source = "quote_self" if is_quote_self else ("pat_self" if is_pat_self else ("direct_reply" if direct_reply else ""))\n'
+        '        context = self._compose_context(\n'
+        '            msg.ctype,\n'
+        '            msg.content,\n'
+        '            isgroup=True,\n'
+        '            msg=msg,\n'
+        '            wechat_group_force_reply=force_reply,\n'
+        '            wechat_group_trigger_source=trigger_source,\n'
+        '        )\n',
+        '        trigger_source = "quote_self" if is_quote_self else ("pat_self" if is_pat_self else ("direct_reply" if direct_reply else ""))\n'
+        '        content = visible_at_content if visible_at and msg.ctype == ContextType.TEXT else msg.content\n'
+        '        context = self._compose_context(\n'
+        '            msg.ctype,\n'
+        '            content,\n'
+        '            isgroup=True,\n'
+        '            msg=msg,\n'
+        '            wechat_group_force_reply=force_reply,\n'
+        '            wechat_group_visible_at=visible_at,\n'
+        '            wechat_group_trigger_source=trigger_source,\n'
+        '        )\n',
+        1,
+    )
+    group_text = group_text.replace(
+        '        context["wechat_group_user_content"] = context.content\n'
+        '        if kwargs.get("wechat_group_is_free_reply"):\n',
+        '        context["wechat_group_user_content"] = context.content\n'
+        '        if kwargs.get("wechat_group_visible_at"):\n'
+        '            context["wechat_group_visible_at"] = True\n'
+        '        if kwargs.get("wechat_group_is_free_reply"):\n',
+        1,
+    )
+    group_text = group_text.replace(
+        '    def _handle_free_reply_mute_command(self, msg: WechatGroupMessage) -> bool:\n',
+        r'''
+    def _handle_duty_reminder_fast_path(self, msg: WechatGroupMessage, visible_at_content) -> bool:
+        text = self._clean_duty_reminder_text(
+            visible_at_content
+            if visible_at_content is not None
+            else (getattr(msg, "text", None) or getattr(msg, "content", ""))
+        )
+        if not text or not self._looks_like_duty_reminder_text(text):
+            return False
+        endpoint = os.environ.get("DUTY_REMINDER_QUERY_URL", "http://duty-reminder:8080/api/wechat-query").strip()
+        token = os.environ.get("DUTY_REMINDER_QUERY_TOKEN", "520pt").strip()
+        timeout = float(os.environ.get("DUTY_REMINDER_QUERY_TIMEOUT", "30") or 30)
+        if not endpoint:
+            self.client.send_text(getattr(msg, "runtime_room_id", "") or msg.other_user_id, "监控查询未配置：缺少 DUTY_REMINDER_QUERY_URL")
+            return True
+        payload = {
+            "text": text,
+            "room_id": str(getattr(msg, "runtime_room_id", "") or getattr(msg, "other_user_id", "") or ""),
+            "stable_room_id": str(getattr(msg, "wechat_group_stable_room_id", "") or ""),
+            "sender_id": str(getattr(msg, "actual_user_id", "") or ""),
+            "runtime_sender_id": str(getattr(msg, "runtime_sender_id", "") or getattr(msg, "actual_user_id", "") or ""),
+            "stable_member_id": str(getattr(msg, "wechat_group_stable_member_id", "") or ""),
+            "sender_name": str(getattr(msg, "actual_user_nickname", "") or ""),
+        }
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["X-Duty-Query-Token"] = token
+        receiver = str(getattr(msg, "runtime_room_id", "") or getattr(msg, "other_user_id", "") or "")
+        image_path = ""
+        try:
+            logger.info(
+                '[wechat_group] duty-reminder fast path: room="{}" text="{}"'.format(
+                    _wechat_group_log_value(getattr(msg, "other_user_nickname", "") or receiver),
+                    _wechat_group_log_preview(text),
+                )
+            )
+            response = requests.post(endpoint, json=payload, headers=headers, timeout=timeout)
+            data = response.json() if response.content else {}
+            if response.status_code >= 400:
+                reply_text = "监控查询失败：{}".format(data.get("detail") or response.status_code)
+            else:
+                reply_text = str(data.get("reply") or "没有查询到结果")
+                try:
+                    image_path = self._download_duty_reminder_image(
+                        data.get("image_full_url") or data.get("image_url"),
+                        endpoint,
+                    )
+                except Exception as exc:
+                    logger.warning("[wechat_group] duty-reminder image download failed: %s", exc)
+        except Exception as exc:
+            logger.warning("[wechat_group] duty-reminder fast path failed: %s", exc)
+            reply_text = "监控查询失败：无法连接 duty-reminder"
+        self.client.send_text(receiver, reply_text)
+        logger.info(
+            '[wechat_group] duty-reminder fast path text sent: room="{}" chars={}'.format(
+                _wechat_group_log_value(receiver),
+                len(reply_text),
+            )
+        )
+        if image_path:
+            self.client.send_image(receiver, image_path)
+            logger.info(
+                '[wechat_group] duty-reminder fast path image sent: room="{}" path="{}"'.format(
+                    _wechat_group_log_value(receiver),
+                    _wechat_group_log_value(image_path),
+                )
+            )
+        return True
+
+    @staticmethod
+    def _download_duty_reminder_image(image_url, endpoint: str) -> str:
+        url_text = str(image_url or "").strip()
+        if not url_text:
+            return ""
+        if not url_text.startswith(("http://", "https://")):
+            url_text = urljoin(str(endpoint or ""), url_text)
+        parsed = urlparse(url_text)
+        suffix = Path(parsed.path).suffix.lower()
+        if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}:
+            suffix = ".png"
+        media_dir = Path(get_wechat_group_sidecar_memory_path()) / "media"
+        media_dir.mkdir(parents=True, exist_ok=True)
+        image_path = media_dir / "duty-reminder-result-{}{}".format(int(time.time() * 1000), suffix)
+        response = requests.get(url_text, timeout=15)
+        response.raise_for_status()
+        image_path.write_bytes(response.content)
+        return str(image_path)
+
+    @staticmethod
+    def _clean_duty_reminder_text(text: str) -> str:
+        value = str(text or "").strip()
+        mention_separator = r"[\s\u2005\u2006\u2007\u2008\u2009\u200a]+"
+        for _ in range(5):
+            empty_name = re.match(rf"^@{{2,}}{mention_separator}(?P<rest>.*)$", value, re.DOTALL)
+            if empty_name:
+                value = str(empty_name.group("rest") or "").strip()
+                continue
+            match = re.match(rf"^@(?P<name>.*?){mention_separator}(?P<rest>.*)$", value, re.DOTALL)
+            if not match:
+                break
+            value = str(match.group("rest") or "").strip()
+        return re.sub(r"\s+", "", value).strip("，。！？；：,.!?;:")
+
+    @staticmethod
+    def _looks_like_duty_reminder_text(text: str) -> bool:
+        if text in {
+            "帮助",
+            "查询帮助",
+            "监控帮助",
+            "提醒帮助",
+            "查询我的监控",
+            "查我的监控",
+            "我的监控",
+            "查询我的排班",
+            "我的排班",
+            "查询今日提醒",
+            "今日提醒",
+            "查询今天提醒",
+            "今天提醒",
+            "查询明日监控",
+            "明日监控",
+            "查询明天监控",
+            "明天监控",
+            "查询明日提醒",
+            "明日提醒",
+            "查询明天提醒",
+            "明天提醒",
+            "查询后天监控",
+            "后天监控",
+            "查询本周监控",
+            "本周监控",
+            "查询下周监控",
+            "下周监控",
+            "查询未来7天",
+            "未来7天",
+            "查询下次提醒",
+            "下次提醒",
+            "查询我的绑定",
+            "我的绑定",
+            "查我的绑定",
+            "绑定查询",
+            "隧道机电",
+            "查询今日机电",
+            "查询今天机电",
+            "机电日常检查",
+            "导入排班",
+            "排班导入",
+        }:
+            return True
+        if text.startswith(("隧道机电录入", "隧道机电预览")):
+            return True
+        if "隧道机电" in text or "机电日常检查" in text:
+            return True
+        if "机电" in text and any(keyword in text for keyword in ("查询", "查", "今日", "今天", "昨日", "昨天", "明日", "明天")):
+            return True
+        if "帮助" in text and any(keyword in text for keyword in ("查询", "监控", "提醒", "绑定")):
+            return True
+        if "我" in text and any(keyword in text for keyword in ("什么班", "上班吗", "值班", "监控", "排班", "提醒")):
+            return True
+        return "查询" in text and any(
+            keyword in text
+            for keyword in ("监控", "排班", "提醒", "绑定", "值班", "本周", "下周", "未来", "下次")
+        )
+
+    def _visible_bot_mention_content(self, msg: WechatGroupMessage):
+        if getattr(msg, "ctype", None) != ContextType.TEXT:
+            return None
+        if getattr(msg, "is_at", False) is True:
+            return None
+        text = _wechat_group_log_value(
+            getattr(msg, "text", None) or getattr(msg, "content", "")
+        ).strip()
+        if not text.startswith("@"):
+            return None
+        separator = r"[\s\u2005\u2006\u2007\u2008\u2009\u200a]+"
+        empty_name = re.match(rf"^@{{2,}}{separator}(?P<rest>.*)$", text, re.DOTALL)
+        if empty_name:
+            return str(empty_name.group("rest") or "").strip()
+        match = re.match(rf"^@(?P<name>.*?){separator}(?P<rest>.*)$", text, re.DOTALL)
+        if not match:
+            return None
+        name = self._normalize_visible_mention_name(match.group("name"))
+        if not name:
+            return None
+        bot_names = [
+            getattr(msg, "self_display_name", ""),
+            getattr(msg, "to_user_nickname", ""),
+            getattr(msg, "to_user_id", ""),
+            getattr(msg, "runtime_self_id", ""),
+            self.name,
+        ]
+        normalized_bot_names = {
+            self._normalize_visible_mention_name(value)
+            for value in bot_names
+            if self._normalize_visible_mention_name(value)
+        }
+        if name in normalized_bot_names:
+            return str(match.group("rest") or "").strip()
+        return None
+
+    @staticmethod
+    def _normalize_visible_mention_name(value) -> str:
+        return re.sub(r"\s+", "", str(value or "").strip().lstrip("@")).lower()
+
+    def _handle_free_reply_mute_command(self, msg: WechatGroupMessage) -> bool:
+'''.lstrip(),
+        1,
+    )
 if "wechat_group_roster_import_probe" not in group_text:
     group_text = group_text.replace(
         '        if msg.ctype == ContextType.IMAGE:\n'
@@ -646,6 +979,72 @@ if "wechat_group_roster_import_probe" not in group_text:
         '                    return\n',
     )
     group_path.write_text(group_text, encoding="utf-8")
+
+sidecar_core_path = Path("/app/channel/wechat_group/sidecar/wechaty-sidecar-core.mjs")
+sidecar_core_text = sidecar_core_path.read_text(encoding="utf-8")
+sidecar_core_original = sidecar_core_text
+if "function shouldRefreshRoomMemberPayload" not in sidecar_core_text:
+    sidecar_core_text = sidecar_core_text.replace(
+        "\nexport function memberPayloadMatchesQuery(payload = {}, query = '') {\n",
+        r'''
+
+export function shouldRefreshRoomMemberPayload(payload = {}) {
+  const senderId = String(payload?.sender_id || '').trim()
+  const nickname = String(payload?.sender_nickname || '').trim()
+  const wechatId = String(payload?.wechat_id || '').trim()
+  if (!senderId) return false
+  if (!nickname || !wechatId) return true
+  if (nickname === senderId || nickname.replace(/^[@\uFF20]+/u, '') === senderId.replace(/^[@\uFF20]+/u, '')) {
+    return true
+  }
+  return looksLikeRawWechatInternalId(nickname)
+}
+'''.rstrip() + "\n\nexport function memberPayloadMatchesQuery(payload = {}, query = '') {\n",
+    )
+if "rawPayload?.DisplayName" not in sidecar_core_text:
+    sidecar_core_text = sidecar_core_text.replace(
+        "    rawPayload?.User?.NickName,\n",
+        "    rawPayload?.User?.NickName,\n"
+        "    rawPayload?.DisplayName,\n"
+        "    rawPayload?.RemarkName,\n"
+        "    rawPayload?.NickName,\n",
+    )
+if sidecar_core_text != sidecar_core_original:
+    sidecar_core_path.write_text(sidecar_core_text, encoding="utf-8")
+
+sidecar_path = Path("/app/channel/wechat_group/sidecar/wechaty-sidecar.mjs")
+sidecar_text = sidecar_path.read_text(encoding="utf-8")
+sidecar_original = sidecar_text
+if "shouldRefreshRoomMemberPayload" not in sidecar_text:
+    sidecar_text = sidecar_text.replace(
+        "  sendText as sendTextCore,\n} from './wechaty-sidecar-core.mjs'\n",
+        "  sendText as sendTextCore,\n  shouldRefreshRoomMemberPayload,\n} from './wechaty-sidecar-core.mjs'\n",
+    )
+    sidecar_text = sidecar_text.replace(
+        "    if (query && !memberPayloadMatchesQuery(payload, query)) {\n",
+        "    if (shouldRefreshRoomMemberPayload(payload) || (query && !memberPayloadMatchesQuery(payload, query))) {\n",
+    )
+if "async function roomMemberRawPayload" not in sidecar_text:
+    sidecar_text = sidecar_text.replace(
+        "\nasync function contactPayload(contact, room = null, rawPayload = null) {\n",
+        r'''
+
+async function roomMemberRawPayload(room, contact) {
+  try {
+    if (room?.id && contact?.id && typeof state.bot?.puppet?.roomMemberRawPayload === 'function') {
+      return await state.bot.puppet.roomMemberRawPayload(room.id, contact.id)
+    }
+  } catch {}
+  return null
+}
+'''.rstrip() + "\n\nasync function contactPayload(contact, room = null, rawPayload = null) {\n",
+    )
+    sidecar_text = sidecar_text.replace(
+        "      const rawPayload = await contactRawPayload(contact)\n",
+        "      const rawPayload = await roomMemberRawPayload(room, contact) || await contactRawPayload(contact)\n",
+    )
+if sidecar_text != sidecar_original:
+    sidecar_path.write_text(sidecar_text, encoding="utf-8")
 PY
 
 RUN cp config-template.json config.json \

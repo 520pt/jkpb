@@ -14,7 +14,7 @@ LEGACY_DAILY_DUTY_TEMPLATE = (
 )
 DEFAULT_DAILY_DUTY_TEMPLATE = (
     "今日在岗人员\n"
-    "监控班：早班：{early}，中班：{middle}，晚班：{night}\n"
+    "监控班：今日早班：{early}，明日早班：{tomorrow_early}，中班：{middle}，晚班：{night}\n"
     "驾驶员：大车：{big_drivers} 小车：{small_drivers}\n"
     "备勤人员：{standby}\n"
     "今日下午休息：{afternoon_rest}\n"
@@ -66,6 +66,40 @@ def _normalize_patrol_end_template(value: str) -> str:
     if not text or text == LEGACY_PATROL_WARNING_END_TEMPLATE:
         return DEFAULT_PATROL_WARNING_END_TEMPLATE
     return text
+
+
+def _loads_json(value: str, default: Any) -> Any:
+    try:
+        return json.loads(value) if str(value or "").strip() else default
+    except Exception:
+        return default
+
+
+def _normalize_feature_channel_rooms(rooms: Any) -> list[dict[str, str]]:
+    if not isinstance(rooms, list):
+        return []
+    normalized: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for room in rooms:
+        if not isinstance(room, dict):
+            continue
+        room_id = str(
+            room.get("id")
+            or room.get("room_id")
+            or room.get("stable_room_id")
+            or room.get("wechat_group_room_id")
+            or ""
+        ).strip()
+        if not room_id or room_id in seen:
+            continue
+        seen.add(room_id)
+        normalized.append(
+            {
+                "id": room_id,
+                "name": str(room.get("name") or room.get("room_name") or room.get("wechat_group_room_name") or "").strip(),
+            }
+        )
+    return normalized
 
 
 class DutyRepository:
@@ -122,6 +156,20 @@ class DutyRepository:
                     lightagent_token TEXT NOT NULL DEFAULT '',
                     lightagent_target TEXT NOT NULL DEFAULT '',
                     message_template TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS feature_channel_config (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    lightagent_web_url TEXT NOT NULL DEFAULT '',
+                    lightagent_web_password TEXT NOT NULL DEFAULT '',
+                    wechat_group_room_id TEXT NOT NULL DEFAULT '',
+                    wechat_group_room_name TEXT NOT NULL DEFAULT '',
+                    wechat_group_rooms_json TEXT NOT NULL DEFAULT '[]',
+                    allow_tunnel_mechanical INTEGER NOT NULL DEFAULT 1,
+                    allow_duty_query INTEGER NOT NULL DEFAULT 1,
+                    allow_roster_import INTEGER NOT NULL DEFAULT 1,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -258,6 +306,20 @@ class DutyRepository:
                 conn.execute("ALTER TABLE notification_config ADD COLUMN lightagent_token TEXT NOT NULL DEFAULT ''")
             if "lightagent_target" not in config_columns:
                 conn.execute("ALTER TABLE notification_config ADD COLUMN lightagent_target TEXT NOT NULL DEFAULT ''")
+            feature_columns = {row["name"] for row in conn.execute("PRAGMA table_info(feature_channel_config)").fetchall()}
+            for column, definition in {
+                "enabled": "INTEGER NOT NULL DEFAULT 1",
+                "lightagent_web_url": "TEXT NOT NULL DEFAULT ''",
+                "lightagent_web_password": "TEXT NOT NULL DEFAULT ''",
+                "wechat_group_room_id": "TEXT NOT NULL DEFAULT ''",
+                "wechat_group_room_name": "TEXT NOT NULL DEFAULT ''",
+                "wechat_group_rooms_json": "TEXT NOT NULL DEFAULT '[]'",
+                "allow_tunnel_mechanical": "INTEGER NOT NULL DEFAULT 1",
+                "allow_duty_query": "INTEGER NOT NULL DEFAULT 1",
+                "allow_roster_import": "INTEGER NOT NULL DEFAULT 1",
+            }.items():
+                if column not in feature_columns:
+                    conn.execute(f"ALTER TABLE feature_channel_config ADD COLUMN {column} {definition}")
             personnel_columns = {row["name"] for row in conn.execute("PRAGMA table_info(personnel_names)").fetchall()}
             if "mention_mobile" not in personnel_columns:
                 conn.execute("ALTER TABLE personnel_names ADD COLUMN mention_mobile TEXT NOT NULL DEFAULT ''")
@@ -814,6 +876,106 @@ class DutyRepository:
             "message_template": row["message_template"] or DEFAULT_MESSAGE_TEMPLATE,
         }
 
+    def save_feature_channel_config(
+        self,
+        *,
+        enabled: bool = True,
+        lightagent_web_url: str = "",
+        lightagent_web_password: str = "",
+        wechat_group_room_id: str = "",
+        wechat_group_room_name: str = "",
+        wechat_group_rooms: list[dict[str, Any]] | None = None,
+        allow_tunnel_mechanical: bool = True,
+        allow_duty_query: bool = True,
+        allow_roster_import: bool = True,
+    ) -> None:
+        rooms = _normalize_feature_channel_rooms(wechat_group_rooms)
+        if not rooms and str(wechat_group_room_id or "").strip():
+            rooms = _normalize_feature_channel_rooms([
+                {
+                    "id": wechat_group_room_id,
+                    "name": wechat_group_room_name,
+                }
+            ])
+        primary_room = rooms[0] if rooms else {}
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO feature_channel_config
+                    (
+                        id, enabled, lightagent_web_url, lightagent_web_password,
+                        wechat_group_room_id, wechat_group_room_name, wechat_group_rooms_json,
+                        allow_tunnel_mechanical, allow_duty_query, allow_roster_import
+                    )
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    enabled = excluded.enabled,
+                    lightagent_web_url = excluded.lightagent_web_url,
+                    lightagent_web_password = excluded.lightagent_web_password,
+                    wechat_group_room_id = excluded.wechat_group_room_id,
+                    wechat_group_room_name = excluded.wechat_group_room_name,
+                    wechat_group_rooms_json = excluded.wechat_group_rooms_json,
+                    allow_tunnel_mechanical = excluded.allow_tunnel_mechanical,
+                    allow_duty_query = excluded.allow_duty_query,
+                    allow_roster_import = excluded.allow_roster_import,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    int(enabled),
+                    lightagent_web_url,
+                    lightagent_web_password,
+                    str(primary_room.get("id") or ""),
+                    str(primary_room.get("name") or ""),
+                    json.dumps(rooms, ensure_ascii=False),
+                    int(allow_tunnel_mechanical),
+                    int(allow_duty_query),
+                    int(allow_roster_import),
+                ),
+            )
+
+    def get_feature_channel_config(self) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT enabled, lightagent_web_url, lightagent_web_password,
+                       wechat_group_room_id, wechat_group_room_name, wechat_group_rooms_json,
+                       allow_tunnel_mechanical, allow_duty_query, allow_roster_import
+                FROM feature_channel_config
+                WHERE id = 1
+                """
+            ).fetchone()
+        if row is None:
+            return {
+                "enabled": True,
+                "lightagent_web_url": "",
+                "lightagent_web_password": "",
+                "wechat_group_room_id": "",
+                "wechat_group_room_name": "",
+                "wechat_group_rooms": [],
+                "allow_tunnel_mechanical": True,
+                "allow_duty_query": True,
+                "allow_roster_import": True,
+            }
+        rooms = _normalize_feature_channel_rooms(_loads_json(row["wechat_group_rooms_json"], []))
+        if not rooms and str(row["wechat_group_room_id"] or "").strip():
+            rooms = _normalize_feature_channel_rooms([
+                {
+                    "id": row["wechat_group_room_id"],
+                    "name": row["wechat_group_room_name"],
+                }
+            ])
+        return {
+            "enabled": bool(row["enabled"]),
+            "lightagent_web_url": row["lightagent_web_url"],
+            "lightagent_web_password": row["lightagent_web_password"],
+            "wechat_group_room_id": row["wechat_group_room_id"],
+            "wechat_group_room_name": row["wechat_group_room_name"],
+            "wechat_group_rooms": rooms,
+            "allow_tunnel_mechanical": bool(row["allow_tunnel_mechanical"]),
+            "allow_duty_query": bool(row["allow_duty_query"]),
+            "allow_roster_import": bool(row["allow_roster_import"]),
+        }
+
     def save_daily_duty_config(
         self,
         *,
@@ -1328,6 +1490,12 @@ def _normalize_daily_duty_template(value: str | None) -> str:
         "正在休息到：{resting_until}\n"
         "今日下午到岗：{afternoon_return}"
     )
-    if not template or template in {LEGACY_DAILY_DUTY_TEMPLATE, legacy_with_resting, legacy_with_rest_statuses}:
+    legacy_with_current_rest_statuses = (
+        LEGACY_DAILY_DUTY_TEMPLATE + "\n"
+        "今日下午休息：{afternoon_rest}\n"
+        "正在休息：{resting}\n"
+        "今日下午到岗：{afternoon_return}"
+    )
+    if not template or template in {LEGACY_DAILY_DUTY_TEMPLATE, legacy_with_resting, legacy_with_rest_statuses, legacy_with_current_rest_statuses}:
         return DEFAULT_DAILY_DUTY_TEMPLATE
     return template

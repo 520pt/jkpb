@@ -26,6 +26,7 @@ def test_initializes_sqlite_schema(tmp_path: Path):
         "roster_months",
         "monitored_people",
         "notification_config",
+        "feature_channel_config",
         "personnel_names",
         "custom_reminders",
         "daily_duty_config",
@@ -349,6 +350,40 @@ def test_saving_notification_config_replaces_existing_value(tmp_path: Path):
         "lightagent_token": "",
         "lightagent_target": "",
         "message_template": "new {name}",
+    }
+
+
+def test_feature_channel_config_roundtrip(tmp_path: Path):
+    repo = DutyRepository(tmp_path / "duty.db")
+
+    repo.save_feature_channel_config(
+        enabled=False,
+        lightagent_web_url="http://lightagent:9899",
+        lightagent_web_password="secret",
+        wechat_group_room_id="wgr_room",
+        wechat_group_room_name="功能群",
+        wechat_group_rooms=[
+            {"id": "wgr_room", "name": "功能群"},
+            {"id": "wgr_second", "name": "第二功能群"},
+        ],
+        allow_tunnel_mechanical=True,
+        allow_duty_query=False,
+        allow_roster_import=False,
+    )
+
+    assert repo.get_feature_channel_config() == {
+        "enabled": False,
+        "lightagent_web_url": "http://lightagent:9899",
+        "lightagent_web_password": "secret",
+        "wechat_group_room_id": "wgr_room",
+        "wechat_group_room_name": "功能群",
+        "wechat_group_rooms": [
+            {"id": "wgr_room", "name": "功能群"},
+            {"id": "wgr_second", "name": "第二功能群"},
+        ],
+        "allow_tunnel_mechanical": True,
+        "allow_duty_query": False,
+        "allow_roster_import": False,
     }
 
 

@@ -181,6 +181,37 @@ async def _lightagent_text_posts_gateway_payload_with_token():
     assert len(requests) == 1
 
 
+def test_lightagent_text_uses_runtime_member_ids_as_mentions():
+    asyncio.run(_lightagent_text_uses_runtime_member_ids_as_mentions())
+
+
+async def _lightagent_text_uses_runtime_member_ids_as_mentions():
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        body = json.loads(request.content.decode("utf-8"))
+        assert body["text"] == {
+            "content": "提醒内容",
+            "mention_ids": ["wxid_member_1"],
+        }
+        assert "mentioned_mobile_list" not in body["text"]
+        return httpx.Response(200, json={"success": True})
+
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = LightAgentNotifyClient(
+        endpoint_url="https://lightagent.test/api/push/send",
+        target="room-1",
+        token="push-token",
+        http_client=http_client,
+    )
+
+    await client.send_text("提醒内容", ["wxid_member_1"])
+    await http_client.aclose()
+
+    assert len(requests) == 1
+
+
 def test_webhook_non_json_response_raises_readable_error():
     asyncio.run(_webhook_non_json_response_raises_readable_error())
 

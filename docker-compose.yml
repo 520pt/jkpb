@@ -20,6 +20,7 @@ services:
       DUTY_REMINDER_ROSTER_IMPORT_URL: "${DUTY_REMINDER_ROSTER_IMPORT_URL:-http://duty-reminder:8080/api/wechat-roster/import}"
       DUTY_REMINDER_ROSTER_CONFIRM_URL: "${DUTY_REMINDER_ROSTER_CONFIRM_URL:-http://duty-reminder:8080/api/wechat-roster/confirm}"
       DUTY_REMINDER_QUERY_TOKEN: "${DUTY_REMINDER_QUERY_TOKEN:-520pt}"
+      DUTY_REMINDER_QUERY_TIMEOUT: "${DUTY_REMINDER_QUERY_TIMEOUT:-30}"
       AGENT: "${LIGHTAGENT_AGENT:-true}"
       MODEL: "${LIGHTAGENT_MODEL:-deepseek-v4-flash}"
       DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"

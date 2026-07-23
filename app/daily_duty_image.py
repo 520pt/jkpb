@@ -33,9 +33,9 @@ def render_daily_duty_image(preview: dict[str, Any]) -> bytes:
     }
 
     top_sections = [
-        ("监控班", "#2563eb", [("早班", details.get("early") or "无"), ("中班", details.get("middle") or "无"), ("晚班", details.get("night") or "无")]),
-        ("驾驶员", "#0f8a5f", [("大车", details.get("big_drivers") or "无"), ("小车", details.get("small_drivers") or "无")]),
-        ("在岗", "#7c3aed", [("备勤人员", details.get("standby") or "无")]),
+        ("监控班", "#0f766e", [("今日早班", details.get("early") or "无"), ("明日早班", details.get("tomorrow_early") or "无"), ("中班", details.get("middle") or "无"), ("晚班", details.get("night") or "无")]),
+        ("驾驶员", "#be123c", [("大车", details.get("big_drivers") or "无"), ("小车", details.get("small_drivers") or "无")]),
+        ("备勤", "#4d7c0f", [("备勤人员", details.get("standby") or "无")]),
     ]
     rest_items = [
         ("今日下午休息", details.get("afternoon_rest") or "无"),
@@ -46,10 +46,23 @@ def render_daily_duty_image(preview: dict[str, Any]) -> bytes:
     top_meta = []
     for title, accent, items in top_sections:
         item_meta = []
-        for label, value in items:
-            lines = _wrap_text(str(value), column_width - 60, fonts["body"])
-            item_meta.append({"label": label, "lines": lines, "height": max(76, 50 + len(lines) * 24)})
-        top_meta.append({"title": title, "accent": accent, "items": item_meta, "height": 60 + sum(item["height"] for item in item_meta) + BLOCK_BOTTOM_PADDING})
+        if title == "监控班":
+            pair_width = (column_width - 40) // 2
+            for index, (label, value) in enumerate(items):
+                max_width = pair_width - 24 if index < 2 else column_width - 60
+                font = fonts["body_small"] if index < 2 else fonts["body"]
+                lines = _wrap_text(str(value), max_width, font)
+                item_meta.append({"label": label, "lines": lines, "height": max(84, 50 + len(lines) * 24), "paired": index < 2})
+            pair_height = max(item["height"] for item in item_meta[:2])
+            for item in item_meta[:2]:
+                item["height"] = pair_height
+            height = 60 + pair_height + sum(item["height"] for item in item_meta[2:]) + BLOCK_BOTTOM_PADDING
+        else:
+            for label, value in items:
+                lines = _wrap_text(str(value), column_width - 60, fonts["body"])
+                item_meta.append({"label": label, "lines": lines, "height": max(76, 50 + len(lines) * 24), "paired": False})
+            height = 60 + sum(item["height"] for item in item_meta) + BLOCK_BOTTOM_PADDING
+        top_meta.append({"title": title, "accent": accent, "items": item_meta, "height": height})
     top_height = max(meta["height"] for meta in top_meta)
 
     rest_meta = []
@@ -60,39 +73,54 @@ def render_daily_duty_image(preview: dict[str, Any]) -> bytes:
     rest_height = 60 + rest_card_height + BLOCK_BOTTOM_PADDING
     height = HEADER_HEIGHT + top_height + GAP + rest_height + 36
 
-    image = Image.new("RGB", (WIDTH, height), "#f3f6fb")
+    image = Image.new("RGB", (WIDTH, height), "#f6fbf9")
     draw = ImageDraw.Draw(image)
 
-    _rounded(draw, (LEFT, 18, WIDTH - LEFT, 64), 8, "#172033")
-    draw.text((LEFT + 18, 32), "今日在岗人员", font=fonts["title"], fill="#ffffff")
-    _rounded(draw, (WIDTH - LEFT - 132, 27, WIDTH - LEFT - 20, 55), 14, "#26364f")
-    draw.text((WIDTH - LEFT - 116, 33), date_text, font=fonts["date"], fill="#dbeafe")
+    title_box = (LEFT, 18, WIDTH - LEFT, 64)
+    date_box = (WIDTH - LEFT - 132, 27, WIDTH - LEFT - 20, 55)
+    _rounded(draw, title_box, 8, "#0f3f3a")
+    _draw_centered_y_text(draw, title_box, LEFT + 18, "今日在岗人员", fonts["title"], "#ffffff")
+    _rounded(draw, date_box, 14, "#d9f3ee")
+    _draw_centered_y_text(draw, date_box, WIDTH - LEFT - 116, date_text, fonts["date"], "#0f3f3a")
 
     for section_index, meta in enumerate(top_meta):
         x = LEFT + section_index * (column_width + GAP)
         y = HEADER_HEIGHT
-        _rounded(draw, (x, y, x + column_width, y + top_height), 8, "#ffffff", "#d7deea")
-        _rounded(draw, (x, y, x + column_width, y + 46), 8, meta["accent"])
+        _rounded(draw, (x, y, x + column_width, y + top_height), 8, "#ffffff", "#cde5df")
+        header_box = (x, y, x + column_width, y + 46)
+        _rounded(draw, header_box, 8, meta["accent"])
         draw.rectangle((x, y + 36, x + column_width, y + 46), fill=meta["accent"])
-        draw.text((x + 18, y + 13), meta["title"], font=fonts["header"], fill="#ffffff")
+        _draw_centered_y_text(draw, header_box, x + 18, meta["title"], fonts["header"], "#ffffff")
         item_y = y + 60
-        for item in meta["items"]:
-            _rounded(draw, (x + 16, item_y, x + column_width - 16, item_y + item["height"]), 8, "#f8fafc", "#e6ebf3")
+        if meta["title"] == "监控班":
+            pair_width = (column_width - 40) // 2
+            for pair_index, item in enumerate(meta["items"][:2]):
+                item_x = x + 16 + pair_index * (pair_width + 8)
+                _rounded(draw, (item_x, item_y, item_x + pair_width, item_y + item["height"]), 8, "#f7fdfb", "#d6ebe4")
+                draw.text((item_x + 12, item_y + 12), item["label"], font=fonts["label"], fill=meta["accent"])
+                _draw_lines(draw, item["lines"], item_x + 12, item_y + 42, fonts["body_small"] if "".join(item["lines"]) != "无" else fonts["date"], "#18212f" if "".join(item["lines"]) != "无" else "#7aa79e", 24)
+            item_y += meta["items"][0]["height"]
+            items = meta["items"][2:]
+        else:
+            items = meta["items"]
+        for item in items:
+            _rounded(draw, (x + 16, item_y, x + column_width - 16, item_y + item["height"]), 8, "#f7fdfb", "#d6ebe4")
             draw.text((x + 30, item_y + 12), item["label"], font=fonts["label"], fill=meta["accent"])
-            _draw_lines(draw, item["lines"], x + 30, item_y + 42, fonts["body"] if "".join(item["lines"]) != "无" else fonts["muted"], "#18212f" if "".join(item["lines"]) != "无" else "#94a3b8", 25)
+            _draw_lines(draw, item["lines"], x + 30, item_y + 42, fonts["body"] if "".join(item["lines"]) != "无" else fonts["muted"], "#18212f" if "".join(item["lines"]) != "无" else "#7aa79e", 25)
             item_y += item["height"]
 
     rest_y = HEADER_HEIGHT + top_height + GAP
-    _rounded(draw, (LEFT, rest_y, LEFT + inner_width, rest_y + rest_height), 8, "#ffffff", "#d7deea")
-    _rounded(draw, (LEFT, rest_y, LEFT + inner_width, rest_y + 46), 8, "#c2410c")
-    draw.rectangle((LEFT, rest_y + 36, LEFT + inner_width, rest_y + 46), fill="#c2410c")
-    draw.text((LEFT + 18, rest_y + 13), "休息状态", font=fonts["header"], fill="#ffffff")
+    _rounded(draw, (LEFT, rest_y, LEFT + inner_width, rest_y + rest_height), 8, "#ffffff", "#f4c7d8")
+    rest_header_box = (LEFT, rest_y, LEFT + inner_width, rest_y + 46)
+    _rounded(draw, rest_header_box, 8, "#9f1239")
+    draw.rectangle((LEFT, rest_y + 36, LEFT + inner_width, rest_y + 46), fill="#9f1239")
+    _draw_centered_y_text(draw, rest_header_box, LEFT + 18, "休息状态", fonts["header"], "#ffffff")
     for index, item in enumerate(rest_meta):
         x = LEFT + 18 + index * (rest_card_width + GAP)
         y = rest_y + 60
-        _rounded(draw, (x, y, x + rest_card_width, y + rest_card_height), 8, "#fffaf7", "#f2d8ca")
-        draw.text((x + 14, y + 12), item["label"], font=fonts["label"], fill="#9a3412")
-        _draw_lines(draw, item["lines"], x + 14, y + 42, fonts["body_small"] if "".join(item["lines"]) != "无" else fonts["date"], "#18212f" if "".join(item["lines"]) != "无" else "#b08474", 24)
+        _rounded(draw, (x, y, x + rest_card_width, y + rest_card_height), 8, "#fff7fb", "#f4c7d8")
+        draw.text((x + 14, y + 12), item["label"], font=fonts["label"], fill="#9f1239")
+        _draw_lines(draw, item["lines"], x + 14, y + 42, fonts["body_small"] if "".join(item["lines"]) != "无" else fonts["date"], "#18212f" if "".join(item["lines"]) != "无" else "#b46980", 24)
 
     output = BytesIO()
     image.save(output, format="PNG", optimize=True)
@@ -217,6 +245,21 @@ def _candidate_font_paths(*, bold: bool) -> list[Path]:
 
 def _rounded(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], radius: int, fill: str, outline: str | None = None) -> None:
     draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline)
+
+
+def _draw_centered_y_text(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    x: int,
+    text: str,
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    fill: str,
+) -> None:
+    text_box = draw.textbbox((0, 0), text, font=font)
+    text_height = text_box[3] - text_box[1]
+    box_height = box[3] - box[1]
+    y = int(box[1] + (box_height - text_height) / 2 - text_box[1])
+    draw.text((x, y), text, font=font, fill=fill)
 
 
 def _draw_lines(draw: ImageDraw.ImageDraw, lines: list[str], x: int, y: int, font: ImageFont.FreeTypeFont | ImageFont.ImageFont, fill: str, line_height: int) -> None:
