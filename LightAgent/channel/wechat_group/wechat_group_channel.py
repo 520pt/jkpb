@@ -736,6 +736,15 @@ class WechatGroupChannel(ChatChannel):
                 return
         if msg.ctype == ContextType.IMAGE:
             if not direct_reply:
+                roster_context = self._compose_context(
+                    ContextType.IMAGE,
+                    getattr(msg, "media_path", "") or getattr(msg, "content", ""),
+                    isgroup=True,
+                    msg=msg,
+                    wechat_group_trigger_source="wechat_group_roster_import_probe",
+                )
+                if roster_context:
+                    self.produce(roster_context)
                 if not conf().get("wechat_group_free_reply_image_understanding_enabled", False):
                     return
                 image_text = self._build_free_reply_image_text(msg)

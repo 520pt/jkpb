@@ -1,0 +1,16 @@
+.git
+.venv
+venv*
+__pycache__/
+*.py[cod]
+*.log
+logs/
+workspace/
+node_modules/
+channel/wechat_group/sidecar/node_modules/
+config.json
+QR.png
+plugins.json
+user_datas.pkl
+ms-playwright/
+.pytest_cache/

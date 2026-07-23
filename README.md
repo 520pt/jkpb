@@ -38,7 +38,6 @@ Windows 本地也可以直接运行：
 
 ```bash
 cp .env.example .env
-git submodule update --init --recursive
 docker compose up -d --build
 ```
 
@@ -54,7 +53,9 @@ ghcr.io/520pt/jkpb-lightagent:latest
 `docker-compose.yml` 会同时启动两个服务：
 
 - `duty-reminder`：排班提醒服务，默认端口 `8080`。
-- `lightagent`：LightAgent Web 控制台和个人微信群通道，默认端口 `9899`。
+- `lightagent`：本项目内维护的 `LightAgent/` 源码，提供 LightAgent Web 控制台和个人微信群通道，默认端口 `9899`。
+
+`LightAgent/` 不是 Git submodule。同步上游 `yideng966/LightAgent` 时，只把上游改动合并到本仓库内的 `LightAgent/` 目录，并最终推送本仓库 `520pt/jkpb`。
 
 ### 服务器推荐部署
 

@@ -443,6 +443,9 @@ function extractSenderNameFromRawPayload(rawPayload = {}) {
     rawPayload?.ActualNickName,
     rawPayload?.RecommendInfo?.NickName,
     rawPayload?.User?.NickName,
+    rawPayload?.DisplayName,
+    rawPayload?.RemarkName,
+    rawPayload?.NickName,
   ]
   if (content.includes(':\n')) candidates.push(content.split(':\n')[0])
   if (original.includes(':<br/>')) candidates.push(original.split(':<br/>')[0])
@@ -533,6 +536,18 @@ export function memberPayloadMatchesQuery(payload = {}, query = '') {
     payload?.wechat_id,
   ].map(value => String(value || '')).join(' ').toLowerCase()
   return haystack.includes(q)
+}
+
+export function shouldRefreshRoomMemberPayload(payload = {}) {
+  const senderId = String(payload?.sender_id || '').trim()
+  const nickname = String(payload?.sender_nickname || '').trim()
+  const wechatId = String(payload?.wechat_id || '').trim()
+  if (!senderId) return false
+  if (!nickname || !wechatId) return true
+  if (nickname === senderId || nickname.replace(/^[@\uFF20]+/u, '') === senderId.replace(/^[@\uFF20]+/u, '')) {
+    return true
+  }
+  return looksLikeRawWechatInternalId(nickname)
 }
 
 function stripLeadingWechatMentionText(text = '') {

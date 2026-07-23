@@ -21,6 +21,8 @@ chatgpt_tool_hub/
 plugins/**/
 !plugins/bdunit
 !plugins/dungeon
+!plugins/duty_reminder_query
+!plugins/duty_reminder_query/**/
 !plugins/finish
 !plugins/godcmd
 !plugins/tool

@@ -1,5 +1,6 @@
 import datetime
 import asyncio
+import base64
 import hashlib
 import hmac
 import json
@@ -9,6 +10,7 @@ import os
 import random
 import re
 import shutil
+import sys
 import threading
 import time
 import uuid
@@ -1285,6 +1287,7 @@ class WebChannel(ChatChannel):
             '/api/wechat-group/styles/(.*)', 'WechatGroupStylesHandler',
             '/api/wechat-group/emotion/(.*)', 'WechatGroupEmotionHandler',
             '/api/wechat-group/stickers/(.*)', 'WechatGroupStickersHandler',
+            '/api/push/send', 'PushSendHandler',
             '/api/feishu/register', 'FeishuRegisterHandler',
             '/api/tools', 'ToolsHandler',
             '/api/skills', 'SkillsHandler',
@@ -6816,6 +6819,128 @@ class WechatGroupStickersHandler(_WechatGroupWebIdentityMixin):
             return int(text)
         except Exception:
             return None
+
+
+class PushSendHandler:
+    def POST(self):
+        web.header('Content-Type', 'application/json; charset=utf-8')
+        try:
+            _require_push_auth()
+            body = json.loads(web.data() or b"{}")
+            channel = str(body.get("channel") or "wechat_group")
+            if channel != const.WECHAT_GROUP:
+                return json.dumps({"success": False, "error": "unsupported channel"}, ensure_ascii=False)
+            target = str(body.get("target") or "").strip()
+            if not target:
+                return json.dumps({"success": False, "error": "target is required"}, ensure_ascii=False)
+            group_channel = _get_running_channel(const.WECHAT_GROUP)
+            if group_channel is None:
+                return json.dumps({"success": False, "error": "wechat_group channel is not running"}, ensure_ascii=False)
+            runtime_target = _resolve_push_target_room_id(group_channel, target)
+            if not runtime_target:
+                return json.dumps(
+                    {"success": False, "error": "target room is not active or could not be resolved: {}".format(target)},
+                    ensure_ascii=False,
+                )
+            msgtype = str(body.get("msgtype") or "text").lower()
+            if msgtype == "image":
+                image = body.get("image") if isinstance(body.get("image"), dict) else {}
+                image_path = _write_push_image_file(image)
+                group_channel.client.send_image(runtime_target, image_path)
+            else:
+                text_payload = body.get("text") if isinstance(body.get("text"), dict) else {}
+                content = str(text_payload.get("content") or body.get("content") or "")
+                if not content:
+                    return json.dumps({"success": False, "error": "content is required"}, ensure_ascii=False)
+                mention_ids = text_payload.get("mention_ids") or body.get("mention_ids") or []
+                if not isinstance(mention_ids, list):
+                    mention_ids = []
+                group_channel.client.send_text(runtime_target, content, mention_ids=mention_ids)
+            return json.dumps({"success": True, "target": target, "runtime_target": runtime_target}, ensure_ascii=False)
+        except web.HTTPError:
+            raise
+        except Exception as e:
+            logger.exception("[PushSendHandler] push send failed: %s", e)
+            return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+
+
+def _require_push_auth():
+    token = str(os.environ.get("LIGHTAGENT_PUSH_TOKEN") or conf().get("push_api_token", "") or "").strip()
+    if token:
+        auth = str(web.ctx.env.get("HTTP_AUTHORIZATION") or "")
+        prefix = "Bearer "
+        supplied = auth[len(prefix):].strip() if auth.startswith(prefix) else ""
+        if not hmac.compare_digest(supplied, token):
+            raise web.HTTPError(
+                "401 Unauthorized",
+                {"Content-Type": "application/json; charset=utf-8"},
+                json.dumps({"success": False, "error": "Unauthorized"}),
+            )
+        return
+    _require_auth()
+
+
+def _get_running_channel(channel_type):
+    for module_name in ("app", "__main__"):
+        module = sys.modules.get(module_name)
+        getter = getattr(module, "get_channel_manager", None)
+        if not getter:
+            continue
+        manager = getter()
+        if manager is None:
+            continue
+        channel = manager.get_channel(channel_type)
+        if channel is not None:
+            return channel
+    return None
+
+
+def _resolve_push_target_room_id(group_channel, target):
+    room_id = str(target or "").strip()
+    if not room_id:
+        return ""
+    if not room_id.startswith("wgr_"):
+        return room_id
+    service = getattr(group_channel, "identity_service", None)
+    if service is None:
+        try:
+            from channel.wechat_group.wechat_group_identity_service import WechatGroupIdentityService
+
+            service = WechatGroupIdentityService()
+        except Exception:
+            service = None
+    if service is not None:
+        try:
+            runtime_id = str(service.get_active_runtime_room_id(room_id) or "").strip()
+            if runtime_id:
+                return runtime_id
+        except Exception:
+            pass
+    try:
+        rooms = group_channel.get_rooms() if hasattr(group_channel, "get_rooms") else getattr(group_channel, "rooms", [])
+    except Exception:
+        rooms = []
+    for room in rooms or []:
+        stable_id = str(room.get("stable_room_id") or room.get("id") or "").strip()
+        runtime_id = str(room.get("runtime_room_id") or room.get("room_id") or "").strip()
+        if stable_id == room_id and runtime_id:
+            return runtime_id
+    return ""
+
+
+def _write_push_image_file(image):
+    encoded = str(image.get("base64") or "")
+    if not encoded:
+        raise ValueError("image.base64 is required")
+    raw = base64.b64decode(encoded)
+    expected_md5 = str(image.get("md5") or "").strip().lower()
+    if expected_md5 and hashlib.md5(raw).hexdigest() != expected_md5:
+        raise ValueError("image md5 mismatch")
+    upload_dir = _get_upload_dir()
+    path = os.path.join(upload_dir, "push-{}.png".format(uuid.uuid4().hex))
+    with open(path, "wb") as handle:
+        handle.write(raw)
+    return path
 
 
 class FeishuRegisterHandler:

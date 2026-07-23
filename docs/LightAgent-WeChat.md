@@ -7,9 +7,9 @@
 1. 部署并启动 LightAgent。
 2. 在 LightAgent 的 `config.json` 中启用 `wechat_group` 渠道，并安装 `channel/wechat_group/sidecar` 的 npm 依赖。
 3. 进入 LightAgent Web 控制台，扫码登录个人微信，选择目标微信群并记录群的 `room_id`。
-4. 使用本仓库的 `docker/lightagent.Dockerfile` 构建 LightAgent 镜像。该镜像会在构建阶段给 LightAgent Web 服务注入 `/api/push/send` 推送入口。
+4. 使用本仓库的 `docker/lightagent.Dockerfile` 构建 LightAgent 镜像。该镜像基于本仓库内的 `LightAgent/` 源码构建，`/api/push/send` 推送入口也维护在该源码目录中。
 
-LightAgent 当前上游主要提供 Web 控制台和内部调度能力，没有稳定的外部 `/send` API。因此本仓库把 LightAgent 作为 Git submodule 引入，并只在 Docker 镜像构建阶段注入一个很小的推送 API；不会直接修改上游 submodule 源码。
+`LightAgent/` 是本项目内维护的源码目录，不是 Git submodule。上游 `yideng966/LightAgent` 只作为更新来源参考；同步时把需要的改动合并进本仓库，再推送 `520pt/jkpb`。
 
 ## Docker Compose
 

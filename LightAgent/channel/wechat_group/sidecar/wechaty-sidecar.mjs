@@ -19,6 +19,7 @@ import {
   resolveContactDisplayName,
   resolveContactWechatId,
   sendText as sendTextCore,
+  shouldRefreshRoomMemberPayload,
 } from './wechaty-sidecar-core.mjs'
 import {
   createSessionBackedWechaty,
@@ -59,6 +60,15 @@ async function contactRawPayload(contact) {
   return null
 }
 
+async function roomMemberRawPayload(room, contact) {
+  try {
+    if (room?.id && contact?.id && typeof state.bot?.puppet?.roomMemberRawPayload === 'function') {
+      return await state.bot.puppet.roomMemberRawPayload(room.id, contact.id)
+    }
+  } catch {}
+  return null
+}
+
 async function contactPayload(contact, room = null, rawPayload = null) {
   let roomAlias = ''
   try { roomAlias = await room?.alias?.(contact) || '' } catch {}
@@ -81,8 +91,8 @@ async function listRoomMembers(command) {
   const members = []
   for (const contact of contacts) {
     let payload = await buildRoomMemberPayload(contact, room)
-    if (query && !memberPayloadMatchesQuery(payload, query)) {
-      const rawPayload = await contactRawPayload(contact)
+    if (shouldRefreshRoomMemberPayload(payload) || (query && !memberPayloadMatchesQuery(payload, query))) {
+      const rawPayload = await roomMemberRawPayload(room, contact) || await contactRawPayload(contact)
       if (rawPayload) {
         payload = await buildRoomMemberPayload(contact, room, rawPayload)
       }
