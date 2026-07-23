@@ -654,6 +654,121 @@ def test_wechat_query_reports_unbound_sender(tmp_path, monkeypatch):
     assert "@missing-member" in body["reply"]
 
 
+def test_wechat_query_accepts_natural_date_shift_question(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2025, 9, 15))
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/personnel",
+        json={
+            "names": ["Alice"],
+            "people": [{"name": "Alice", "wechat_group_runtime_sender_id": "@member-1"}],
+        },
+    )
+    client.post(
+        "/api/people",
+        json={"name": "Alice", "daily_time": "07:40", "before_shift_minutes": 10, "enabled": True},
+    )
+    client.post(
+        "/api/rosters/confirm",
+        json={"year": 2025, "month": 9, "grid": [{"name": "Alice", "days": {"16": "中"}}]},
+    )
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "我9月16日什么班", "runtime_sender_id": "@member-1"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["query_type"] == "monitor"
+    assert body["target_date"] == "2025-09-16"
+    assert "中班 08:00至16:00" in body["reply"]
+
+
+def test_wechat_query_returns_future_range_summary(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2025, 9, 15))
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/personnel",
+        json={
+            "names": ["Alice"],
+            "people": [{"name": "Alice", "wechat_group_runtime_sender_id": "@member-1"}],
+        },
+    )
+    client.post(
+        "/api/people",
+        json={"name": "Alice", "daily_time": "07:40", "before_shift_minutes": 10, "enabled": True},
+    )
+    client.post(
+        "/api/rosters/confirm",
+        json={
+            "year": 2025,
+            "month": 9,
+            "grid": [{"name": "Alice", "days": {"15": "早", "16": "中", "17": "休"}}],
+        },
+    )
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "查询未来3天", "runtime_sender_id": "@member-1"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["query_type"] == "monitor_range"
+    assert body["start_date"] == "2025-09-15"
+    assert body["days"] == 3
+    assert "09-15" in body["reply"]
+    assert "09-16" in body["reply"]
+    assert "09-17" in body["reply"]
+    assert "休息" in body["reply"]
+
+
+def test_wechat_query_returns_next_reminder(tmp_path, monkeypatch):
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2025, 9, 15, 6, 0, tzinfo=tz)
+
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/personnel",
+        json={
+            "names": ["Alice"],
+            "people": [{"name": "Alice", "wechat_group_runtime_sender_id": "@member-1"}],
+        },
+    )
+    client.post(
+        "/api/people",
+        json={"name": "Alice", "daily_time": "07:40", "before_shift_minutes": 10, "enabled": True},
+    )
+    client.post(
+        "/api/rosters/confirm",
+        json={"year": 2025, "month": 9, "grid": [{"name": "Alice", "days": {"15": "中"}}]},
+    )
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "下次提醒", "runtime_sender_id": "@member-1"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["query_type"] == "next_reminder"
+    assert "Alice 下次提醒" in body["reply"]
+    assert "07:40" in body["reply"]
+
+
 def test_monitored_person_can_be_updated_and_deleted(tmp_path):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)

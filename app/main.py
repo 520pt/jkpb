@@ -1038,11 +1038,18 @@ def _build_wechat_query_response(repo: DutyRepository, query: WechatQueryRequest
                 f"成员ID：{person.get('wechat_group_runtime_sender_id') or query.runtime_sender_id or query.sender_id}"
             ),
         }
+    if _is_wechat_next_reminder_query(text):
+        if not person:
+            return _wechat_query_unbound_response(query)
+        return _build_person_next_reminder_query_response(repo, str(person["name"]))
     if not _is_wechat_monitor_query(text):
         return {"success": False, "reply": _wechat_query_help_text(), "query_type": "unknown"}
     if not person:
         return _wechat_query_unbound_response(query)
-    target = query.target_date or _wechat_query_target_date(text)
+    start, days = _wechat_query_range(text, query.target_date)
+    if days > 1:
+        return _build_person_monitor_range_query_response(repo, str(person["name"]), start, days)
+    target = start
     return _build_person_monitor_query_response(repo, str(person["name"]), target)
 
 
@@ -1058,7 +1065,11 @@ def _is_wechat_query_help(text: str) -> bool:
 
 
 def _is_wechat_binding_query(text: str) -> bool:
-    return text in {"查询我的绑定", "我的绑定", "查我的绑定", "绑定查询"}
+    return text in {"查询我的绑定", "我的绑定", "查我的绑定", "绑定查询", "我绑定了吗", "我的微信绑定"}
+
+
+def _is_wechat_next_reminder_query(text: str) -> bool:
+    return text in {"查询下次提醒", "下次提醒", "我的下次提醒", "最近提醒", "下一次提醒", "我下次什么时候提醒"}
 
 
 def _is_wechat_monitor_query(text: str) -> bool:
@@ -1082,18 +1093,131 @@ def _is_wechat_monitor_query(text: str) -> bool:
         "明天提醒",
         "查询后天监控",
         "后天监控",
+        "查询我的提醒",
+        "我的提醒",
+        "我的班",
+        "我的值班",
+        "我今天什么班",
+        "我明天什么班",
+        "我后天什么班",
+        "今天我上班吗",
+        "明天我上班吗",
+        "后天我上班吗",
+        "查询本周监控",
+        "本周监控",
+        "这周监控",
+        "本周排班",
+        "这周排班",
+        "查询下周监控",
+        "下周监控",
+        "下周排班",
+        "查询未来7天",
+        "未来7天",
+        "未来七天",
+        "未来7天监控",
+        "接下来7天",
+        "接下来七天",
     }:
         return True
-    return "查询" in text and any(keyword in text for keyword in ("我的监控", "我的排班", "今日提醒", "今天提醒", "明日监控", "明天监控", "明日提醒", "明天提醒"))
+    if re.search(r"\d{4}-\d{1,2}-\d{1,2}|\d{1,2}月\d{1,2}[日号]?|\d{1,2}/\d{1,2}", text):
+        return any(keyword in text for keyword in ("查询", "监控", "排班", "提醒", "值班", "什么班", "上班吗"))
+    if re.search(r"(?:未来|接下来|最近)(?:\d{1,2}|[一二两三四五六七八九十]+)天", text):
+        return True
+    return any(
+        keyword in text
+        for keyword in (
+            "我的监控",
+            "我的排班",
+            "今日提醒",
+            "今天提醒",
+            "明日监控",
+            "明天监控",
+            "明日提醒",
+            "明天提醒",
+            "什么班",
+            "上班吗",
+            "本周监控",
+            "这周监控",
+            "下周监控",
+            "未来7天",
+            "未来七天",
+            "接下来7天",
+            "接下来七天",
+        )
+    ) and any(prefix in text for prefix in ("查询", "查", "我", "今天", "明天", "后天", "本周", "这周", "下周", "未来", "接下来"))
 
 
 def _wechat_query_target_date(text: str) -> date:
     today = _today_in_tz()
+    explicit = _wechat_query_explicit_date(text, today)
+    if explicit:
+        return explicit
     if "后天" in text:
         return today + timedelta(days=2)
     if "明日" in text or "明天" in text:
         return today + timedelta(days=1)
     return today
+
+
+def _wechat_query_range(text: str, requested_date: date | None = None) -> tuple[date, int]:
+    today = _today_in_tz()
+    start = requested_date or _wechat_query_target_date(text)
+    if "下周" in text:
+        next_monday = today + timedelta(days=(7 - today.weekday()))
+        return next_monday, 7
+    if "本周" in text or "这周" in text:
+        return today, max(1, 7 - today.weekday())
+    match = re.search(r"(?:未来|接下来|最近)(\d{1,2}|[一二两三四五六七八九十]+)天", text)
+    if match:
+        return today, min(max(_wechat_query_chinese_int(match.group(1)), 1), 14)
+    if "未来七天" in text or "接下来七天" in text:
+        return today, 7
+    return start, 1
+
+
+def _wechat_query_explicit_date(text: str, today: date) -> date | None:
+    match = re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})", text)
+    if match:
+        try:
+            return date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        except ValueError:
+            return None
+    match = re.search(r"(\d{1,2})月(\d{1,2})(?:日|号)?", text)
+    if match:
+        return _wechat_query_month_day(today, int(match.group(1)), int(match.group(2)))
+    match = re.search(r"(?<!\d)(\d{1,2})/(\d{1,2})(?!\d)", text)
+    if match:
+        return _wechat_query_month_day(today, int(match.group(1)), int(match.group(2)))
+    return None
+
+
+def _wechat_query_month_day(today: date, month: int, day: int) -> date | None:
+    try:
+        target = date(today.year, month, day)
+    except ValueError:
+        return None
+    if target < today - timedelta(days=1):
+        try:
+            target = date(today.year + 1, month, day)
+        except ValueError:
+            return None
+    return target
+
+
+def _wechat_query_chinese_int(value: str) -> int:
+    text = str(value or "").strip()
+    if text.isdigit():
+        return int(text)
+    mapping = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+    if text == "十":
+        return 10
+    if text.startswith("十") and len(text) == 2:
+        return 10 + mapping.get(text[1], 0)
+    if text.endswith("十") and len(text) == 2:
+        return mapping.get(text[0], 0) * 10
+    if "十" in text and len(text) == 3:
+        return mapping.get(text[0], 0) * 10 + mapping.get(text[2], 0)
+    return mapping.get(text, 1)
 
 
 def _wechat_query_help_text() -> str:
@@ -1102,7 +1226,11 @@ def _wechat_query_help_text() -> str:
         "查询我的监控\n"
         "查询今日提醒\n"
         "查询明日监控\n"
+        "查询本周监控\n"
+        "查询未来7天\n"
+        "查询下次提醒\n"
         "查询我的绑定\n"
+        "也可以问：我今天什么班、明天我上班吗、查询7月24日监控。\n"
         "说明：普通群成员只能查询自己，需要先在 duty-reminder 设置里绑定微信成员。"
     )
 
@@ -1172,6 +1300,75 @@ def _build_person_monitor_query_response(repo: DutyRepository, person_name: str,
         "target_date": target.isoformat(),
         "reply": "\n".join(lines),
     }
+
+
+def _build_person_monitor_range_query_response(repo: DutyRepository, person_name: str, start: date, days: int) -> dict[str, Any]:
+    monitored = next((person for person in repo.list_monitored_people() if person["name"] == person_name), None)
+    lines = [
+        f"{person_name} {start:%Y-%m-%d} 起 {days} 天监控汇总",
+        _wechat_query_monitor_config_line(monitored),
+    ]
+    for offset in range(days):
+        target = start + timedelta(days=offset)
+        events = [event for event in _plan_all_events(repo, target) if event.person_name == person_name]
+        event_times = "、".join(f"{event.send_at:%H:%M}{_wechat_query_event_label(event.kind)}" for event in events[:4])
+        if len(events) > 4:
+            event_times += f"等{len(events)}条"
+        if not event_times:
+            event_times = "无计划提醒"
+        lines.append(
+            f"- {target:%m-%d} {_wechat_query_weekday(target)}：{_person_roster_status_text(repo, person_name, target)}；{event_times}"
+        )
+    return {
+        "success": True,
+        "query_type": "monitor_range",
+        "person_name": person_name,
+        "start_date": start.isoformat(),
+        "days": days,
+        "reply": "\n".join(lines),
+    }
+
+
+def _build_person_next_reminder_query_response(repo: DutyRepository, person_name: str) -> dict[str, Any]:
+    now = datetime.now(TZ)
+    upcoming = []
+    for offset in range(14):
+        target = now.date() + timedelta(days=offset)
+        upcoming.extend(
+            event
+            for event in _plan_all_events(repo, target)
+            if event.person_name == person_name and event.send_at >= now
+        )
+    upcoming.sort(key=lambda event: event.send_at)
+    if not upcoming:
+        reply = f"{person_name} 未来14天没有计划提醒。"
+    else:
+        lines = [f"{person_name} 下次提醒"]
+        for event in upcoming[:5]:
+            content = str(event.content or "").splitlines()[0]
+            lines.append(f"- {event.send_at:%m-%d %H:%M} {_wechat_query_event_label(event.kind)}：{content}")
+        reply = "\n".join(lines)
+    return {
+        "success": True,
+        "query_type": "next_reminder",
+        "person_name": person_name,
+        "reply": reply,
+    }
+
+
+def _wechat_query_monitor_config_line(monitored: dict[str, Any] | None) -> str:
+    if not monitored:
+        return "监控提醒：未配置"
+    enabled_text = "启用" if monitored.get("enabled") else "停用"
+    return "监控提醒：{}，每日 {}，班前 {} 分钟".format(
+        enabled_text,
+        _coerce_hhmm(str(monitored.get("daily_time") or ""), "07:50"),
+        int(monitored.get("before_shift_minutes") or 0),
+    )
+
+
+def _wechat_query_weekday(target: date) -> str:
+    return "周" + "一二三四五六日"[target.weekday()]
 
 
 def _person_roster_status_text(repo: DutyRepository, person_name: str, target: date) -> str:
