@@ -79,9 +79,12 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'data-edit-person="${escapeHtml(person.name)}"' in html
     assert 'data-delete-person="${escapeHtml(person.name)}"' in html
     assert 'id="testMobile" placeholder="10000000000"' in html
-    assert 'id="mentionMobile" placeholder="10000000000"' in html
+    assert 'id="monitorMobileField">@ 手机号 <input id="mentionMobile" placeholder="10000000000"' in html
+    assert 'class="field-grid hidden" id="monitorWechatFields"' in html
     assert 'id="monitorWechatMember"' in html
     assert 'id="monitorWechatMemberId" readonly placeholder="未绑定"' in html
+    assert "updateMonitorNotificationFields" in html
+    assert "autofillMonitorContactByName" in html
     assert "monitorWechatBindingPayload" in html
     assert "monitorWechatBindingText" in html
     assert 'id="patrolWarningSettings"' in html

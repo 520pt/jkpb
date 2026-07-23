@@ -1684,9 +1684,9 @@
               <div class="stack">
                 <div class="field-grid">
                   <label>姓名 <input id="personName" list="personnelNameOptions" placeholder="选择或输入姓名" /></label>
-                  <label>@ 手机号 <input id="mentionMobile" placeholder="10000000000" /></label>
+                  <label id="monitorMobileField">@ 手机号 <input id="mentionMobile" placeholder="10000000000" /></label>
                 </div>
-                <div class="field-grid">
+                <div class="field-grid hidden" id="monitorWechatFields">
                   <label>个人微信群成员
                     <select id="monitorWechatMember"></select>
                   </label>
@@ -2809,6 +2809,18 @@
       $("restReminderFields").classList.toggle("hidden", !$("restReminderEnabled").checked);
     }
 
+    function isLightAgentNotificationSelected() {
+      return $("notificationSenderType") && $("notificationSenderType").value === "lightagent";
+    }
+
+    function updateMonitorNotificationFields() {
+      const isLightAgent = isLightAgentNotificationSelected();
+      $("monitorMobileField").classList.toggle("hidden", isLightAgent);
+      $("monitorWechatFields").classList.toggle("hidden", !isLightAgent);
+      renderMonitorWechatMemberOptions();
+      renderMonitoredPeopleList();
+    }
+
     $("restReminderEnabled").addEventListener("change", updateRestReminderFields);
     updateRestReminderFields();
 
@@ -2817,6 +2829,7 @@
       $("personName").value = "";
       $("mentionMobile").value = "";
       renderMonitorWechatMemberOptions("");
+      updateMonitorNotificationFields();
       $("dailyTime").value = "07:50";
       $("beforeMinutes").value = "10";
       $("restReminderEnabled").checked = false;
@@ -2834,6 +2847,7 @@
       $("personName").value = person.name || "";
       $("mentionMobile").value = person.mention_mobile || "";
       renderMonitorWechatMemberOptions(person.wechat_group_runtime_sender_id || "");
+      updateMonitorNotificationFields();
       $("dailyTime").value = person.daily_time || "07:50";
       $("beforeMinutes").value = String(person.before_shift_minutes || 10);
       $("restReminderEnabled").checked = Boolean(person.rest_reminder_enabled);
@@ -2874,11 +2888,24 @@
       const response = await fetch("/api/people");
       const body = await response.json();
       state.monitoredPeople = body.people || [];
+      renderMonitoredPeopleList();
+      renderPersonnelNameOptions();
+      renderMonitorWechatMemberOptions();
+    }
+
+    function monitorNotificationText(person) {
+      if (isLightAgentNotificationSelected()) {
+        return `通知方式 个人微信群 · ${monitorWechatBindingText(person)}`;
+      }
+      return `通知方式 群机器人 · @手机号 ${escapeHtml(person.mention_mobile || "未填写")}`;
+    }
+
+    function renderMonitoredPeopleList() {
+      if (!$("peopleList")) return;
       $("peopleList").innerHTML = state.monitoredPeople.map((person) => `
         <div class="item">
           <strong>${escapeHtml(person.name)}</strong>
-          <small>@手机号 ${escapeHtml(person.mention_mobile || "未填写")} · 每日提醒时间 ${escapeHtml(person.daily_time)} · 班次提前提醒 ${person.before_shift_minutes} 分钟 · 休息提醒 ${person.rest_reminder_enabled ? escapeHtml(person.rest_reminder_time) : "未启用"}</small>
-          <small>个人微信群 ${monitorWechatBindingText(person)}</small>
+          <small>${monitorNotificationText(person)} · 每日提醒时间 ${escapeHtml(person.daily_time)} · 班次提前提醒 ${person.before_shift_minutes} 分钟 · 休息提醒 ${person.rest_reminder_enabled ? escapeHtml(person.rest_reminder_time) : "未启用"}</small>
           ${person.rest_reminder_enabled ? `<small>休息文案 ${escapeHtml(person.rest_message_template || "{name} {rest_status}")}</small>` : ""}
           <div class="settings-actions">
             <button type="button" data-edit-person="${escapeHtml(person.name)}">编辑</button>
@@ -2886,8 +2913,6 @@
           </div>
         </div>
       `).join("") || `<div class="item"><small>暂无人员</small></div>`;
-      renderPersonnelNameOptions();
-      renderMonitorWechatMemberOptions();
     }
 
     $("peopleList").addEventListener("click", async (event) => {
@@ -3082,6 +3107,13 @@
         return `<option value="${escapeHtml(id)}" data-stable-member-id="${escapeHtml(stableId)}" data-member-name="${escapeHtml(label)}" ${id && id === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
       }).join("");
       idInput.value = selected || "";
+    }
+
+    function autofillMonitorContactByName() {
+      const name = $("personName").value;
+      const mobile = personnelMobileByName(name);
+      if (mobile) $("mentionMobile").value = mobile;
+      renderMonitorWechatMemberOptions();
     }
 
     function monitorWechatBindingPayload() {
@@ -3785,6 +3817,7 @@
       const isLightAgent = $("notificationSenderType").value === "lightagent";
       $("wecomNotificationFields").classList.toggle("hidden", isLightAgent);
       $("lightAgentNotificationFields").classList.toggle("hidden", !isLightAgent);
+      updateMonitorNotificationFields();
     }
 
     $("notificationSenderType").addEventListener("change", updateNotificationBackendFields);
@@ -5022,10 +5055,10 @@
     $("dailyDutyPreviewDate").value = beijingDateInputValue();
     $("savedDutyDate").value = beijingDateInputValue();
     $("tunnelMechanicalCheckTime").value = beijingDateInputValue();
-    bindMobileAutofill("personName", "mentionMobile");
     bindMobileAutofill("customReminderName", "customReminderMobile");
-    $("personName").addEventListener("change", () => renderMonitorWechatMemberOptions());
-    $("personName").addEventListener("blur", () => renderMonitorWechatMemberOptions());
+    $("personName").addEventListener("input", autofillMonitorContactByName);
+    $("personName").addEventListener("change", autofillMonitorContactByName);
+    $("personName").addEventListener("blur", autofillMonitorContactByName);
     $("monitorWechatMember").addEventListener("change", () => {
       $("monitorWechatMemberId").value = $("monitorWechatMember").value.trim();
     });
