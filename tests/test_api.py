@@ -89,6 +89,8 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert "monitorWechatBindingText" in html
     assert "同步${wechatGatewayLabel()}群失败" in html
     assert "功能通道已保存，但同步${wechatGatewayLabel()}群失败" in html
+    assert 'tunnel_mechanical_wechat: "隧道机电录入"' in html
+    assert 'tunnel_mechanical_query_wechat: "隧道机电查询"' in html
     assert 'id="patrolWarningSettings"' in html
     assert 'id="patrolLoginUrl"' in html
     assert 'id="patrolRouteCode" placeholder="S41"' in html

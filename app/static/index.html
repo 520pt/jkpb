@@ -1284,7 +1284,7 @@
     .item small { color: var(--muted); }
     .record-item {
       display: grid;
-      grid-template-columns: 170px 112px 130px 72px minmax(180px, 1fr) 92px;
+      grid-template-columns: 170px 140px 130px 72px minmax(180px, 1fr) 92px;
       gap: 8px;
       align-items: start;
       border: 1px solid var(--line);
@@ -1292,6 +1292,9 @@
       padding: 8px;
       background: #fbfcff;
       font-size: 12px;
+    }
+    .record-item > div {
+      min-width: 0;
     }
     .record-item.success {
       border-color: #bde5d1;
@@ -1301,7 +1304,12 @@
       border-color: #fecaca;
       background: #fff8f8;
     }
-    .record-item strong { display: block; font-size: 13px; }
+    .record-item strong {
+      display: block;
+      font-size: 13px;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
     .record-item small { color: var(--muted); }
     .record-item button {
       width: 76px;
@@ -5493,6 +5501,10 @@
         patrol_warning_end: "预警结束巡查提醒",
         patrol_warning_end_resend: "预警结束巡查提醒补发",
         patrol_warning_check: "公路巡查预警检查",
+        tunnel_mechanical_wechat: "隧道机电录入",
+        tunnel_mechanical_wechat_resend: "隧道机电录入补发",
+        tunnel_mechanical_query_wechat: "隧道机电查询",
+        tunnel_mechanical_query_wechat_resend: "隧道机电查询补发",
       })[kind] || kind;
     }
 
