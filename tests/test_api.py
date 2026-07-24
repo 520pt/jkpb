@@ -2462,6 +2462,45 @@ def test_wechat_query_returns_bound_person_monitor_plan(tmp_path, monkeypatch):
     assert "07:50" in body["reply"]
 
 
+def test_wechat_query_returns_named_person_monitor_plan(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post("/api/personnel", json={"names": ["罗熙云"]})
+    client.post(
+        "/api/people",
+        json={
+            "name": "罗熙云",
+            "daily_time": "07:40",
+            "before_shift_minutes": 10,
+            "enabled": True,
+        },
+    )
+    client.post(
+        "/api/rosters/confirm",
+        json={
+            "year": 2025,
+            "month": 9,
+            "grid": [{"name": "罗熙云", "days": {"16": "中"}}],
+        },
+    )
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "查询罗熙云监控", "target_date": "2025-09-16"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["query_type"] == "monitor"
+    assert body["person_name"] == "罗熙云"
+    assert body["target_date"] == "2025-09-16"
+    assert "罗熙云 2025-09-16" in body["reply"]
+    assert "中班 08:00至16:00" in body["reply"]
+
+
 def test_wechat_query_reports_unbound_sender(tmp_path, monkeypatch):
     monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)

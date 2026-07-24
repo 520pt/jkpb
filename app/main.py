@@ -2073,6 +2073,7 @@ async def _build_wechat_query_response(
     if _is_wechat_query_help(text):
         return {"success": True, "reply": _wechat_query_help_text(), "query_type": "help"}
     person = _person_for_wechat_query(repo, query)
+    requested_person_name = _wechat_query_requested_person_name(repo, text)
     if _is_wechat_binding_query(text):
         if not person:
             return _wechat_query_unbound_response(query)
@@ -2091,13 +2092,14 @@ async def _build_wechat_query_response(
         return _build_person_next_reminder_query_response(repo, str(person["name"]))
     if not _is_wechat_monitor_query(text):
         return {"success": False, "reply": _wechat_query_help_text(), "query_type": "unknown"}
-    if not person:
+    person_name = requested_person_name or (str(person["name"]) if person else "")
+    if not person_name:
         return _wechat_query_unbound_response(query)
     start, days = _wechat_query_range(text, query.target_date)
     if days > 1:
-        return _build_person_monitor_range_query_response(repo, str(person["name"]), start, days)
+        return _build_person_monitor_range_query_response(repo, person_name, start, days)
     target = start
-    return _build_person_monitor_query_response(repo, str(person["name"]), target)
+    return _build_person_monitor_query_response(repo, person_name, target)
 
 
 def _handle_wechat_bridge_message(repo: DutyRepository, uploads: Path, message: dict[str, Any]) -> None:
@@ -2583,6 +2585,8 @@ def _is_wechat_monitor_query(text: str) -> bool:
         return any(keyword in text for keyword in ("查询", "监控", "排班", "提醒", "值班", "什么班", "上班吗"))
     if re.search(r"(?:未来|接下来|最近)(?:\d{1,2}|[一二两三四五六七八九十]+)天", text):
         return True
+    if text.startswith(("查询", "查")) and any(keyword in text for keyword in ("监控", "排班", "提醒", "值班", "什么班", "上班吗")):
+        return True
     return any(
         keyword in text
         for keyword in (
@@ -2696,7 +2700,7 @@ def _wechat_query_help_text() -> str:
         "10. 查看隧道机电录入格式\n"
         "直接回复序号即可执行。\n"
         f"录入格式：隧道机电录入 日期{today} 负责人张三 记录人李四 天气晴\n"
-        "也可以问：我今天什么班、明天我上班吗、查询7月24日监控。\n"
+        "也可以问：我今天什么班、明天我上班吗、查询7月24日监控、查询罗熙云监控。\n"
         "说明：普通群成员只能查询自己，需要先在 duty-reminder 设置里绑定微信成员。"
     )
 
@@ -2727,6 +2731,25 @@ def _person_for_wechat_query(repo: DutyRepository, query: WechatQueryRequest) ->
         if stable_id and stable_id in stable_ids:
             return person
     return None
+
+
+def _wechat_query_known_person_names(repo: DutyRepository) -> list[str]:
+    names: list[str] = []
+    names.extend(str(name or "").strip() for name in repo.list_personnel_names())
+    names.extend(str(person.get("name") or "").strip() for person in repo.list_personnel())
+    names.extend(str(person.get("name") or "").strip() for person in repo.list_monitored_people())
+    unique = {name for name in names if name}
+    return sorted(unique, key=len, reverse=True)
+
+
+def _wechat_query_requested_person_name(repo: DutyRepository, text: str) -> str:
+    value = str(text or "").strip()
+    if not value:
+        return ""
+    for name in _wechat_query_known_person_names(repo):
+        if name in value:
+            return name
+    return ""
 
 
 def _build_person_monitor_query_response(repo: DutyRepository, person_name: str, target: date) -> dict[str, Any]:
