@@ -595,17 +595,18 @@ def create_app(
                 content=preview["content"],
                 error=str(exc),
             )
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise HTTPException(status_code=502, detail=_sanitize_wechat_ids_for_display(repo, str(exc))) from exc
         except Exception as exc:
+            error = f"测试发送失败：{exc}"
             repo.save_send_record(
                 kind="daily_duty_test",
                 target="今日在岗人员",
                 scheduled_at=preview["send_at"],
                 status="failed",
                 content=preview["content"],
-                error=f"测试发送失败：{exc}",
+                error=error,
             )
-            raise HTTPException(status_code=502, detail=f"测试发送失败：{exc}") from exc
+            raise HTTPException(status_code=502, detail=_sanitize_wechat_ids_for_display(repo, error)) from exc
         return {"success": True, "content": preview["content"], "send_at": preview["send_at"], "details": preview["details"]}
 
     @app.get("/api/patrol-warning-config")
@@ -721,7 +722,7 @@ def create_app(
                 image_mode=mode,
             )
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"发送预警提醒失败：{exc}") from exc
+            raise HTTPException(status_code=502, detail=_sanitize_wechat_ids_for_display(repo, f"发送预警提醒失败：{exc}")) from exc
         return {"success": True, "content": content}
 
     @app.get("/api/tunnel-mechanical/templates")
@@ -886,16 +887,17 @@ def create_app(
                 content=content,
                 error=str(exc),
             )
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise HTTPException(status_code=502, detail=_sanitize_wechat_ids_for_display(repo, str(exc))) from exc
         except Exception as exc:
+            error = f"测试发送失败：{exc}"
             repo.save_send_record(
                 kind="notification_test",
                 target=record_target,
                 status="failed",
                 content=content,
-                error=f"测试发送失败：{exc}",
+                error=error,
             )
-            raise HTTPException(status_code=502, detail=f"测试发送失败：{exc}") from exc
+            raise HTTPException(status_code=502, detail=_sanitize_wechat_ids_for_display(repo, error)) from exc
         return {"success": True, "content": content}
 
     @app.get("/api/feature-channel-config")
@@ -5120,7 +5122,7 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
             content=content,
             error=str(exc),
         )
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail=_sanitize_wechat_ids_for_display(repo, str(exc))) from exc
     except Exception as exc:
         error = f"补发失败：{exc}"
         repo.save_send_record(
@@ -5131,7 +5133,7 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
             content=content,
             error=error,
         )
-        raise HTTPException(status_code=502, detail=error) from exc
+        raise HTTPException(status_code=502, detail=_sanitize_wechat_ids_for_display(repo, error)) from exc
     return {"success": True}
 
 

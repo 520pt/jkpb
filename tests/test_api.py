@@ -1408,6 +1408,54 @@ def test_lightagent_notification_config_hides_secret_fields_and_tests_send(tmp_p
     }
 
 
+def test_notification_test_failure_sanitizes_wechat_ids(tmp_path, monkeypatch):
+    class FakeLightAgentClient:
+        def __init__(self, *, endpoint_url: str, target: str = "", targets: list[str] | None = None, token: str = ""):
+            pass
+
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            raise main_module.WeComError("wgr_notice failed; @member-runtime failed")
+
+    monkeypatch.setattr("app.main.LightAgentNotifyClient", FakeLightAgentClient)
+    monkeypatch.setattr(
+        main_module,
+        "_sync_lightagent_notification_targets",
+        lambda repo, sender_type, targets: {"success": True},
+    )
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/notification-config",
+        json={
+            "sender_type": "lightagent",
+            "lightagent_url": "https://lightagent.test/api/push/send",
+            "lightagent_token": "push-token",
+            "lightagent_targets": [{"id": "wgr_notice", "name": "通知群"}],
+        },
+    )
+    client.post(
+        "/api/personnel",
+        json={
+            "names": ["王路飞"],
+            "people": [
+                {
+                    "name": "王路飞",
+                    "wechat_group_runtime_sender_id": "@member-runtime",
+                    "wechat_group_member_name": "王路飞",
+                }
+            ],
+        },
+    )
+
+    response = client.post(
+        "/api/notification-config/test",
+        json={"test_wechat_member_id": "@member-runtime", "test_wechat_member_name": "王路飞"},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "通知群 failed; 王路飞 failed"
+
+
 def test_lightagent_notification_config_syncs_target_to_wechat_group_channel(tmp_path, monkeypatch):
     calls: list[dict[str, object]] = []
 
@@ -3766,6 +3814,53 @@ def test_resend_record_does_not_append_duplicate_resend_suffix(tmp_path, monkeyp
     records = client.get("/api/send-records").json()["records"]
     assert records[0]["kind"] == "daily_resend"
     assert records[0]["kind"] != "daily_resend_resend"
+
+
+def test_resend_failure_sanitizes_wechat_ids(tmp_path, monkeypatch):
+    class FakeWechatClient:
+        is_wechat_bridge = True
+
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            raise main_module.WeComError("wgr_notice failed; @member-runtime failed")
+
+        async def send_image(self, image_bytes: bytes):
+            raise main_module.WeComError("wgr_notice failed")
+
+    monkeypatch.setattr("app.main._notification_client_from_config", lambda config: FakeWechatClient())
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(
+        sender_type="lightagent",
+        webhook_url="",
+        lightagent_url="https://lightagent.test/api/push/send",
+        lightagent_token="push-token",
+        lightagent_targets=[{"id": "wgr_notice", "name": "通知群"}],
+    )
+    repo.save_personnel_names(["王路飞"])
+    repo.save_personnel_contacts(
+        [
+            {
+                "name": "王路飞",
+                "wechat_group_runtime_sender_id": "@member-runtime",
+                "wechat_group_member_name": "王路飞",
+            }
+        ]
+    )
+    repo.save_send_record(
+        kind="daily",
+        target="王路飞",
+        scheduled_at="2025-09-16T07:50:00+08:00",
+        status="failed",
+        content="补发内容",
+        error="network down",
+    )
+    record_id = client.get("/api/send-records").json()["records"][0]["id"]
+
+    response = client.post(f"/api/send-records/{record_id}/resend")
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "通知群 failed; 王路飞 failed"
 
 
 def test_recheck_roster_corrects_mismatched_cells_from_source_image(tmp_path):
