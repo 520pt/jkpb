@@ -381,6 +381,7 @@ export async function resolveMentionContacts(room, mentionIds, findContact) {
   for (const contactId of mentionIds || []) {
     const wanted = String(contactId || '').trim()
     if (!wanted) continue
+    if (isMentionAllId(wanted)) continue
     let contact = null
     try {
       const members = await room.memberAll?.()
@@ -398,6 +399,11 @@ export async function resolveMentionContacts(room, mentionIds, findContact) {
     if (inRoom) mentions.push(contact)
   }
   return mentions
+}
+
+function isMentionAllId(value = '') {
+  const text = String(value || '').trim().replace(/^＠/u, '@').toLowerCase()
+  return text === '@all' || text === 'notify@all' || text === '@所有人' || text === '所有人'
 }
 
 function cleanMentionName(value = '') {
@@ -589,6 +595,9 @@ function makeClientMsgId() {
 }
 
 function buildAtUserList(targets = []) {
+  if ((targets || []).some(target => target?.mentionAll || isMentionAllId(target?.id))) {
+    return ['notify@all']
+  }
   const seen = new Set()
   const ids = []
   for (const target of targets || []) {
@@ -632,6 +641,9 @@ function shouldRefreshRoomAlias(roomId, cooldownMinutes, cooldownStore, nowMs) {
 export async function resolveMentionTargets(room, mentionIds, findContact, options = {}) {
   const mentions = await resolveMentionContacts(room, mentionIds, findContact)
   const targets = []
+  if ((mentionIds || []).some(isMentionAllId)) {
+    targets.push({ id: 'notify@all', contact: null, name: '所有人', mentionAll: true })
+  }
   let aliasRefreshAttempted = false
   const cooldownMinutes = options.aliasSyncCooldownMinutes
   const cooldownStore = options.aliasSyncCooldownStore
@@ -746,6 +758,11 @@ export async function sendText(command, deps) {
   } else if (mentionTargets.length) {
     const contacts = mentionTargets.map(item => item.contact).filter(Boolean)
     const manualText = buildManualMentionText(command.text, mentionTargets)
+    if (contacts.length !== mentionTargets.length) {
+      await room.say(manualText || command.text)
+      deps.emit('send_result', { ok: true, command: 'send_text', room_id: command.room_id })
+      return
+    }
     try {
       await room.say(command.text, ...contacts)
     } catch {

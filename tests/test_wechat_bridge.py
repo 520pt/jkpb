@@ -78,6 +78,22 @@ def test_wechat_bridge_notify_client_sends_to_multiple_targets():
     assert manager.image_calls == [("wgr_a", b"png"), ("wgr_b", b"png")]
 
 
+def test_wechat_bridge_notify_client_passes_all_mention():
+    class FakeManager:
+        def __init__(self):
+            self.text_calls = []
+
+        def send_text(self, room_id, text, *, mention_ids=None):
+            self.text_calls.append((room_id, text, mention_ids))
+
+    manager = FakeManager()
+    client = WechatBridgeNotifyClient(targets=["wgr_notice"], manager=manager)
+
+    asyncio.run(client.send_text("预警内容", ["@all"]))
+
+    assert manager.text_calls == [("wgr_notice", "预警内容", ["@all"])]
+
+
 def test_wechat_bridge_marks_recent_outgoing_text_as_self_message(tmp_path):
     manager = WechatBridgeManager(data_dir=tmp_path / "wechat")
     manager.self_id = "@self"

@@ -3404,6 +3404,22 @@ def test_personal_wechat_notification_test_records_member_name(tmp_path, monkeyp
     assert records[0]["target"] == "王路飞"
 
 
+def test_personal_wechat_patrol_warning_uses_true_all_mention(tmp_path):
+    class FakeWechatClient:
+        is_wechat_bridge = True
+
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_patrol_warning_config(mention_all=True)
+
+    mentions = main_module._patrol_warning_mentions_for_client(
+        repo,
+        repo.get_patrol_warning_config(),
+        FakeWechatClient(),
+    )
+
+    assert mentions == ["@all"]
+
+
 def test_send_records_display_wechat_runtime_id_as_member_name(tmp_path):
     data_dir = tmp_path / "data"
     app = create_app(data_dir=data_dir, upload_dir=tmp_path / "uploads", start_scheduler=False)

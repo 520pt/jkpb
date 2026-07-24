@@ -5266,7 +5266,7 @@ def _lightagent_room_member_sender_ids(repo: DutyRepository) -> list[str]:
 def _patrol_warning_mentions_for_client(repo: DutyRepository, config: dict[str, Any], client: Any) -> list[str]:
     if _is_personal_wechat_notify_client(client):
         if bool(config.get("mention_all", True)):
-            return _lightagent_room_member_sender_ids(repo)
+            return ["@all"]
         names_or_ids = [part for part in re.split(r"[\s,，;；]+", str(config.get("mention_mobiles") or "")) if part]
         lookup = _person_wechat_sender_lookup(repo)
         mentions = []
