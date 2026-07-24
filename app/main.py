@@ -5084,7 +5084,7 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
     target = str(record.get("target") or "")
     scheduled_at = str(record.get("scheduled_at") or "")
     content = str(record.get("content") or "")
-    resend_kind = f"{kind}_resend"
+    resend_kind = kind if kind.endswith("_resend") else f"{kind}_resend"
     try:
         if kind in {"daily_duty", "daily_duty_test", "daily_duty_resend"}:
             preview_date = _date_from_record(record) or _today_in_tz()

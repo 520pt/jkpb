@@ -1,6 +1,8 @@
 import asyncio
 import os
+import re
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import quote
 
@@ -91,6 +93,9 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert "功能通道已保存，但同步${wechatGatewayLabel()}群失败" in html
     assert 'tunnel_mechanical_wechat: "隧道机电录入"' in html
     assert 'tunnel_mechanical_query_wechat: "隧道机电查询"' in html
+    assert 'patrol_warning_start_test: "公路巡查预警测试"' in html
+    assert 'patrol_warning_end_test: "预警结束巡查测试"' in html
+    assert 'patrol_warning_check_resend: "公路巡查预警检查补发"' in html
     assert 'id="patrolWarningSettings"' in html
     assert 'id="patrolLoginUrl"' in html
     assert 'id="patrolRouteCode" placeholder="S41"' in html
@@ -154,6 +159,25 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert "已过预警结束巡查提醒" in html
     assert "其余待发送提醒" in html
     assert "event-collapsed" in html
+
+
+def test_send_record_kind_labels_cover_backend_record_kinds():
+    root = Path(__file__).resolve().parents[1]
+    source = "\n".join(
+        [
+            (root / "app" / "main.py").read_text(encoding="utf-8"),
+            (root / "app" / "reminders.py").read_text(encoding="utf-8"),
+        ]
+    )
+    html = (root / "app" / "static" / "index.html").read_text(encoding="utf-8")
+    backend_kinds = set(re.findall(r'kind="([^"]+)"', source))
+    backend_kinds.update({"patrol_warning_start_test", "patrol_warning_end_test"})
+    expected_kinds = backend_kinds | {f"{kind}_resend" for kind in backend_kinds if not kind.endswith("_resend")}
+    match = re.search(r"function sendRecordKindLabel\(kind\) \{\s*return \(\{([\s\S]*?)\}\)\[kind\]", html)
+    assert match is not None
+    frontend_labels = set(re.findall(r"\n\s*([A-Za-z0-9_]+):\s*\"", match.group(1)))
+
+    assert sorted(expected_kinds - frontend_labels) == []
 
 
 def test_tunnel_mechanical_templates_are_empty_until_imported(tmp_path):
@@ -3656,6 +3680,40 @@ def test_resend_failed_text_record_sends_again_and_records_result(tmp_path, monk
     records = client.get("/api/send-records").json()["records"]
     assert records[0]["kind"] == "daily_resend"
     assert records[0]["status"] == "success"
+
+
+def test_resend_record_does_not_append_duplicate_resend_suffix(tmp_path, monkeypatch):
+    class FakeWebhookClient:
+        def __init__(self, webhook_url: str):
+            pass
+
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            pass
+
+        async def send_image(self, image_bytes: bytes):
+            raise AssertionError("文字补发不应该发送图片")
+
+    monkeypatch.setattr("app.main.WeComWebhookClient", FakeWebhookClient)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post("/api/notification-config", json={"webhook_url": "https://example.test/cgi-bin/webhook/send?key=unit-test"})
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_send_record(
+        kind="daily_resend",
+        target="示例甲",
+        scheduled_at="2025-09-16T07:50:00+08:00",
+        status="failed",
+        content="补发内容",
+        error="network down",
+    )
+    record_id = client.get("/api/send-records").json()["records"][0]["id"]
+
+    response = client.post(f"/api/send-records/{record_id}/resend")
+
+    assert response.status_code == 200
+    records = client.get("/api/send-records").json()["records"]
+    assert records[0]["kind"] == "daily_resend"
+    assert records[0]["kind"] != "daily_resend_resend"
 
 
 def test_recheck_roster_corrects_mismatched_cells_from_source_image(tmp_path):
