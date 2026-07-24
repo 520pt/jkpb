@@ -57,9 +57,22 @@ ghcr.io/520pt/jkpb-lightagent:latest
 
 `LightAgent/` 不是 Git submodule。同步上游 `yideng966/LightAgent` 时，只把上游改动合并到本仓库内的 `LightAgent/` 目录，并最终推送本仓库 `520pt/jkpb`。
 
-### 服务器推荐部署
+### Docker 镜像部署
 
-直接用仓库里的 `docker-compose.prod.yml`，结构尽量保持简单：
+服务器 Docker 部署用 `docker-compose.prod.yml`。这个文件直接拉取已经发布的镜像：
+
+```text
+ghcr.io/520pt/jkpb:latest
+ghcr.io/520pt/jkpb-lightagent:latest
+```
+
+不要用根目录的 `docker-compose.yml` 做服务器部署，那个文件用于本地源码构建和开发调试。
+
+大部分固定配置已经写进镜像默认值：内部服务地址、微信查询接口、频道类型、Web 监听地址、上传清理、隧道机电登录保活等都不需要在 Compose 里配置。
+
+账号、密码、token、模型 key 这些部署时需要确认的环境变量仍然保留在 Compose 里，直接打开 `docker-compose.prod.yml` 修改即可。
+
+当前生产 Compose 的核心配置如下：
 
 ```yaml
 services:
@@ -70,17 +83,10 @@ services:
     ports:
       - "9899:9899"
     environment:
-      TZ: Asia/Shanghai
-      CHANNEL_TYPE: web,wechat_group
-      WEB_HOST: 0.0.0.0
-      WEB_PORT: "9899"
-      WEB_PASSWORD: CHANGE_THIS_LIGHTAGENT_PASSWORD
-      LIGHTAGENT_PUSH_TOKEN: CHANGE_THIS_LIGHTAGENT_PUSH_TOKEN
-      DUTY_REMINDER_BASE_URL: http://duty-reminder:8080
-      DUTY_REMINDER_QUERY_TOKEN: CHANGE_THIS_QUERY_TOKEN
-      MODEL: deepseek-v4-flash
-      DEEPSEEK_API_KEY: CHANGE_THIS_DEEPSEEK_KEY
-      WECHAT_GROUP_ENABLED: "true"
+      LIGHTAGENT_WEB_PASSWORD: 520pt
+      LIGHTAGENT_PUSH_TOKEN: 520pt
+      DUTY_REMINDER_QUERY_TOKEN: 520pt
+      DEEPSEEK_API_KEY: ""
     volumes:
       - ./lightagent:/home/agent/lightagent
 
@@ -89,17 +95,13 @@ services:
     container_name: duty-reminder
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "2222:8080"
     environment:
-      TZ: Asia/Shanghai
-      ENABLE_SCHEDULER: "true"
-      ADMIN_USERNAME: admin
-      ADMIN_PASSWORD: CHANGE_THIS_PASSWORD
-      NOTIFICATION_SENDER_TYPE: lightagent
-      LIGHTAGENT_BASE_URL: http://lightagent:9899
-      LIGHTAGENT_WEB_PASSWORD: CHANGE_THIS_LIGHTAGENT_PASSWORD
-      LIGHTAGENT_PUSH_TOKEN: CHANGE_THIS_LIGHTAGENT_PUSH_TOKEN
-      DUTY_REMINDER_QUERY_TOKEN: CHANGE_THIS_QUERY_TOKEN
+      ADMIN_USERNAME: 520pt
+      ADMIN_PASSWORD: 520pt
+      LIGHTAGENT_WEB_PASSWORD: 520pt
+      LIGHTAGENT_PUSH_TOKEN: 520pt
+      DUTY_REMINDER_QUERY_TOKEN: 520pt
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads
@@ -113,7 +115,7 @@ services:
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-部署前把 `docker-compose.prod.yml` 里的 `ADMIN_PASSWORD: CHANGE_THIS_PASSWORD`、`WEB_PASSWORD: CHANGE_THIS_LIGHTAGENT_PASSWORD`、`LIGHTAGENT_PUSH_TOKEN: CHANGE_THIS_LIGHTAGENT_PUSH_TOKEN`、`DUTY_REMINDER_QUERY_TOKEN: CHANGE_THIS_QUERY_TOKEN` 和 `DEEPSEEK_API_KEY: CHANGE_THIS_DEEPSEEK_KEY` 改成你自己的值。`LIGHTAGENT_BASE_URL` 会同时用于 LightAgent Web 管理接口和推送接口，`DUTY_REMINDER_BASE_URL` 会同时用于微信查询、排班导入和确认接口。更新镜像时再执行一次：
+部署前一般只需要确认 `ADMIN_USERNAME`、`ADMIN_PASSWORD`、`LIGHTAGENT_WEB_PASSWORD`、`LIGHTAGENT_PUSH_TOKEN`、`DUTY_REMINDER_QUERY_TOKEN` 和 `DEEPSEEK_API_KEY`。其中 `LIGHTAGENT_PUSH_TOKEN` 和 `DUTY_REMINDER_QUERY_TOKEN` 两个服务里要保持一致。更新镜像时再执行一次：
 
 ```bash
 docker compose -f docker-compose.prod.yml pull
