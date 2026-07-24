@@ -1174,6 +1174,11 @@ def test_custom_reminder_crud_personnel_contact_and_preview(tmp_path):
         json={
             "name": "示例甲",
             "mention_mobile": "10000000000",
+            "wechat_group_room_id": "room-1",
+            "wechat_group_room_name": "通知群",
+            "wechat_group_member_id": "stable-member-1",
+            "wechat_group_runtime_sender_id": "@member-1",
+            "wechat_group_member_name": "示例甲微信",
             "shift_code": "night",
             "reminder_time": "21:00",
             "message": "{name} 需要关闭隧道灯",
@@ -1186,7 +1191,17 @@ def test_custom_reminder_crud_personnel_contact_and_preview(tmp_path):
     assert confirm_response.status_code == 200
     assert reminder_response.status_code == 200
     assert reminder_response.json()["reminders"][0]["message"] == "{name} 需要关闭隧道灯"
-    assert personnel_response.json()["people"] == [{"name": "示例甲", "mention_mobile": "10000000000"}]
+    assert personnel_response.json()["people"] == [
+        {
+            "name": "示例甲",
+            "mention_mobile": "10000000000",
+            "wechat_group_room_id": "room-1",
+            "wechat_group_room_name": "通知群",
+            "wechat_group_member_id": "stable-member-1",
+            "wechat_group_runtime_sender_id": "@member-1",
+            "wechat_group_member_name": "示例甲微信",
+        }
+    ]
     events = preview_response.json()["events"]
     assert any(
         event["kind"] == "custom"

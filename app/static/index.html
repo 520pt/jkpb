@@ -125,6 +125,9 @@
       background: white;
       color: var(--ink);
     }
+    input, select {
+      max-width: 100%;
+    }
     textarea {
       min-height: 92px;
       border: 1px solid var(--line);
@@ -854,6 +857,7 @@
       border: 1px solid var(--line);
       border-radius: 8px;
       background: #fbfcff;
+      min-width: 0;
     }
     .lightagent-notify-card h3 {
       padding-bottom: 8px;
@@ -869,7 +873,7 @@
     }
     .wechat-card-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
       gap: 8px;
       max-height: 376px;
       overflow: auto;
@@ -983,8 +987,10 @@
       color: var(--muted);
       font-size: 12px;
     }
-    .stack label input {
+    .stack label input,
+    .stack label select {
       width: 100%;
+      min-width: 0;
       color: var(--ink);
     }
     .stack label.checkbox-label {
@@ -1039,6 +1045,11 @@
     }
     .field-grid label {
       min-width: 0;
+    }
+    .field-grid input,
+    .field-grid select {
+      min-width: 0;
+      width: 100%;
     }
     .driver-tag-grid {
       align-items: stretch;
@@ -2276,7 +2287,15 @@
               <div class="stack">
                 <div class="field-grid">
                   <label>姓名 <input id="customReminderName" list="personnelNameOptions" placeholder="选择或输入姓名" /></label>
-                  <label>@ 手机号 <input id="customReminderMobile" placeholder="10000000000" /></label>
+                  <label id="customReminderMobileField">@ 手机号 <input id="customReminderMobile" placeholder="10000000000" /></label>
+                </div>
+                <div class="field-grid hidden" id="customReminderWechatFields">
+                  <label>个人微信群成员
+                    <select id="customReminderWechatMember"></select>
+                  </label>
+                  <label>微信群成员 ID
+                    <input id="customReminderWechatMemberId" readonly placeholder="未绑定" />
+                  </label>
                 </div>
                 <div class="field-grid">
                   <label>匹配班次
@@ -3574,6 +3593,14 @@
       renderMonitoredPeopleList();
     }
 
+    function updateCustomReminderNotificationFields() {
+      const isLightAgent = isLightAgentNotificationSelected();
+      $("customReminderMobileField").classList.toggle("hidden", isLightAgent);
+      $("customReminderWechatFields").classList.toggle("hidden", !isLightAgent);
+      renderCustomReminderWechatMemberOptions();
+      renderCustomRemindersList();
+    }
+
     $("restReminderEnabled").addEventListener("change", updateRestReminderFields);
     updateRestReminderFields();
 
@@ -3698,6 +3725,8 @@
       state.editingCustomReminderId = null;
       $("customReminderName").value = "";
       $("customReminderMobile").value = "";
+      renderCustomReminderWechatMemberOptions("");
+      updateCustomReminderNotificationFields();
       $("customReminderShift").value = "early";
       $("customReminderTime").value = "21:00";
       $("customReminderMessage").value = "";
@@ -3709,6 +3738,8 @@
       state.editingCustomReminderId = reminder.id;
       $("customReminderName").value = reminder.name || "";
       $("customReminderMobile").value = reminder.mention_mobile || personnelMobileByName(reminder.name);
+      renderCustomReminderWechatMemberOptions(customWechatSavedBinding(reminder.name).wechat_group_runtime_sender_id || "");
+      updateCustomReminderNotificationFields();
       $("customReminderShift").value = reminder.shift_code || "early";
       $("customReminderTime").value = reminder.reminder_time || "21:00";
       $("customReminderMessage").value = reminder.message || "";
@@ -3720,10 +3751,23 @@
       const response = await fetch("/api/custom-reminders");
       const body = await response.json();
       state.customReminders = body.reminders || [];
+      renderCustomRemindersList();
+      renderSettingsOverview();
+    }
+
+    function customReminderNotificationText(reminder) {
+      if (isLightAgentNotificationSelected()) {
+        return `通知方式 个人微信群 · ${monitorWechatBindingText(customWechatSavedBinding(reminder.name))}`;
+      }
+      return `通知方式 群机器人 · @手机号 ${escapeHtml(reminder.mention_mobile || personnelMobileByName(reminder.name) || "未填写")}`;
+    }
+
+    function renderCustomRemindersList() {
+      if (!$("customReminderList")) return;
       $("customReminderList").innerHTML = state.customReminders.map((reminder) => `
         <div class="item">
           <strong>${escapeHtml(reminder.name)} · ${escapeHtml(customReminderShiftLabel(reminder.shift_code))} · ${escapeHtml(reminder.reminder_time)}</strong>
-          <small>@手机号 ${escapeHtml(reminder.mention_mobile || personnelMobileByName(reminder.name) || "未填写")} · ${reminder.enabled ? "已启用" : "已停用"}</small>
+          <small>${customReminderNotificationText(reminder)} · ${reminder.enabled ? "已启用" : "已停用"}</small>
           <div>${escapeHtml(reminder.message || "").replace(/\n/g, "<br>")}</div>
           <div class="settings-actions">
             <button type="button" data-edit-custom-reminder="${reminder.id}">编辑</button>
@@ -3731,7 +3775,6 @@
           </div>
         </div>
       `).join("") || `<div class="item"><small>暂无自定义提醒</small></div>`;
-      renderSettingsOverview();
     }
 
     $("saveCustomReminderBtn").addEventListener("click", async () => {
@@ -3739,6 +3782,7 @@
         id: state.editingCustomReminderId,
         name: $("customReminderName").value.trim(),
         mention_mobile: $("customReminderMobile").value.trim(),
+        ...customReminderWechatBindingPayload(),
         shift_code: $("customReminderShift").value,
         reminder_time: $("customReminderTime").value || "21:00",
         message: $("customReminderMessage").value.trim(),
@@ -3749,6 +3793,7 @@
         $("customReminderStatus").className = "status error";
         return;
       }
+      await saveNotificationConfig(false);
       const response = await fetch("/api/custom-reminders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -3814,6 +3859,14 @@
     }
 
     function monitorWechatSavedBinding(name) {
+      return personWechatSavedBinding(name);
+    }
+
+    function customWechatSavedBinding(name) {
+      return personWechatSavedBinding(name);
+    }
+
+    function personWechatSavedBinding(name) {
       const personnel = personnelContactByName(name);
       const monitored = monitorPersonByName(name);
       return {
@@ -3866,11 +3919,38 @@
       idInput.value = selected || "";
     }
 
+    function renderCustomReminderWechatMemberOptions(selectedId = "") {
+      const select = $("customReminderWechatMember");
+      const idInput = $("customReminderWechatMemberId");
+      if (!select || !idInput) return;
+      const saved = customWechatSavedBinding($("customReminderName") ? $("customReminderName").value : "");
+      const selected = String(selectedId || saved.wechat_group_runtime_sender_id || "").trim();
+      const members = state.lightAgentMembers || [];
+      const hasSelectedInMembers = members.some((member) => wechatMemberRuntimeId(member) === selected);
+      const savedOption = selected && !hasSelectedInMembers
+        ? `<option value="${escapeHtml(selected)}" data-stable-member-id="${escapeHtml(saved.wechat_group_member_id || "")}" data-member-name="${escapeHtml(saved.wechat_group_member_name || selected)}" selected>${escapeHtml(saved.wechat_group_member_name || "已保存成员")} · ${escapeHtml(shortWechatId(selected))}</option>`
+        : "";
+      select.innerHTML = `<option value="">未绑定个人微信群成员</option>` + savedOption + members.map((member) => {
+        const id = wechatMemberRuntimeId(member);
+        const label = wechatMemberDisplayText(member);
+        const stableId = String(member.stable_member_id || member.wechat_group_member_id || "").trim();
+        return `<option value="${escapeHtml(id)}" data-stable-member-id="${escapeHtml(stableId)}" data-member-name="${escapeHtml(label)}" ${id && id === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
+      }).join("");
+      idInput.value = selected || "";
+    }
+
     function autofillMonitorContactByName() {
       const name = $("personName").value;
       const mobile = personnelMobileByName(name);
       if (mobile) $("mentionMobile").value = mobile;
       renderMonitorWechatMemberOptions();
+    }
+
+    function autofillCustomReminderContactByName() {
+      const name = $("customReminderName").value;
+      const mobile = personnelMobileByName(name);
+      if (mobile) $("customReminderMobile").value = mobile;
+      renderCustomReminderWechatMemberOptions();
     }
 
     function monitorWechatBindingPayload() {
@@ -3879,6 +3959,21 @@
       const runtimeId = select ? String(select.value || "").trim() : "";
       const room = currentLightAgentRoomForMonitorBinding();
       const saved = monitorWechatSavedBinding($("personName") ? $("personName").value : "");
+      return {
+        wechat_group_room_id: runtimeId ? (room.id || saved.wechat_group_room_id || "") : "",
+        wechat_group_room_name: runtimeId ? (room.name || saved.wechat_group_room_name || "") : "",
+        wechat_group_member_id: runtimeId && option ? String(option.dataset.stableMemberId || saved.wechat_group_member_id || "").trim() : "",
+        wechat_group_runtime_sender_id: runtimeId,
+        wechat_group_member_name: runtimeId && option ? String(option.dataset.memberName || saved.wechat_group_member_name || "").trim() : "",
+      };
+    }
+
+    function customReminderWechatBindingPayload() {
+      const select = $("customReminderWechatMember");
+      const option = select ? select.selectedOptions[0] : null;
+      const runtimeId = select ? String(select.value || "").trim() : "";
+      const room = currentLightAgentRoomForMonitorBinding();
+      const saved = customWechatSavedBinding($("customReminderName") ? $("customReminderName").value : "");
       return {
         wechat_group_room_id: runtimeId ? (room.id || saved.wechat_group_room_id || "") : "",
         wechat_group_room_name: runtimeId ? (room.name || saved.wechat_group_room_name || "") : "",
@@ -4193,11 +4288,14 @@
       state.notificationTargetRooms = rooms;
       const firstRoom = rooms[0] || {};
       $("lightAgentTarget").value = firstRoom.id || "";
+      const activeRoomIds = new Set((state.lightAgentRooms || []).map((room) => String(room.id || room.stable_room_id || room.runtime_room_id || "").trim()).filter(Boolean));
       box.innerHTML = rooms.map((room) => {
         const label = room.name || room.id;
+        const active = !activeRoomIds.size || activeRoomIds.has(room.id);
+        const note = active ? room.id : `${room.id} · 未在当前同步群聊中，可能已失效`;
         return `<div class="item">
           <strong>${escapeHtml(label)}</strong>
-          <small>${escapeHtml(room.id)}</small>
+          <small class="${active ? "" : "status error"}">${escapeHtml(note)}</small>
           <button type="button" data-remove-notification-room="${escapeHtml(room.id)}">移除</button>
         </div>`;
       }).join("") || `<div class="item"><small>还没有添加通知微信群</small></div>`;
@@ -4259,6 +4357,7 @@
       }
       renderWechatBindingList();
       renderMonitorWechatMemberOptions();
+      renderCustomReminderWechatMemberOptions();
     }
 
     function renderWechatBindingList() {
@@ -4707,6 +4806,7 @@
       $("wecomTestMobileFields").classList.toggle("hidden", isLightAgent);
       $("lightAgentNotificationFields").classList.toggle("hidden", !isLightAgent);
       updateMonitorNotificationFields();
+      updateCustomReminderNotificationFields();
     }
 
     function setNotificationSenderType(value) {
@@ -5983,6 +6083,12 @@
     $("personName").addEventListener("blur", autofillMonitorContactByName);
     $("monitorWechatMember").addEventListener("change", () => {
       $("monitorWechatMemberId").value = $("monitorWechatMember").value.trim();
+    });
+    $("customReminderName").addEventListener("input", autofillCustomReminderContactByName);
+    $("customReminderName").addEventListener("change", autofillCustomReminderContactByName);
+    $("customReminderName").addEventListener("blur", autofillCustomReminderContactByName);
+    $("customReminderWechatMember").addEventListener("change", () => {
+      $("customReminderWechatMemberId").value = $("customReminderWechatMember").value.trim();
     });
     setupImageViewer();
     setupNameTagEditor("personnelNames");

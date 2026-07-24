@@ -781,6 +781,11 @@ class DutyRepository:
         reminder_time: str,
         message: str,
         mention_mobile: str = "",
+        wechat_group_room_id: str = "",
+        wechat_group_room_name: str = "",
+        wechat_group_member_id: str = "",
+        wechat_group_runtime_sender_id: str = "",
+        wechat_group_member_name: str = "",
         enabled: bool = True,
         id: int | None = None,
     ) -> int:
@@ -824,7 +829,19 @@ class DutyRepository:
                     (clean_name, clean_mobile, shift_code, reminder_time, message, int(enabled)),
                 )
                 reminder_id = int(cursor.lastrowid)
-        self.upsert_personnel_contacts([{"name": clean_name, "mention_mobile": clean_mobile}])
+        self.upsert_personnel_contacts(
+            [
+                {
+                    "name": clean_name,
+                    "mention_mobile": clean_mobile,
+                    "wechat_group_room_id": str(wechat_group_room_id or "").strip(),
+                    "wechat_group_room_name": str(wechat_group_room_name or "").strip(),
+                    "wechat_group_member_id": str(wechat_group_member_id or "").strip(),
+                    "wechat_group_runtime_sender_id": str(wechat_group_runtime_sender_id or "").strip(),
+                    "wechat_group_member_name": str(wechat_group_member_name or "").strip(),
+                }
+            ]
+        )
         return reminder_id
 
     def delete_custom_reminder(self, reminder_id: int) -> bool:

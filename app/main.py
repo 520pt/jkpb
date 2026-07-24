@@ -176,6 +176,11 @@ class CustomReminderRequest(BaseModel):
     id: int | None = None
     name: str
     mention_mobile: str = ""
+    wechat_group_room_id: str = ""
+    wechat_group_room_name: str = ""
+    wechat_group_member_id: str = ""
+    wechat_group_runtime_sender_id: str = ""
+    wechat_group_member_name: str = ""
     shift_code: str
     reminder_time: str
     message: str

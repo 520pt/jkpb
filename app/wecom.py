@@ -165,19 +165,38 @@ class LightAgentNotifyClient:
         if not self.targets:
             raise WeComError("LightAgent 目标群 room_id 未配置")
         headers = {"Authorization": f"Bearer {self.token}"} if self.token else None
+        failures: list[str] = []
+        sent = 0
         for target in self.targets:
             body = {"channel": self.channel, "target": target, **payload}
             try:
                 response = await self.http_client.post(self.endpoint_url, json=body, headers=headers)
             except httpx.HTTPError as exc:
-                raise WeComError(f"LightAgent 推送连接失败：{exc.__class__.__name__}") from exc
+                failures.append(f"{target}: 连接失败 {exc.__class__.__name__}")
+                continue
             if response.status_code >= 400:
-                raise WeComError(f"LightAgent 推送失败：HTTP {response.status_code}")
+                failures.append(f"{target}: HTTP {response.status_code} {_lightagent_error_text(response)}".strip())
+                continue
             try:
                 data = response.json()
             except ValueError:
+                sent += 1
                 continue
             if data.get("errcode") not in (None, 0):
-                raise WeComError(f"LightAgent 推送失败：{data.get('errmsg', 'unknown error')}")
+                failures.append(f"{target}: {data.get('errmsg', 'unknown error')}")
+                continue
             if data.get("success") is False or data.get("ok") is False:
-                raise WeComError(f"LightAgent 推送失败：{data.get('error') or data.get('detail') or 'unknown error'}")
+                failures.append(f"{target}: {data.get('error') or data.get('detail') or 'unknown error'}")
+                continue
+            sent += 1
+        if sent == 0 and failures:
+            raise WeComError(f"LightAgent 推送失败：{'; '.join(failures)}")
+
+
+def _lightagent_error_text(response: httpx.Response) -> str:
+    try:
+        data = response.json()
+    except ValueError:
+        return response.text[:200]
+    detail = data.get("detail") or data.get("error") or data.get("errmsg")
+    return str(detail or "")[:200]

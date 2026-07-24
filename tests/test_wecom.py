@@ -189,6 +189,10 @@ def test_lightagent_text_posts_to_multiple_targets():
     asyncio.run(_lightagent_text_posts_to_multiple_targets())
 
 
+def test_lightagent_text_ignores_failed_target_when_another_target_succeeds():
+    asyncio.run(_lightagent_text_ignores_failed_target_when_another_target_succeeds())
+
+
 async def _lightagent_text_posts_to_multiple_targets():
     requests: list[httpx.Request] = []
 
@@ -208,6 +212,33 @@ async def _lightagent_text_posts_to_multiple_targets():
     await http_client.aclose()
 
     assert [json.loads(request.content.decode("utf-8"))["target"] for request in requests] == ["room-1", "room-2"]
+
+
+async def _lightagent_text_ignores_failed_target_when_another_target_succeeds():
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        body = json.loads(request.content.decode("utf-8"))
+        if body["target"] == "stale-room":
+            return httpx.Response(
+                400,
+                json={"detail": "target room is not active or could not be resolved: stale-room"},
+            )
+        return httpx.Response(200, json={"success": True})
+
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = LightAgentNotifyClient(
+        endpoint_url="https://lightagent.test/api/push/send",
+        targets=["stale-room", "active-room"],
+        token="push-token",
+        http_client=http_client,
+    )
+
+    await client.send_text("提醒内容", [])
+    await http_client.aclose()
+
+    assert [json.loads(request.content.decode("utf-8"))["target"] for request in requests] == ["stale-room", "active-room"]
 
 
 async def _lightagent_text_uses_runtime_member_ids_as_mentions():

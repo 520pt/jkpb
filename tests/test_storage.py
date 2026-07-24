@@ -209,6 +209,11 @@ def test_custom_reminder_roundtrip_updates_personnel_contact(tmp_path: Path):
     reminder_id = repo.save_custom_reminder(
         name="示例甲",
         mention_mobile="10000000000",
+        wechat_group_room_id="room-1",
+        wechat_group_room_name="通知群",
+        wechat_group_member_id="stable-member-1",
+        wechat_group_runtime_sender_id="@member-1",
+        wechat_group_member_name="示例甲微信",
         shift_code="night",
         reminder_time="21:00",
         message="需要关闭隧道灯",
@@ -228,7 +233,17 @@ def test_custom_reminder_roundtrip_updates_personnel_contact(tmp_path: Path):
             "updated_at": repo.list_custom_reminders()[0]["updated_at"],
         }
     ]
-    assert repo.list_personnel() == [{"name": "示例甲", "mention_mobile": "10000000000"}]
+    assert repo.list_personnel() == [
+        {
+            "name": "示例甲",
+            "mention_mobile": "10000000000",
+            "wechat_group_room_id": "room-1",
+            "wechat_group_room_name": "通知群",
+            "wechat_group_member_id": "stable-member-1",
+            "wechat_group_runtime_sender_id": "@member-1",
+            "wechat_group_member_name": "示例甲微信",
+        }
+    ]
 
 
 def test_daily_duty_config_roundtrip(tmp_path: Path):
