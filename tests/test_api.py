@@ -1453,6 +1453,113 @@ def test_lightagent_notification_config_hides_secret_fields_and_tests_send(tmp_p
     }
 
 
+def test_notification_channel_switch_preserves_wecom_but_only_lightagent_sends(tmp_path, monkeypatch):
+    sent: dict[str, object] = {}
+
+    class FailingWebhookClient:
+        def __init__(self, *, webhook_url: str):
+            raise AssertionError("企业微信群机器人不应该在个人微信群渠道下生效")
+
+    class FakeLightAgentClient:
+        def __init__(self, *, endpoint_url: str, target: str = "", targets: list[str] | None = None, token: str = ""):
+            sent["endpoint_url"] = endpoint_url
+            sent["targets"] = targets or []
+            sent["token"] = token
+
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            sent["content"] = content
+            sent["mentions"] = mentioned_mobile_list
+
+    monkeypatch.setenv("WECHAT_BRIDGE_ENABLED", "false")
+    monkeypatch.setattr("app.main.WeComWebhookClient", FailingWebhookClient)
+    monkeypatch.setattr("app.main.LightAgentNotifyClient", FakeLightAgentClient)
+    monkeypatch.setattr(main_module, "_sync_lightagent_notification_targets", lambda repo, sender_type, targets: {"success": True})
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(
+        sender_type="wecom_webhook",
+        webhook_url="https://example.test/cgi-bin/webhook/send?key=old-wecom",
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/notification-config",
+        json={
+            "sender_type": "lightagent",
+            "webhook_url": "",
+            "lightagent_url": "https://lightagent.test/api/push/send",
+            "lightagent_token": "push-token",
+            "lightagent_targets": [{"id": "room-1", "name": "通知群"}],
+        },
+    )
+    test_response = client.post("/api/notification-config/test", json={"test_wechat_member_id": "@member-1"})
+    config = repo.get_notification_config()
+
+    assert response.status_code == 200
+    assert config["sender_type"] == "lightagent"
+    assert config["webhook_url"].endswith("old-wecom")
+    assert response.json()["config"]["webhook_configured"] is True
+    assert response.json()["config"]["lightagent_active"] is True
+    assert test_response.status_code == 200
+    assert sent["targets"] == ["room-1"]
+    assert sent["mentions"] == ["@member-1"]
+
+
+def test_notification_channel_switch_preserves_lightagent_but_only_wecom_sends(tmp_path, monkeypatch):
+    sent: dict[str, object] = {}
+
+    class FakeWebhookClient:
+        def __init__(self, *, webhook_url: str):
+            sent["webhook_url"] = webhook_url
+
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            sent["content"] = content
+            sent["mentions"] = mentioned_mobile_list
+
+    class FailingLightAgentClient:
+        def __init__(self, **kwargs):
+            raise AssertionError("个人微信群不应该在企业微信群机器人渠道下生效")
+
+    monkeypatch.setenv("WECHAT_BRIDGE_ENABLED", "false")
+    monkeypatch.setattr("app.main.WeComWebhookClient", FakeWebhookClient)
+    monkeypatch.setattr("app.main.LightAgentNotifyClient", FailingLightAgentClient)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(
+        sender_type="lightagent",
+        webhook_url="",
+        lightagent_url="https://lightagent.test/api/push/send",
+        lightagent_token="push-token",
+        lightagent_targets=[{"id": "room-1", "name": "通知群"}],
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/notification-config",
+        json={
+            "sender_type": "wecom_webhook",
+            "webhook_url": "https://example.test/cgi-bin/webhook/send?key=new-wecom",
+            "lightagent_url": "",
+            "lightagent_token": "",
+            "lightagent_targets": [],
+        },
+    )
+    test_response = client.post("/api/notification-config/test", json={"test_mobile": "10000000000"})
+    config = repo.get_notification_config()
+
+    assert response.status_code == 200
+    assert config["sender_type"] == "wecom_webhook"
+    assert config["webhook_url"].endswith("new-wecom")
+    assert config["lightagent_url"] == "https://lightagent.test/api/push/send"
+    assert config["lightagent_token"] == "push-token"
+    assert config["lightagent_targets"] == [{"id": "room-1", "name": "通知群"}]
+    assert response.json()["config"]["webhook_active"] is True
+    assert response.json()["config"]["lightagent_configured"] is True
+    assert test_response.status_code == 200
+    assert sent["webhook_url"].endswith("new-wecom")
+    assert sent["mentions"] == ["10000000000"]
+
+
 def test_notification_test_failure_sanitizes_wechat_ids(tmp_path, monkeypatch):
     class FakeLightAgentClient:
         def __init__(self, *, endpoint_url: str, target: str = "", targets: list[str] | None = None, token: str = ""):

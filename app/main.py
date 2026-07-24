@@ -832,7 +832,11 @@ def create_app(
             request_targets = _normalize_feature_channel_rooms(
                 request_targets + [{"id": request.lightagent_target.strip()}]
             )
-        lightagent_targets = request_targets
+        existing_targets = _normalize_feature_channel_rooms(existing.get("lightagent_targets"))
+        existing_legacy_target = str(existing.get("lightagent_target") or "").strip()
+        if existing_legacy_target:
+            existing_targets = _normalize_feature_channel_rooms(existing_targets + [{"id": existing_legacy_target}])
+        lightagent_targets = request_targets or existing_targets
         lightagent_target = lightagent_targets[0]["id"] if lightagent_targets else ""
         repo.save_notification_config(
             sender_type=sender_type,
@@ -3219,19 +3223,19 @@ def _public_notification_config(config: dict[str, Any]) -> dict[str, Any]:
     lightagent_target = lightagent_targets[0]["id"] if lightagent_targets else ""
     lightagent_token = str(config.get("lightagent_token", "")).strip()
     sender_type = _normalize_notification_sender_type(str(config.get("sender_type") or "wecom_webhook"))
-    active_configured = (
-        bool(webhook_url)
-        if sender_type == "wecom_webhook"
-        else bool(lightagent_targets and (lightagent_url or wechat_bridge_enabled()))
-    )
+    webhook_active = sender_type == "wecom_webhook"
+    lightagent_active = sender_type == "lightagent"
+    active_configured = bool(webhook_url) if webhook_active else bool(lightagent_targets and (lightagent_url or wechat_bridge_enabled()))
     return {
         "sender_type": sender_type,
         "wechat_bridge_enabled": wechat_bridge_enabled(),
         "webhook_url": "",
         "webhook_configured": bool(webhook_url),
+        "webhook_active": webhook_active and bool(webhook_url),
         "webhook_display": "已配置" if webhook_url else "未配置",
         "lightagent_url": lightagent_url,
         "lightagent_configured": bool(lightagent_targets and (lightagent_url or wechat_bridge_enabled())),
+        "lightagent_active": lightagent_active and bool(lightagent_targets and (lightagent_url or wechat_bridge_enabled())),
         "lightagent_display": "已配置" if lightagent_targets and (lightagent_url or wechat_bridge_enabled()) else "未配置",
         "lightagent_token_configured": bool(lightagent_token),
         "lightagent_target": lightagent_target,

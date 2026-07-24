@@ -5016,16 +5016,18 @@
         }
       }
       const notificationTargets = normalizeFeatureChannelRooms(state.notificationTargetRooms || []);
+      const senderType = $("notificationSenderType").value;
+      const useLightAgent = senderType === "lightagent";
       const response = await fetch("/api/notification-config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          sender_type: $("notificationSenderType").value,
-          webhook_url: $("webhookUrl").value.trim(),
-          lightagent_url: $("lightAgentUrl").value.trim(),
-          lightagent_token: $("lightAgentToken").value.trim(),
-          lightagent_target: notificationTargets.length ? notificationTargets[0].id : "",
-          lightagent_targets: notificationTargets,
+          sender_type: senderType,
+          webhook_url: useLightAgent ? "" : $("webhookUrl").value.trim(),
+          lightagent_url: useLightAgent ? $("lightAgentUrl").value.trim() : "",
+          lightagent_token: useLightAgent ? $("lightAgentToken").value.trim() : "",
+          lightagent_target: useLightAgent && notificationTargets.length ? notificationTargets[0].id : "",
+          lightagent_targets: useLightAgent ? notificationTargets : [],
           message_template: $("messageTemplate").value.trim()
         })
       });
