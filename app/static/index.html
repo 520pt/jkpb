@@ -153,6 +153,33 @@
       font-size: 13px;
       line-height: 1.5;
     }
+    .patrol-warning-title-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      padding-bottom: 10px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .side-block .patrol-warning-title-row h3 {
+      padding-bottom: 0;
+      margin-bottom: 0;
+      border-bottom: 0;
+    }
+    .patrol-warning-query-meta {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 6px 10px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+      text-align: right;
+    }
+    .patrol-warning-query-meta span {
+      white-space: nowrap;
+    }
     .patrol-delivery-row {
       display: grid;
       grid-template-columns: minmax(0, 1fr) 150px;
@@ -2280,10 +2307,12 @@
             </div>
 
             <div class="side-block">
-              <h3>已监测到的预警</h3>
+              <div class="patrol-warning-title-row">
+                <h3>已监测到的预警</h3>
+                <div id="patrolWarningQueryMeta" class="patrol-warning-query-meta"></div>
+              </div>
               <div id="patrolWarningLatest" class="people-list"></div>
               <img id="patrolWarningImagePreview" class="warning-image-preview hidden" alt="公路巡查预警图片预览" />
-              <div id="patrolWarningImageMeta" class="warning-image-meta"></div>
               <div id="patrolWarningRuntime" class="people-list"></div>
             </div>
           </section>
@@ -5192,16 +5221,15 @@
       state.patrolWarningLatest = latest || null;
       state.patrolWarningPanelState = stateInfo || null;
       renderPatrolWarningRuntime(stateInfo);
-      const stateText = stateInfo && stateInfo.last_checked_at ? `最近检查：${formatIsoMinute(stateInfo.last_checked_at)}` : "尚未检查";
       if (!latest || !latest.key) {
-        $("patrolWarningLatest").innerHTML = `<div class="item"><strong>暂无匹配预警</strong><small>${escapeHtml(stateText)}</small></div>`;
+        $("patrolWarningLatest").innerHTML = `<div class="item"><strong>暂无匹配预警</strong><small>等待最新查询结果</small></div>`;
         renderPatrolWarningImagePreview(false);
         return;
       }
       $("patrolWarningLatest").innerHTML = `
         <div class="item">
           <strong>${escapeHtml(latest.route_code || "-")} ${escapeHtml(latest.warning_level_label || "预警")}</strong>
-          <small>${escapeHtml(latest.route_name || "")} · 匹配 ${stats && stats.matched_rows !== undefined ? stats.matched_rows : "-"} 条 · ${escapeHtml(stateText)}</small>
+          <small>${escapeHtml(latest.route_name || "")} · 匹配 ${stats && stats.matched_rows !== undefined ? stats.matched_rows : "-"} 条</small>
           <div>开始：${escapeHtml(latest.start_time ? formatIsoMinute(latest.start_time) : "-")} · 结束：${escapeHtml(latest.end_time ? formatIsoMinute(latest.end_time) : "-")}</div>
           <div>桩号：${escapeHtml(latest.start_stake || "-")} - ${escapeHtml(latest.end_stake || "-")}</div>
           <div id="patrolWarningNextReminder"></div>
@@ -5337,14 +5365,21 @@
     }
 
     function updatePatrolWarningQueryCountdown() {
-      const target = $("patrolWarningImageMeta");
+      const target = $("patrolWarningQueryMeta");
       if (!target) return;
       const query = patrolWarningQueryStatus(state.patrolWarningPanelState);
-      if (!query) {
-        target.textContent = "";
+      const lastCheckedAt = state.patrolWarningPanelState && state.patrolWarningPanelState.last_checked_at
+        ? formatIsoMinute(state.patrolWarningPanelState.last_checked_at)
+        : "";
+      if (!query && !lastCheckedAt) {
+        target.innerHTML = `<span>上次查询：尚未查询</span><span>下次查询：等待首次查询</span>`;
         return;
       }
-      target.textContent = `${query.label}：${formatIsoMinute(query.nextAt.toISOString())} · 倒计时：${formatCountdown(query.countdownMs)}`;
+      const lastText = lastCheckedAt ? `上次查询：${lastCheckedAt}` : "上次查询：尚未查询";
+      const nextText = query
+        ? `${query.label}：${formatIsoMinute(query.nextAt.toISOString())} · 倒计时：${formatCountdown(query.countdownMs)}`
+        : "下次查询：等待首次查询";
+      target.innerHTML = `<span>${escapeHtml(lastText)}</span><span>${escapeHtml(nextText)}</span>`;
     }
 
     function updatePatrolWarningNextReminder() {
