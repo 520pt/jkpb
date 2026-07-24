@@ -620,6 +620,34 @@ class DutyRepository:
                     ),
                 )
 
+    def clear_wechat_binding_for_member(self, member_ids: list[str], *, except_name: str = "") -> None:
+        ids = sorted({str(member_id or "").strip() for member_id in member_ids if str(member_id or "").strip()})
+        if not ids:
+            return
+        placeholders = ",".join("?" for _ in ids)
+        params: list[str] = [*ids, *ids]
+        where_name = ""
+        if except_name.strip():
+            where_name = " AND name != ?"
+            params.append(except_name.strip())
+        with self._connect() as conn:
+            conn.execute(
+                f"""
+                UPDATE personnel_names
+                SET wechat_group_room_id = '',
+                    wechat_group_room_name = '',
+                    wechat_group_member_id = '',
+                    wechat_group_runtime_sender_id = '',
+                    wechat_group_member_name = '',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE (
+                    wechat_group_member_id IN ({placeholders})
+                    OR wechat_group_runtime_sender_id IN ({placeholders})
+                ){where_name}
+                """,
+                params,
+            )
+
     def list_personnel_names(self) -> list[str]:
         with self._connect() as conn:
             rows = conn.execute("SELECT name FROM personnel_names ORDER BY name").fetchall()

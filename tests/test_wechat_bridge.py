@@ -96,3 +96,26 @@ def test_wechat_bridge_marks_recent_outgoing_text_as_self_message(tmp_path):
     )
 
     assert message["my_msg"] is True
+
+
+def test_wechat_bridge_message_includes_stable_member_id(tmp_path):
+    manager = WechatBridgeManager(data_dir=tmp_path / "wechat")
+    manager.self_id = "@self"
+    room = manager._normalize_rooms([{"id": "room@@runtime", "name": "测试群"}])[0]
+
+    message = manager._normalize_message(
+        {
+            "room_id": "room@@runtime",
+            "room_name": "测试群",
+            "sender_id": "@member-runtime",
+            "sender_name": "张三",
+            "self_id": "@self",
+            "text": "@机器人 查询我的绑定",
+            "is_at": True,
+        }
+    )
+
+    assert message["stable_room_id"] == room["stable_room_id"]
+    assert message["sender_id"].startswith("wgm_")
+    assert message["stable_member_id"] == message["sender_id"]
+    assert message["runtime_sender_id"] == "@member-runtime"

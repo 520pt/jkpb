@@ -176,6 +176,43 @@ def test_personnel_contacts_save_and_clear_wechat_binding(tmp_path: Path):
     assert repo.list_personnel() == [{"name": "Alice", "mention_mobile": "10000000000"}]
 
 
+def test_clear_wechat_binding_for_member_preserves_mobile_and_except_name(tmp_path: Path):
+    repo = DutyRepository(tmp_path / "duty.db")
+    repo.save_personnel_contacts(
+        [
+            _personnel_row(
+                "Alice",
+                "10000000000",
+                wechat_group_member_id="stable-member-1",
+                wechat_group_runtime_sender_id="@member-1",
+                wechat_group_member_name="Alice WeChat",
+            ),
+            _personnel_row(
+                "Bob",
+                "10000000001",
+                wechat_group_member_id="stable-member-1",
+                wechat_group_runtime_sender_id="@member-1",
+                wechat_group_member_name="Bob WeChat",
+            ),
+        ]
+    )
+
+    repo.clear_wechat_binding_for_member(["stable-member-1", "@member-1"], except_name="Bob")
+
+    assert repo.list_personnel() == [
+        {"name": "Alice", "mention_mobile": "10000000000"},
+        {
+            "name": "Bob",
+            "mention_mobile": "10000000001",
+            "wechat_group_room_id": "",
+            "wechat_group_room_name": "",
+            "wechat_group_member_id": "stable-member-1",
+            "wechat_group_runtime_sender_id": "@member-1",
+            "wechat_group_member_name": "Bob WeChat",
+        },
+    ]
+
+
 def test_monitored_people_include_saved_wechat_binding(tmp_path: Path):
     repo = DutyRepository(tmp_path / "duty.db")
 

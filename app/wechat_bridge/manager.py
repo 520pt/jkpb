@@ -422,6 +422,7 @@ class WechatBridgeManager:
             "stable_room_id": stable_room_id,
             "sender_id": stable_member_id,
             "runtime_sender_id": runtime_sender_id,
+            "stable_member_id": stable_member_id,
             "sender_name": sender_name,
             "text": str(payload.get("text") or ""),
             "is_at": bool(payload.get("is_at")),

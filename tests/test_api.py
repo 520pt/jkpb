@@ -2222,8 +2222,21 @@ def test_wechat_bridge_group_command_requires_at_mention(tmp_path, monkeypatch):
             "is_at": True,
         },
     )
+    main_module._handle_wechat_bridge_message(
+        repo,
+        uploads,
+        {
+            "room_id": "room@@runtime",
+            "stable_room_id": "wgr_feature",
+            "sender_id": "wgm_member",
+            "stable_member_id": "wgm_member",
+            "runtime_sender_id": "@member",
+            "text": "@闷葫芦 绑定商邱宏",
+            "is_at": True,
+        },
+    )
 
-    assert calls == ["@闷葫芦 查询今日机电", "@闷葫芦 8"]
+    assert calls == ["@闷葫芦 查询今日机电", "@闷葫芦 8", "@闷葫芦 绑定商邱宏"]
 
 
 def test_wechat_query_triggers_tunnel_mechanical_submit(tmp_path, monkeypatch):
@@ -2518,6 +2531,116 @@ def test_wechat_query_reports_unbound_sender(tmp_path, monkeypatch):
     assert body["query_type"] == "unbound"
     assert "还没有找到你的微信成员绑定" in body["reply"]
     assert "@missing-member" not in body["reply"]
+
+
+def test_wechat_query_matches_saved_stable_member_id(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/personnel",
+        json={
+            "names": ["商邱宏"],
+            "people": [
+                {
+                    "name": "商邱宏",
+                    "wechat_group_member_id": "wgm_stable_member",
+                    "wechat_group_member_name": "商邱宏微信",
+                }
+            ],
+        },
+    )
+    client.post("/api/people", json={"name": "商邱宏", "daily_time": "07:40", "before_shift_minutes": 10, "enabled": True})
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "查询我的绑定", "sender_id": "wgm_stable_member"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["query_type"] == "binding"
+    assert body["person_name"] == "商邱宏"
+
+
+def test_wechat_binding_query_is_not_treated_as_bind_command(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/personnel",
+        json={
+            "names": ["商邱宏"],
+            "people": [
+                {
+                    "name": "商邱宏",
+                    "wechat_group_runtime_sender_id": "@runtime-member",
+                    "wechat_group_member_name": "商邱宏微信",
+                }
+            ],
+        },
+    )
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "绑定查询", "runtime_sender_id": "@runtime-member"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["query_type"] == "binding"
+    assert body["person_name"] == "商邱宏"
+
+
+def test_wechat_query_can_bind_current_sender_to_person_name(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post("/api/personnel", json={"names": ["旧人员", "商邱宏"]})
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_personnel_contacts(
+        [
+            {
+                "name": "旧人员",
+                "wechat_group_member_id": "wgm_stable_member",
+                "wechat_group_runtime_sender_id": "@runtime-member",
+                "wechat_group_member_name": "旧微信名",
+            }
+        ]
+    )
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={
+            "text": "绑定商邱宏",
+            "room_id": "room@@runtime",
+            "stable_room_id": "wgr_feature",
+            "room_name": "功能群",
+            "sender_id": "wgm_stable_member",
+            "stable_member_id": "wgm_stable_member",
+            "runtime_sender_id": "@runtime-member",
+            "sender_name": "商邱宏微信",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["query_type"] == "binding_update"
+    assert body["person_name"] == "商邱宏"
+    people = DutyRepository(tmp_path / "data" / "duty-reminder.db").list_personnel()
+    assert next(person for person in people if person["name"] == "旧人员") == {"name": "旧人员", "mention_mobile": ""}
+    bound = next(person for person in people if person["name"] == "商邱宏")
+    assert bound["wechat_group_room_id"] == "wgr_feature"
+    assert bound["wechat_group_room_name"] == "功能群"
+    assert bound["wechat_group_member_id"] == "wgm_stable_member"
+    assert bound["wechat_group_runtime_sender_id"] == "@runtime-member"
+    assert bound["wechat_group_member_name"] == "商邱宏微信"
 
 
 def test_wechat_query_accepts_natural_date_shift_question(tmp_path, monkeypatch):

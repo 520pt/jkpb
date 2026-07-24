@@ -308,6 +308,7 @@ class WechatQueryRequest(BaseModel):
     text: str = ""
     room_id: str = ""
     stable_room_id: str = ""
+    room_name: str = ""
     sender_id: str = ""
     runtime_sender_id: str = ""
     stable_member_id: str = ""
@@ -2086,6 +2087,8 @@ async def _build_wechat_query_response(
                 f"微信成员：{_clean_wechat_member_display_name(str(person.get('wechat_group_member_name') or query.sender_name or ''), str(person.get('wechat_group_runtime_sender_id') or query.runtime_sender_id or query.sender_id or '')) or '已绑定'}"
             ),
         }
+    if _is_wechat_self_bind_command(text):
+        return _build_wechat_self_bind_response(repo, query, text)
     if _is_wechat_next_reminder_query(text):
         if not person:
             return _wechat_query_unbound_response(query)
@@ -2124,8 +2127,10 @@ def _handle_wechat_bridge_message(repo: DutyRepository, uploads: Path, message: 
         text=text,
         room_id=str(message.get("room_id") or ""),
         stable_room_id=str(message.get("stable_room_id") or ""),
+        room_name=str(message.get("room_name") or ""),
         sender_id=str(message.get("sender_id") or ""),
         runtime_sender_id=str(message.get("runtime_sender_id") or ""),
+        stable_member_id=str(message.get("stable_member_id") or message.get("sender_id") or ""),
         sender_name=str(message.get("sender_name") or ""),
     )
     try:
@@ -2158,6 +2163,7 @@ def _looks_like_duty_wechat_command(text: str) -> bool:
         for checker in (
             _is_tunnel_mechanical_wechat_request,
             _is_wechat_query_help,
+            _is_wechat_self_bind_command,
             _is_wechat_binding_query,
             _is_wechat_next_reminder_query,
             _is_wechat_monitor_query,
@@ -2530,6 +2536,11 @@ def _is_wechat_binding_query(text: str) -> bool:
     return text in {"查询我的绑定", "我的绑定", "查我的绑定", "绑定查询", "我绑定了吗", "我的微信绑定"}
 
 
+def _is_wechat_self_bind_command(text: str) -> bool:
+    value = str(text or "").strip()
+    return not _is_wechat_binding_query(value) and bool(re.match(r"^(绑定|我是|我叫).+", value))
+
+
 def _is_wechat_next_reminder_query(text: str) -> bool:
     return text in {"查询下次提醒", "下次提醒", "我的下次提醒", "最近提醒", "下一次提醒", "我下次什么时候提醒"}
 
@@ -2711,7 +2722,7 @@ def _wechat_query_unbound_response(query: WechatQueryRequest) -> dict[str, Any]:
     return {
         "success": False,
         "query_type": "unbound",
-        "reply": "还没有找到你的微信成员绑定。请先在 duty-reminder 设置 -> 通知发送 -> 微信群通知里同步成员并保存绑定。" + suffix,
+        "reply": "还没有找到你的微信成员绑定。可以直接回复“绑定姓名”，例如：绑定商邱宏；也可以在 duty-reminder 设置里同步成员并保存绑定。" + suffix,
     }
 
 
@@ -2720,7 +2731,10 @@ def _person_for_wechat_query(repo: DutyRepository, query: WechatQueryRequest) ->
         str(query.runtime_sender_id or "").strip(),
         str(query.sender_id or "").strip(),
     }
-    stable_ids = {str(query.stable_member_id or "").strip()}
+    stable_ids = {
+        str(query.stable_member_id or "").strip(),
+        str(query.sender_id or "").strip(),
+    }
     runtime_ids.discard("")
     stable_ids.discard("")
     for person in repo.list_personnel():
@@ -2731,6 +2745,69 @@ def _person_for_wechat_query(repo: DutyRepository, query: WechatQueryRequest) ->
         if stable_id and stable_id in stable_ids:
             return person
     return None
+
+
+def _wechat_self_bind_requested_name(repo: DutyRepository, text: str) -> str:
+    value = re.sub(r"^(绑定|我是|我叫)", "", str(text or "").strip(), count=1).strip()
+    value = value.strip("，,。.!！?？：:")
+    if not value:
+        return ""
+    for name in _wechat_query_known_person_names(repo):
+        if value == name or name in value:
+            return name
+    return value
+
+
+def _build_wechat_self_bind_response(repo: DutyRepository, query: WechatQueryRequest, text: str) -> dict[str, Any]:
+    requested_name = _wechat_self_bind_requested_name(repo, text)
+    known_names = set(_wechat_query_known_person_names(repo))
+    if not requested_name or requested_name not in known_names:
+        examples = "、".join(_wechat_query_known_person_names(repo)[:8])
+        suffix = f"\n当前可绑定人员示例：{examples}" if examples else "\n当前还没有人员名单，请先在后台添加人员或导入排班。"
+        return {
+            "success": False,
+            "query_type": "binding_update",
+            "reply": f"没有找到人员“{requested_name or '未填写'}”，请发送“绑定姓名”，姓名必须和后台人员名单一致。{suffix}",
+        }
+
+    stable_member_id = str(query.stable_member_id or "").strip()
+    sender_id = str(query.sender_id or "").strip()
+    if not stable_member_id and sender_id.startswith("wgm_"):
+        stable_member_id = sender_id
+    runtime_sender_id = str(query.runtime_sender_id or "").strip()
+    if not runtime_sender_id and sender_id and not sender_id.startswith("wgm_"):
+        runtime_sender_id = sender_id
+    member_ids = [stable_member_id, runtime_sender_id]
+    if not any(member_ids):
+        return {
+            "success": False,
+            "query_type": "binding_update",
+            "reply": "没有识别到当前微信成员标识，请在群里重新发送：绑定姓名。",
+        }
+
+    sender_name = _clean_wechat_member_display_name(str(query.sender_name or ""), runtime_sender_id or stable_member_id)
+    room_id = str(query.stable_room_id or query.room_id or "").strip()
+    room_name = _clean_wechat_member_display_name(str(query.room_name or ""), room_id)
+    repo.clear_wechat_binding_for_member(member_ids, except_name=requested_name)
+    repo.upsert_personnel_contacts(
+        [
+            {
+                "name": requested_name,
+                "wechat_group_room_id": room_id,
+                "wechat_group_room_name": room_name,
+                "wechat_group_member_id": stable_member_id,
+                "wechat_group_runtime_sender_id": runtime_sender_id,
+                "wechat_group_member_name": sender_name,
+            }
+        ]
+    )
+    display_name = sender_name or "当前微信成员"
+    return {
+        "success": True,
+        "query_type": "binding_update",
+        "person_name": requested_name,
+        "reply": f"绑定成功：{requested_name}\n微信成员：{display_name}\n现在可以发送“查询我的监控”或“查询我的绑定”。",
+    }
 
 
 def _wechat_query_known_person_names(repo: DutyRepository) -> list[str]:
