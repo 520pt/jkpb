@@ -4237,6 +4237,22 @@
       return Number.isNaN(date.getTime()) ? text : date.toLocaleString();
     }
 
+    function formatBeijingMinute(date) {
+      const value = date instanceof Date ? date : new Date(date);
+      if (Number.isNaN(value.getTime())) return "";
+      const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: BEIJING_TIME_ZONE,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false
+      }).formatToParts(value);
+      const lookup = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+      return `${lookup.year}-${lookup.month}-${lookup.day} ${lookup.hour}:${lookup.minute}`;
+    }
+
     function beijingDateParts(date = new Date()) {
       const parts = new Intl.DateTimeFormat("en-US", {
         timeZone: BEIJING_TIME_ZONE,
@@ -5464,7 +5480,7 @@
       }
       const lastText = lastCheckedAt ? `上次查询：${lastCheckedAt}` : "上次查询：尚未查询";
       const nextText = query
-        ? `${query.label}：${formatIsoMinute(query.nextAt.toISOString())} · 倒计时：${formatCountdown(query.countdownMs)}`
+        ? `${query.label}：${formatBeijingMinute(query.nextAt)} · 倒计时：${formatCountdown(query.countdownMs)}`
         : "下次查询：等待首次查询";
       target.innerHTML = `<span>${escapeHtml(lastText)}</span><span>${escapeHtml(nextText)}</span>`;
     }
@@ -5481,7 +5497,7 @@
         target.textContent = reminder.text;
         return;
       }
-      target.textContent = `下次提醒时间：${formatIsoMinute(reminder.nextAt.toISOString())} · 倒计时：${formatCountdown(reminder.countdownMs)} · ${reminder.text}`;
+      target.textContent = `下次提醒时间：${formatBeijingMinute(reminder.nextAt)} · 倒计时：${formatCountdown(reminder.countdownMs)} · ${reminder.text}`;
     }
 
     async function refreshPatrolWarningPanel() {
