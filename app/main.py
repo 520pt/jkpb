@@ -2062,7 +2062,7 @@ async def _build_wechat_query_response(
     *,
     uploads: Path | None = None,
 ) -> dict[str, Any]:
-    text = _normalize_wechat_query_text(query.text)
+    text = _wechat_query_menu_selection_command(_normalize_wechat_query_text(query.text))
     if _is_tunnel_mechanical_wechat_request(text):
         _require_feature_channel_for_wechat_query(repo, query, "allow_tunnel_mechanical")
     else:
@@ -2148,7 +2148,7 @@ def _handle_wechat_bridge_message(repo: DutyRepository, uploads: Path, message: 
 
 
 def _looks_like_duty_wechat_command(text: str) -> bool:
-    value = str(text or "").strip()
+    value = _wechat_query_menu_selection_command(str(text or "").strip())
     if not value:
         return False
     return any(
@@ -2503,9 +2503,25 @@ def _normalize_wechat_query_text(text: str) -> str:
 
 
 def _is_wechat_query_help(text: str) -> bool:
-    if text in {"帮助", "查询帮助", "监控帮助", "提醒帮助"}:
+    if text in {"查询", "查", "菜单", "帮助", "查询帮助", "监控帮助", "提醒帮助"}:
         return True
     return "帮助" in text and any(keyword in text for keyword in ("查询", "监控", "提醒", "绑定"))
+
+
+def _wechat_query_menu_selection_command(text: str) -> str:
+    today = _today_in_tz().isoformat()
+    return {
+        "1": "查询我的监控",
+        "2": "查询今日提醒",
+        "3": "查询明日监控",
+        "4": "查询本周监控",
+        "5": "查询未来7天",
+        "6": "查询下次提醒",
+        "7": "查询我的绑定",
+        "8": "查询今日机电",
+        "9": f"查询{today}机电",
+        "10": "隧道机电",
+    }.get(text, text)
 
 
 def _is_wechat_binding_query(text: str) -> bool:
@@ -2665,6 +2681,7 @@ def _wechat_query_chinese_int(value: str) -> int:
 
 
 def _wechat_query_help_text() -> str:
+    today = _today_in_tz().isoformat()
     return (
         "监控查询菜单：\n"
         "1. 查询我的监控\n"
@@ -2675,9 +2692,10 @@ def _wechat_query_help_text() -> str:
         "6. 查询下次提醒\n"
         "7. 查询我的绑定\n"
         "8. 查询今日机电\n"
-        "9. 查询2026-07-24机电\n"
-        "10. 隧道机电录入 日期2026-07-24 负责人张三 记录人李四 天气晴\n"
-        "回复序号即可执行，菜单 3 分钟内有效。\n"
+        f"9. 查询{today}机电\n"
+        "10. 查看隧道机电录入格式\n"
+        "直接回复序号即可执行。\n"
+        f"录入格式：隧道机电录入 日期{today} 负责人张三 记录人李四 天气晴\n"
         "也可以问：我今天什么班、明天我上班吗、查询7月24日监控。\n"
         "说明：普通群成员只能查询自己，需要先在 duty-reminder 设置里绑定微信成员。"
     )

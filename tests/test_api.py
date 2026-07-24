@@ -2016,6 +2016,7 @@ def test_feature_channel_can_be_disabled(tmp_path, monkeypatch):
 
 def test_wechat_query_help_returns_numbered_menu(tmp_path, monkeypatch):
     monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2026, 7, 24))
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
     _import_tunnel_template(client)
@@ -2023,7 +2024,7 @@ def test_wechat_query_help_returns_numbered_menu(tmp_path, monkeypatch):
     response = client.post(
         "/api/wechat-query",
         headers={"X-Duty-Query-Token": "unit-token"},
-        json={"text": "查询帮助", "runtime_sender_id": "@member-1"},
+        json={"text": "查询", "runtime_sender_id": "@member-1"},
     )
 
     assert response.status_code == 200
@@ -2033,7 +2034,38 @@ def test_wechat_query_help_returns_numbered_menu(tmp_path, monkeypatch):
     assert "监控查询菜单" in body["reply"]
     assert "1. 查询我的监控" in body["reply"]
     assert "7. 查询我的绑定" in body["reply"]
+    assert "9. 查询2026-07-24机电" in body["reply"]
     assert "回复序号即可执行" in body["reply"]
+    assert "录入格式：隧道机电录入 日期2026-07-24 负责人张三 记录人李四 天气晴" in body["reply"]
+
+
+def test_wechat_query_numbered_menu_selection_runs_command(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2026, 7, 23))
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    _import_tunnel_template(client)
+
+    async def fake_query(repo, request, uploads):
+        return {
+            "success": True,
+            "result_rows": [{"assetName": "示例隧道上行"}],
+            "result_image_url": f"/api/uploads/result-{request.checkTime.isoformat()}.png",
+        }
+
+    monkeypatch.setattr(main_module, "_query_tunnel_mechanical_result_image", fake_query)
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "8"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["query_type"] == "tunnel_mechanical_result"
+    assert body["checkTime"] == "2026-07-23"
 
 
 def test_wechat_query_tunnel_mechanical_returns_fill_template(tmp_path, monkeypatch):
@@ -2178,8 +2210,20 @@ def test_wechat_bridge_group_command_requires_at_mention(tmp_path, monkeypatch):
             "is_at": True,
         },
     )
+    main_module._handle_wechat_bridge_message(
+        repo,
+        uploads,
+        {
+            "room_id": "room@@runtime",
+            "stable_room_id": "wgr_feature",
+            "sender_id": "wgm_member",
+            "runtime_sender_id": "@member",
+            "text": "@闷葫芦 8",
+            "is_at": True,
+        },
+    )
 
-    assert calls == ["@闷葫芦 查询今日机电"]
+    assert calls == ["@闷葫芦 查询今日机电", "@闷葫芦 8"]
 
 
 def test_wechat_query_triggers_tunnel_mechanical_submit(tmp_path, monkeypatch):
