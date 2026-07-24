@@ -367,6 +367,67 @@ def test_tunnel_mechanical_login_retries_when_auto_captcha_is_wrong(tmp_path, mo
     assert calls == {"captcha": 2, "login": 2}
 
 
+def test_tunnel_mechanical_keepalive_skips_when_token_is_fresh(tmp_path, monkeypatch):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    repo: DutyRepository = app.state.repo
+    repo.save_tunnel_mechanical_config(base_url="https://example.test", username="station-user", password="secret")
+    repo.save_tunnel_mechanical_state(
+        access_token="cached-token",
+        refresh_token="refresh-token",
+        token_expires_at=(datetime.now(main_module.TZ) + timedelta(hours=2)).isoformat(),
+    )
+    calls = {"refresh": 0, "login": 0}
+
+    async def fake_refresh(*args, **kwargs):
+        calls["refresh"] += 1
+        return None
+
+    async def fake_login(*args, **kwargs):
+        calls["login"] += 1
+        return {}
+
+    monkeypatch.setattr(main_module, "_refresh_tunnel_mechanical_token", fake_refresh)
+    monkeypatch.setattr(main_module, "_login_tunnel_mechanical", fake_login)
+
+    asyncio.run(main_module._keepalive_tunnel_mechanical_login(repo))
+
+    assert calls == {"refresh": 0, "login": 0}
+
+
+def test_tunnel_mechanical_keepalive_refreshes_when_token_near_expiry(tmp_path, monkeypatch):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    repo: DutyRepository = app.state.repo
+    repo.save_tunnel_mechanical_config(base_url="https://example.test", username="station-user", password="secret")
+    repo.save_tunnel_mechanical_state(
+        access_token="old-token",
+        refresh_token="refresh-token",
+        token_expires_at=(datetime.now(main_module.TZ) + timedelta(minutes=5)).isoformat(),
+    )
+    calls = {"refresh": 0, "login": 0}
+
+    async def fake_refresh(repo_arg, base_url, state):
+        calls["refresh"] += 1
+        assert base_url == "https://example.test"
+        repo_arg.save_tunnel_mechanical_state(
+            access_token="fresh-token",
+            token_expires_at=(datetime.now(main_module.TZ) + timedelta(hours=2)).isoformat(),
+            last_error="",
+        )
+        return repo_arg.get_tunnel_mechanical_state()
+
+    async def fake_login(*args, **kwargs):
+        calls["login"] += 1
+        return {}
+
+    monkeypatch.setattr(main_module, "_refresh_tunnel_mechanical_token", fake_refresh)
+    monkeypatch.setattr(main_module, "_login_tunnel_mechanical", fake_login)
+
+    asyncio.run(main_module._keepalive_tunnel_mechanical_login(repo))
+
+    assert calls == {"refresh": 1, "login": 0}
+    assert repo.get_tunnel_mechanical_state()["access_token"] == "fresh-token"
+
+
 def test_tunnel_mechanical_captcha_fetch_retries_until_solved(monkeypatch):
     calls = {"get": 0, "solve": 0}
 

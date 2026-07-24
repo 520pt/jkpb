@@ -191,6 +191,9 @@ http://lightagent:9899
 - `ADMIN_SESSION_SECRET`：可选，用于固定登录 cookie 签名密钥；不设置时使用 `ADMIN_PASSWORD`。
 - `MAX_UPLOAD_MB`：限制上传图片大小，默认 `10`。
 - `UPLOAD_KEEP_DAYS`：自动清理超过指定天数的旧上传图片，默认 `90`。
+- `TUNNEL_MECHANICAL_KEEPALIVE_ENABLED`：隧道机电登录保活开关，默认 `true`。开启定时任务后会自动提前刷新智慧养护 token。
+- `TUNNEL_MECHANICAL_KEEPALIVE_INTERVAL_MINUTES`：保活检查间隔，默认 `30` 分钟。
+- `TUNNEL_MECHANICAL_KEEPALIVE_REFRESH_BEFORE_MINUTES`：距离 token 过期多少分钟内提前刷新，默认 `30` 分钟。
 - Docker 镜像已安装 `fonts-noto-cjk` 并刷新字体缓存，用于生成中文图片；如果图片中文乱码，请重新 build 镜像，不要继续使用旧镜像。也可以通过 `CJK_FONT_PATH=/app/fonts/your-font.ttf` 指定挂载进容器的中文字体。
 - 页面“发送记录”可查看最近发送时间、类型、状态和失败原因。
 

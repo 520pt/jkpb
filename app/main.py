@@ -64,6 +64,9 @@ ALLOWED_UPLOAD_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 ALLOWED_UPLOAD_TYPES = {"image/jpeg", "image/png", "image/webp", "image/bmp"}
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_MB", "10")) * 1024 * 1024
 UPLOAD_KEEP_DAYS = int(os.getenv("UPLOAD_KEEP_DAYS", "90"))
+TUNNEL_MECHANICAL_KEEPALIVE_ENABLED = os.getenv("TUNNEL_MECHANICAL_KEEPALIVE_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
+TUNNEL_MECHANICAL_KEEPALIVE_INTERVAL_MINUTES = max(5, int(os.getenv("TUNNEL_MECHANICAL_KEEPALIVE_INTERVAL_MINUTES", "30") or 30))
+TUNNEL_MECHANICAL_KEEPALIVE_REFRESH_BEFORE_MINUTES = max(5, int(os.getenv("TUNNEL_MECHANICAL_KEEPALIVE_REFRESH_BEFORE_MINUTES", "30") or 30))
 
 
 class RosterConfirmRequest(BaseModel):
@@ -1028,6 +1031,14 @@ def create_app(
         scheduler = AsyncIOScheduler(timezone=TZ)
         scheduler.add_job(_send_due_reminders, "interval", minutes=1, args=[repo], max_instances=1)
         scheduler.add_job(_check_patrol_warning_monitor, "interval", minutes=1, args=[repo], max_instances=1)
+        if TUNNEL_MECHANICAL_KEEPALIVE_ENABLED:
+            scheduler.add_job(
+                _keepalive_tunnel_mechanical_login,
+                "interval",
+                minutes=TUNNEL_MECHANICAL_KEEPALIVE_INTERVAL_MINUTES,
+                args=[repo],
+                max_instances=1,
+            )
         scheduler.add_job(
             _cleanup_uploads_job,
             "interval",
@@ -3132,6 +3143,17 @@ def _tunnel_mechanical_token_valid(state: dict[str, Any], now: datetime | None =
     return expires_at is not None and (now or datetime.now(TZ)) < expires_at
 
 
+def _tunnel_mechanical_token_needs_keepalive(state: dict[str, Any], now: datetime | None = None) -> bool:
+    token = str(state.get("access_token") or "").strip()
+    if not token:
+        return True
+    expires_at = _state_datetime(str(state.get("token_expires_at") or ""))
+    if expires_at is None:
+        return True
+    refresh_before = timedelta(minutes=TUNNEL_MECHANICAL_KEEPALIVE_REFRESH_BEFORE_MINUTES)
+    return expires_at <= (now or datetime.now(TZ)) + refresh_before
+
+
 def _tunnel_mechanical_cookie_header(cookies: httpx.Cookies) -> str:
     return "; ".join(f"{cookie.name}={cookie.value}" for cookie in cookies.jar)
 
@@ -3370,10 +3392,36 @@ def _clear_tunnel_mechanical_login_state(repo: DutyRepository, message: str = "�
     )
 
 
+async def _keepalive_tunnel_mechanical_login(repo: DutyRepository) -> None:
+    config = repo.get_tunnel_mechanical_config()
+    base_url_text = str(config.get("base_url") or "").strip()
+    username = str(config.get("username") or "").strip()
+    password = str(config.get("password") or "")
+    if not base_url_text or not username or not password:
+        return
+    try:
+        base_url = _tunnel_mechanical_base_url(base_url_text)
+        state = repo.get_tunnel_mechanical_state()
+        if not _tunnel_mechanical_token_needs_keepalive(state):
+            return
+        refreshed_state = await _refresh_tunnel_mechanical_token(repo, base_url, state)
+        if refreshed_state and _tunnel_mechanical_token_valid(refreshed_state):
+            LOGGER.info("隧道机电登录态已通过 refresh token 保活")
+            return
+        await _login_tunnel_mechanical(repo, {**config, "base_url": base_url})
+        LOGGER.info("隧道机电登录态已自动重新登录保活")
+    except HTTPException as exc:
+        repo.save_tunnel_mechanical_state(last_error=f"隧道机电登录保活失败：{exc.detail}")
+        LOGGER.warning("隧道机电登录保活失败：%s", exc.detail)
+    except Exception as exc:
+        repo.save_tunnel_mechanical_state(last_error=f"隧道机电登录保活失败：{exc}")
+        LOGGER.exception("隧道机电登录保活失败")
+
+
 
 async def _tunnel_mechanical_auth_headers(
     repo: DutyRepository,
-    request: TunnelMechanicalSubmitRequest,
+    request: TunnelMechanicalSubmitRequest | TunnelMechanicalResultImageRequest,
     base_url: str,
     *,
     force_login: bool = False,
