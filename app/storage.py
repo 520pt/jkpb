@@ -235,6 +235,7 @@ class DutyRepository:
                     route_code TEXT NOT NULL DEFAULT '',
                     poll_interval_minutes INTEGER NOT NULL DEFAULT 10,
                     rows INTEGER NOT NULL DEFAULT 5000,
+                    end_reminder_enabled INTEGER NOT NULL DEFAULT 1,
                     end_reminder_interval_hours INTEGER NOT NULL DEFAULT 6,
                     end_reminder_window_hours INTEGER NOT NULL DEFAULT 48,
                     mention_all INTEGER NOT NULL DEFAULT 1,
@@ -352,6 +353,8 @@ class DutyRepository:
             patrol_config_columns = {row["name"] for row in conn.execute("PRAGMA table_info(patrol_warning_config)").fetchall()}
             if "mention_mobiles" not in patrol_config_columns:
                 conn.execute("ALTER TABLE patrol_warning_config ADD COLUMN mention_mobiles TEXT NOT NULL DEFAULT ''")
+            if "end_reminder_enabled" not in patrol_config_columns:
+                conn.execute("ALTER TABLE patrol_warning_config ADD COLUMN end_reminder_enabled INTEGER NOT NULL DEFAULT 1")
             if "send_content_mode" not in patrol_config_columns:
                 conn.execute("ALTER TABLE patrol_warning_config ADD COLUMN send_content_mode TEXT NOT NULL DEFAULT 'both'")
             if "start_message_template" not in patrol_config_columns:
@@ -1157,6 +1160,7 @@ class DutyRepository:
         route_code: str = "",
         poll_interval_minutes: int = 10,
         rows: int = 5000,
+        end_reminder_enabled: bool = True,
         end_reminder_interval_hours: int = 6,
         end_reminder_window_hours: int = 48,
         mention_all: bool = True,
@@ -1171,11 +1175,11 @@ class DutyRepository:
                 INSERT INTO patrol_warning_config
                     (
                         id, enabled, login_url, warning_url, username, password, project_id, platform,
-                        route_code, poll_interval_minutes, rows, end_reminder_interval_hours,
+                        route_code, poll_interval_minutes, rows, end_reminder_enabled, end_reminder_interval_hours,
                         end_reminder_window_hours, mention_all, mention_mobiles,
                         send_content_mode, start_message_template, end_message_template
                     )
-                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     enabled = excluded.enabled,
                     login_url = excluded.login_url,
@@ -1187,6 +1191,7 @@ class DutyRepository:
                     route_code = excluded.route_code,
                     poll_interval_minutes = excluded.poll_interval_minutes,
                     rows = excluded.rows,
+                    end_reminder_enabled = excluded.end_reminder_enabled,
                     end_reminder_interval_hours = excluded.end_reminder_interval_hours,
                     end_reminder_window_hours = excluded.end_reminder_window_hours,
                     mention_all = excluded.mention_all,
@@ -1207,6 +1212,7 @@ class DutyRepository:
                     route_code.strip(),
                     max(1, min(int(poll_interval_minutes), 1440)),
                     max(1, min(int(rows), 10000)),
+                    int(end_reminder_enabled),
                     max(1, min(int(end_reminder_interval_hours), 168)),
                     max(1, min(int(end_reminder_window_hours), 720)),
                     int(mention_all),
@@ -1232,6 +1238,7 @@ class DutyRepository:
                 "route_code": "",
                 "poll_interval_minutes": 10,
                 "rows": 5000,
+                "end_reminder_enabled": True,
                 "end_reminder_interval_hours": 6,
                 "end_reminder_window_hours": 48,
                 "mention_all": True,
@@ -1251,6 +1258,7 @@ class DutyRepository:
             "route_code": row["route_code"],
             "poll_interval_minutes": int(row["poll_interval_minutes"]),
             "rows": int(row["rows"]),
+            "end_reminder_enabled": bool(row["end_reminder_enabled"]),
             "end_reminder_interval_hours": int(row["end_reminder_interval_hours"]),
             "end_reminder_window_hours": int(row["end_reminder_window_hours"]),
             "mention_all": bool(row["mention_all"]),

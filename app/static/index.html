@@ -2358,9 +2358,10 @@
                 </div>
                 <div class="field-grid">
                   <label>轮询间隔（分钟） <input id="patrolPollInterval" type="number" min="1" max="1440" value="10" /></label>
-                  <label>结束后提醒频率（小时） <input id="patrolEndInterval" type="number" min="1" max="168" value="6" /></label>
+                  <label class="checkbox-label"><span>启用结束后巡查提醒</span><input id="patrolEndReminderEnabled" type="checkbox" checked /></label>
                 </div>
                 <div class="field-grid">
+                  <label>结束后提醒频率（小时） <input id="patrolEndInterval" type="number" min="1" max="168" value="6" /></label>
                   <label>结束后巡查窗口（小时） <input id="patrolEndWindow" type="number" min="1" max="720" value="48" /></label>
                   <div class="patrol-delivery-row">
                     <label>消息 @ 对象
@@ -3095,6 +3096,7 @@
           meta: [
             `路线：${patrol.route_code || "未填写"}`,
             `轮询：${patrol.poll_interval_minutes || 10} 分钟`,
+            `结束后提醒：${patrol.end_reminder_enabled === false ? "未启用" : `${patrol.end_reminder_interval_hours || 6} 小时`}`,
             `发送模式：${patrol.send_content_mode === "image" ? "仅图片" : (patrol.send_content_mode === "text" ? "仅文字" : "文字和图片")}`,
           ],
           actions: [
@@ -5316,6 +5318,7 @@
         route_code: $("patrolRouteCode").value.trim(),
         poll_interval_minutes: Number($("patrolPollInterval").value || 10),
         rows: Number($("patrolRows").value || 5000),
+        end_reminder_enabled: $("patrolEndReminderEnabled").checked,
         end_reminder_interval_hours: Number($("patrolEndInterval").value || 6),
         end_reminder_window_hours: Number($("patrolEndWindow").value || 48),
         mention_all: mentionAll,
@@ -5426,9 +5429,12 @@
 
     function patrolWarningNextReminder(latest) {
       if (!latest || !latest.end_time) return null;
+      const config = state.patrolWarningConfig || {};
+      if (config.end_reminder_enabled === false) {
+        return { done: true, nextAt: null, countdownMs: 0, text: "结束后巡查提醒已关闭" };
+      }
       const endAt = new Date(latest.end_time);
       if (Number.isNaN(endAt.getTime())) return null;
-      const config = state.patrolWarningConfig || {};
       const intervalHours = Math.max(1, Number(config.end_reminder_interval_hours || 6));
       const windowHours = Math.max(1, Number(config.end_reminder_window_hours || 48));
       const now = new Date();
@@ -5539,6 +5545,7 @@
       $("patrolRouteCode").value = config.route_code || "";
       $("patrolPollInterval").value = config.poll_interval_minutes || 10;
       $("patrolRows").value = config.rows || 5000;
+      $("patrolEndReminderEnabled").checked = config.end_reminder_enabled !== false;
       $("patrolEndInterval").value = config.end_reminder_interval_hours || 6;
       $("patrolEndWindow").value = config.end_reminder_window_hours || 48;
       $("patrolMentionTarget").value = config.mention_all === false ? (config.mention_mobiles || "") : "@所有人";

@@ -336,6 +336,7 @@ def test_patrol_warning_config_and_state_roundtrip(tmp_path: Path):
         route_code="S41",
         poll_interval_minutes=5,
         rows=3000,
+        end_reminder_enabled=False,
         end_reminder_interval_hours=6,
         end_reminder_window_hours=48,
         mention_all=True,
@@ -362,6 +363,7 @@ def test_patrol_warning_config_and_state_roundtrip(tmp_path: Path):
     assert repo.get_patrol_warning_config()["password"] == "secret"
     assert repo.get_patrol_warning_config()["mention_mobiles"] == "13800138000,13900139000"
     assert repo.get_patrol_warning_config()["send_content_mode"] == "image"
+    assert repo.get_patrol_warning_config()["end_reminder_enabled"] is False
     assert repo.get_patrol_warning_config()["start_message_template"] == "start {warning_level_label}"
     assert repo.get_patrol_warning_config()["end_message_template"] == "end {remaining_hours}"
     assert repo.get_patrol_warning_state()["warning"] == {"key": "warning-1", "route_code": "S41"}

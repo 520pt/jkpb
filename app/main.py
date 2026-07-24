@@ -236,6 +236,7 @@ class PatrolWarningConfigRequest(BaseModel):
     route_code: str = ""
     poll_interval_minutes: int = Field(default=10, ge=1, le=1440)
     rows: int = Field(default=5000, ge=1, le=10000)
+    end_reminder_enabled: bool = True
     end_reminder_interval_hours: int = Field(default=6, ge=1, le=168)
     end_reminder_window_hours: int = Field(default=48, ge=1, le=720)
     mention_all: bool = True
@@ -3256,6 +3257,7 @@ def _public_patrol_warning_config(config: dict[str, Any]) -> dict[str, Any]:
         "route_code": str(config.get("route_code") or ""),
         "poll_interval_minutes": int(config.get("poll_interval_minutes") or 10),
         "rows": int(config.get("rows") or 5000),
+        "end_reminder_enabled": bool(config.get("end_reminder_enabled", True)),
         "end_reminder_interval_hours": int(config.get("end_reminder_interval_hours") or 6),
         "end_reminder_window_hours": int(config.get("end_reminder_window_hours") or 48),
         "mention_all": bool(config.get("mention_all", True)),
@@ -4523,7 +4525,7 @@ def _plan_patrol_warning_display_events(repo: DutyRepository, target: date, *, n
             )
         )
 
-    if warning.end_time:
+    if warning.end_time and bool(config.get("end_reminder_enabled", True)):
         interval_hours = max(1, int(config.get("end_reminder_interval_hours") or 6))
         window_hours = max(1, int(config.get("end_reminder_window_hours") or 48))
         deadline = warning.end_time + timedelta(hours=window_hours)
@@ -5057,6 +5059,9 @@ async def _check_patrol_warning_monitor(repo: DutyRepository) -> None:
         except Exception as exc:
             LOGGER.exception("公路巡查预警开始提醒发送失败：%s", exc)
             return
+
+    if not bool(config.get("end_reminder_enabled", True)):
+        return
 
     slot = due_end_reminder_slot(
         latest,
