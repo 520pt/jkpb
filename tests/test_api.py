@@ -2529,8 +2529,98 @@ def test_wechat_query_reports_unbound_sender(tmp_path, monkeypatch):
     body = response.json()
     assert body["success"] is False
     assert body["query_type"] == "unbound"
-    assert "还没有找到你的微信成员绑定" in body["reply"]
+    assert "还没有识别到“我”对应的人员" in body["reply"]
     assert "@missing-member" not in body["reply"]
+
+
+def test_wechat_query_allows_unbound_group_member_to_query_all_today_reminders(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post("/api/personnel", json={"names": ["Alice", "Bob"]})
+    client.post("/api/people", json={"name": "Alice", "daily_time": "07:40", "before_shift_minutes": 10, "enabled": True})
+    client.post("/api/people", json={"name": "Bob", "daily_time": "08:10", "before_shift_minutes": 5, "enabled": True})
+    client.post(
+        "/api/rosters/confirm",
+        json={
+            "year": 2025,
+            "month": 9,
+            "grid": [{"name": "Alice", "days": {"16": "中"}}, {"name": "Bob", "days": {"16": "早"}}],
+        },
+    )
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "查询今日提醒", "runtime_sender_id": "@missing-member", "target_date": "2025-09-16"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["query_type"] == "monitor_all"
+    assert body["target_date"] == "2025-09-16"
+    assert "Alice" in body["reply"]
+    assert "Bob" in body["reply"]
+    assert "还没有识别到" not in body["reply"]
+
+
+def test_wechat_query_allows_unbound_group_member_to_query_all_range(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2025, 9, 15))
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post("/api/personnel", json={"names": ["Alice"]})
+    client.post("/api/people", json={"name": "Alice", "daily_time": "07:40", "before_shift_minutes": 10, "enabled": True})
+    client.post(
+        "/api/rosters/confirm",
+        json={"year": 2025, "month": 9, "grid": [{"name": "Alice", "days": {"15": "早", "16": "中"}}]},
+    )
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "查询未来3天", "runtime_sender_id": "@missing-member"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["query_type"] == "monitor_all_range"
+    assert body["start_date"] == "2025-09-15"
+    assert body["days"] == 3
+    assert "全员提醒汇总" in body["reply"]
+
+
+def test_wechat_query_allows_unbound_group_member_to_query_all_next_reminders(tmp_path, monkeypatch):
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2025, 9, 15, 7, 0, tzinfo=tz)
+
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post("/api/personnel", json={"names": ["Alice"]})
+    client.post("/api/people", json={"name": "Alice", "daily_time": "07:40", "before_shift_minutes": 10, "enabled": True})
+    client.post(
+        "/api/rosters/confirm",
+        json={"year": 2025, "month": 9, "grid": [{"name": "Alice", "days": {"15": "中"}}]},
+    )
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "查询下次提醒", "runtime_sender_id": "@missing-member"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["query_type"] == "next_reminder_all"
+    assert "全员下次提醒" in body["reply"]
+    assert "Alice" in body["reply"]
 
 
 def test_wechat_query_matches_saved_stable_member_id(tmp_path, monkeypatch):

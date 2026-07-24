@@ -2090,14 +2090,21 @@ async def _build_wechat_query_response(
     if _is_wechat_self_bind_command(text):
         return _build_wechat_self_bind_response(repo, query, text)
     if _is_wechat_next_reminder_query(text):
-        if not person:
+        if person:
+            return _build_person_next_reminder_query_response(repo, str(person["name"]))
+        if _is_wechat_self_scoped_query(text):
             return _wechat_query_unbound_response(query)
-        return _build_person_next_reminder_query_response(repo, str(person["name"]))
+        return _build_all_next_reminder_query_response(repo)
     if not _is_wechat_monitor_query(text):
         return {"success": False, "reply": _wechat_query_help_text(), "query_type": "unknown"}
     person_name = requested_person_name or (str(person["name"]) if person else "")
     if not person_name:
-        return _wechat_query_unbound_response(query)
+        if _is_wechat_self_scoped_query(text):
+            return _wechat_query_unbound_response(query)
+        start, days = _wechat_query_range(text, query.target_date)
+        if days > 1:
+            return _build_all_monitor_range_query_response(repo, start, days)
+        return _build_all_monitor_query_response(repo, start)
     start, days = _wechat_query_range(text, query.target_date)
     if days > 1:
         return _build_person_monitor_range_query_response(repo, person_name, start, days)
@@ -2545,6 +2552,11 @@ def _is_wechat_next_reminder_query(text: str) -> bool:
     return text in {"查询下次提醒", "下次提醒", "我的下次提醒", "最近提醒", "下一次提醒", "我下次什么时候提醒"}
 
 
+def _is_wechat_self_scoped_query(text: str) -> bool:
+    value = str(text or "").strip()
+    return "我的" in value or value.startswith("我") or "我今天" in value or "我明天" in value or "我后天" in value
+
+
 def _is_wechat_monitor_query(text: str) -> bool:
     if text in {
         "查询我的监控",
@@ -2712,7 +2724,7 @@ def _wechat_query_help_text() -> str:
         "直接回复序号即可执行。\n"
         f"录入格式：隧道机电录入 日期{today} 负责人张三 记录人李四 天气晴\n"
         "也可以问：我今天什么班、明天我上班吗、查询7月24日监控、查询罗熙云监控。\n"
-        "说明：普通群成员只能查询自己，需要先在 duty-reminder 设置里绑定微信成员。"
+        "说明：群成员可以查询全员或指定姓名；只有“我的监控/我的绑定”这类个人查询需要先绑定微信成员。"
     )
 
 
@@ -2722,7 +2734,7 @@ def _wechat_query_unbound_response(query: WechatQueryRequest) -> dict[str, Any]:
     return {
         "success": False,
         "query_type": "unbound",
-        "reply": "还没有找到你的微信成员绑定。可以直接回复“绑定姓名”，例如：绑定商邱宏；也可以在 duty-reminder 设置里同步成员并保存绑定。" + suffix,
+        "reply": "还没有识别到“我”对应的人员。可以直接回复“绑定姓名”，例如：绑定商邱宏；也可以改发“查询商邱宏监控”按姓名查询。" + suffix,
     }
 
 
@@ -2895,6 +2907,59 @@ def _build_person_monitor_range_query_response(repo: DutyRepository, person_name
     }
 
 
+def _wechat_query_all_person_names_for_date(repo: DutyRepository, target: date) -> list[str]:
+    names: set[str] = set()
+    names.update(str(person.get("name") or "").strip() for person in repo.list_monitored_people())
+    names.update(str(row.get("name") or "").strip() for row in _roster_rows_for_date(repo, target))
+    names.discard("")
+    return sorted(names)
+
+
+def _build_all_monitor_query_response(repo: DutyRepository, target: date) -> dict[str, Any]:
+    events = _plan_all_events(repo, target)
+    names = _wechat_query_all_person_names_for_date(repo, target)
+    if not names:
+        return {
+            "success": True,
+            "query_type": "monitor_all",
+            "target_date": target.isoformat(),
+            "reply": f"{target:%Y-%m-%d} 暂无人员排班或监控提醒配置。",
+        }
+    lines = [f"{target:%Y-%m-%d} 全员监控/提醒汇总"]
+    for name in names[:30]:
+        person_events = [event for event in events if event.person_name == name]
+        event_times = "、".join(f"{event.send_at:%H:%M}{_wechat_query_event_label(event.kind)}" for event in person_events[:4])
+        if len(person_events) > 4:
+            event_times += f"等{len(person_events)}条"
+        lines.append(f"- {name}：{_person_roster_status_text(repo, name, target)}；{event_times or '无计划提醒'}")
+    if len(names) > 30:
+        lines.append(f"- 另有 {len(names) - 30} 人未显示")
+    return {
+        "success": True,
+        "query_type": "monitor_all",
+        "target_date": target.isoformat(),
+        "reply": "\n".join(lines),
+    }
+
+
+def _build_all_monitor_range_query_response(repo: DutyRepository, start: date, days: int) -> dict[str, Any]:
+    lines = [f"{start:%Y-%m-%d} 起 {days} 天全员提醒汇总"]
+    for offset in range(days):
+        target = start + timedelta(days=offset)
+        events = _plan_all_events(repo, target)
+        preview = "、".join(f"{event.person_name}{event.send_at:%H:%M}" for event in events[:6])
+        if len(events) > 6:
+            preview += f"等{len(events)}条"
+        lines.append(f"- {target:%m-%d} {_wechat_query_weekday(target)}：{preview or '无计划提醒'}")
+    return {
+        "success": True,
+        "query_type": "monitor_all_range",
+        "start_date": start.isoformat(),
+        "days": days,
+        "reply": "\n".join(lines),
+    }
+
+
 def _build_person_next_reminder_query_response(repo: DutyRepository, person_name: str) -> dict[str, Any]:
     now = datetime.now(TZ)
     upcoming = []
@@ -2918,6 +2983,30 @@ def _build_person_next_reminder_query_response(repo: DutyRepository, person_name
         "success": True,
         "query_type": "next_reminder",
         "person_name": person_name,
+        "reply": reply,
+    }
+
+
+def _build_all_next_reminder_query_response(repo: DutyRepository) -> dict[str, Any]:
+    now = datetime.now(TZ)
+    upcoming = []
+    for offset in range(14):
+        target = now.date() + timedelta(days=offset)
+        upcoming.extend(event for event in _plan_all_events(repo, target) if event.send_at >= now)
+    upcoming.sort(key=lambda event: event.send_at)
+    if not upcoming:
+        reply = "未来14天没有计划提醒。"
+    else:
+        lines = ["全员下次提醒"]
+        for event in upcoming[:10]:
+            content = str(event.content or "").splitlines()[0]
+            lines.append(f"- {event.person_name} {event.send_at:%m-%d %H:%M} {_wechat_query_event_label(event.kind)}：{content}")
+        if len(upcoming) > 10:
+            lines.append(f"- 另有 {len(upcoming) - 10} 条提醒未显示")
+        reply = "\n".join(lines)
+    return {
+        "success": True,
+        "query_type": "next_reminder_all",
         "reply": reply,
     }
 
