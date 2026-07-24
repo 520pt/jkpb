@@ -1455,6 +1455,52 @@ def test_lightagent_notification_config_reports_inactive_stable_target(tmp_path,
     assert "当前没有可发送会话" in body["lightagent_sync"]["message"]
 
 
+def test_lightagent_notification_config_requires_connected_wechat_channel(tmp_path, monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    def fake_lightagent_web_request(repo, method, path, *, params=None, json_body=None):
+        calls.append({"method": method, "path": path, "params": params, "json_body": json_body})
+        if method == "GET" and path == "/api/channels":
+            return {
+                "channels": [
+                    {
+                        "name": "wechat_group",
+                        "connected": False,
+                        "active": False,
+                        "login_status": "qr_ready",
+                        "extra": {
+                            "stable_selected_room_ids": ["wgr_notice"],
+                            "selected_room_ids": ["wgr_notice"],
+                        },
+                    }
+                ]
+            }
+        raise AssertionError(f"unexpected LightAgent request: {method} {path}")
+
+    monkeypatch.setattr(main_module, "_lightagent_web_request", fake_lightagent_web_request)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/notification-config",
+        json={
+            "sender_type": "lightagent",
+            "lightagent_url": "http://lightagent:9899/api/push/send",
+            "lightagent_token": "push-token",
+            "lightagent_targets": [{"id": "wgr_notice", "name": "通知群"}],
+            "message_template": "{name}",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["lightagent_sync"]["success"] is False
+    assert body["lightagent_sync"]["login_status"] == "qr_ready"
+    assert "未登录或未连接" in body["lightagent_sync"]["message"]
+    assert [call["method"] for call in calls] == ["GET"]
+
+
 def test_lightagent_notification_config_reports_sync_failure_without_losing_save(tmp_path, monkeypatch):
     def fake_lightagent_web_request(repo, method, path, *, params=None, json_body=None):
         raise RuntimeError("room service unavailable")
@@ -1590,6 +1636,7 @@ def test_lightagent_wechat_proxy_endpoints(tmp_path, monkeypatch):
                 "sendable": True,
             }
         ],
+        "sendable_room_count": 1,
         "selected_room_ids": ["room-1"],
         "selected_room_names": ["test-room"],
     }

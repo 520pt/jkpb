@@ -2473,6 +2473,7 @@
       lightAgentRooms: [],
       lightAgentMembers: [],
       lightAgentWechatStatusTimer: null,
+      lightAgentWechatConnected: false,
       featureChannelConfig: null,
       featureChannelRooms: [],
       todayReminderEvents: [],
@@ -4331,10 +4332,10 @@
       box.innerHTML = rooms.map((room) => {
         const label = room.name || room.id;
         const synced = !syncedRoomIds.size || syncedRoomIds.has(room.id);
-        const sendable = !sendableRoomIds.size ? synced : sendableRoomIds.has(room.id);
+        const sendable = state.lightAgentWechatConnected && (!sendableRoomIds.size ? synced : sendableRoomIds.has(room.id));
         const note = sendable
           ? room.id
-          : (synced ? `${room.id} · 当前不可发送，请在群内发言后重新同步` : `${room.id} · 未在当前同步群聊中，可能已失效`);
+          : (!state.lightAgentWechatConnected ? `${room.id} · LightAgent 微信未登录或未连接` : (synced ? `${room.id} · 当前不可发送，请在群内发言后重新同步` : `${room.id} · 未在当前同步群聊中，可能已失效`));
         return `<div class="item">
           <strong>${escapeHtml(label)}</strong>
           <small class="${sendable ? "" : "status error"}">${escapeHtml(note)}</small>
@@ -4448,7 +4449,7 @@
       if (state.lightAgentWechatStatusTimer) return;
       state.lightAgentWechatStatusTimer = setInterval(() => {
         refreshLightAgentWechatStatus({ silent: true }).catch(() => null);
-      }, 2500);
+      }, 15000);
     }
 
     async function refreshLightAgentWechatStatus(options = {}) {
@@ -4462,7 +4463,17 @@
         const body = await response.json();
         if (!response.ok) throw new Error(body.detail || "读取失败");
         const connected = lightAgentWechatConnected(body);
-        status.textContent = connected ? "微信已登录，可以同步群聊和成员" : `微信未登录或等待扫码：${body.login_status || "unknown"}`;
+        state.lightAgentWechatConnected = connected;
+        if (Array.isArray(body.rooms)) {
+          state.lightAgentRooms = body.rooms;
+          renderLightAgentRooms();
+          renderFeatureChannelRooms();
+          renderNotificationTargetRoomList();
+        }
+        const sendableCount = Number(body.sendable_room_count || 0);
+        status.textContent = connected
+          ? `微信已登录，当前可发送群 ${sendableCount || (state.lightAgentRooms || []).filter(lightAgentRoomSendable).length} 个`
+          : `微信未登录或等待扫码：${body.login_status || "unknown"}`;
         status.className = `status ${connected ? "ok" : ""}`;
         if (body.qr_image || body.qrcode_url) {
           $("lightAgentQrImage").src = body.qr_image || body.qrcode_url;
@@ -4471,15 +4482,21 @@
           $("lightAgentQrBox").classList.toggle("hidden", connected);
         }
         if (connected) {
-          stopLightAgentWechatStatusPolling();
+          startLightAgentWechatStatusPolling();
           await loadLightAgentRooms(false);
         } else {
+          renderNotificationTargetRoomList();
           startLightAgentWechatStatusPolling();
         }
+        return body;
       } catch (error) {
+        state.lightAgentWechatConnected = false;
+        renderNotificationTargetRoomList();
         status.textContent = `读取微信状态失败：${error.message || error}`;
         status.className = "status error";
         startLightAgentWechatStatusPolling();
+        if (options.throwOnError) throw error;
+        return null;
       }
     }
 
@@ -4492,6 +4509,7 @@
       const response = await fetch("/api/lightagent/wechat/rooms");
       const body = await response.json();
       if (!response.ok) throw new Error(body.detail || "同步群聊失败");
+      state.lightAgentWechatConnected = lightAgentWechatConnected(body);
       state.lightAgentRooms = body.rooms || [];
       if (!$("lightAgentTarget").value.trim() && state.lightAgentRooms.length) {
         const firstSendableRoom = state.lightAgentRooms.find(lightAgentRoomSendable) || state.lightAgentRooms[0];
@@ -4499,8 +4517,13 @@
       }
       renderLightAgentRooms();
       renderFeatureChannelRooms();
-      $("lightAgentWechatStatus").textContent = state.lightAgentRooms.length ? `已同步 ${state.lightAgentRooms.length} 个群聊` : "未读取到群聊，请先扫码登录微信";
-      $("lightAgentWechatStatus").className = `status ${state.lightAgentRooms.length ? "ok" : ""}`;
+      renderNotificationTargetRoomList();
+      const sendableCount = state.lightAgentRooms.filter(lightAgentRoomSendable).length;
+      $("lightAgentWechatStatus").textContent = state.lightAgentWechatConnected
+        ? (state.lightAgentRooms.length ? `已同步 ${state.lightAgentRooms.length} 个群聊，可发送 ${sendableCount} 个` : "微信已登录，但未读取到群聊")
+        : `微信未登录或未连接，当前群聊不可发送`;
+      $("lightAgentWechatStatus").className = `status ${state.lightAgentWechatConnected && sendableCount ? "ok" : "error"}`;
+      return body;
     }
 
     async function loadLightAgentMembers() {
@@ -4816,6 +4839,17 @@
 
     async function saveNotificationConfig(showStatus = true) {
       if (showStatus) $("notificationStatus").textContent = "正在保存...";
+      if ($("notificationSenderType").value === "lightagent") {
+        try {
+          if (showStatus) $("notificationStatus").textContent = "正在确认 LightAgent 微信状态...";
+          await syncLightAgentWechatStateForNotification({ required: false });
+        } catch (error) {
+          if (showStatus) {
+            $("notificationStatus").textContent = `读取 LightAgent 微信状态失败：${error.message || error}`;
+            $("notificationStatus").className = "status error";
+          }
+        }
+      }
       const notificationTargets = normalizeFeatureChannelRooms(state.notificationTargetRooms || []);
       const response = await fetch("/api/notification-config", {
         method: "POST",
@@ -4866,6 +4900,29 @@
     document.querySelectorAll("[data-notification-sender]").forEach((button) => {
       button.addEventListener("click", () => setNotificationSenderType(button.dataset.notificationSender));
     });
+
+    async function syncLightAgentWechatStateForNotification(options = {}) {
+      if ($("notificationSenderType").value !== "lightagent") return true;
+      await refreshLightAgentWechatStatus({ silent: true, throwOnError: !!options.required });
+      await loadLightAgentRooms(false);
+      if (!options.required) return state.lightAgentWechatConnected;
+      if (!state.lightAgentWechatConnected) {
+        throw new Error("LightAgent 微信未登录或未连接，请先完成微信登录并同步群聊");
+      }
+      const targets = normalizeFeatureChannelRooms(state.notificationTargetRooms || []);
+      if (!targets.length) {
+        throw new Error("请先添加可发送的通知微信群");
+      }
+      const badTargets = targets.filter((target) => {
+        const room = lightAgentRoomById(target.id);
+        return !room || !lightAgentRoomSendable(room);
+      });
+      if (badTargets.length) {
+        throw new Error(`以下通知群当前不可发送：${badTargets.map((room) => room.name || room.id).join("、")}。请重新同步群聊或移除失效群。`);
+      }
+      return true;
+    }
+
     document.querySelectorAll("[data-save-notification]").forEach((button) => {
       button.addEventListener("click", () => saveNotificationConfig(true));
     });
@@ -4877,6 +4934,7 @@
       try {
         const saved = await saveNotificationConfig(false);
         if (!saved) throw new Error("通知配置保存失败");
+        await syncLightAgentWechatStateForNotification({ required: true });
         const response = await fetch("/api/notification-config/test", {
           method: "POST",
           headers: { "Content-Type": "application/json" },

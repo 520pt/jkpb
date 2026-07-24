@@ -933,7 +933,25 @@ def create_app(
 
     @app.get("/api/lightagent/wechat/status")
     def lightagent_wechat_status():
-        return _lightagent_web_request(repo, "GET", "/api/wechat_group/qrlogin")
+        status = _lightagent_web_request(repo, "GET", "/api/wechat_group/qrlogin")
+        channels_error = ""
+        channel_info: dict[str, Any] = {}
+        try:
+            channel_info = _lightagent_wechat_group_channel_info(_lightagent_web_request(repo, "GET", "/api/channels"))
+        except Exception as exc:
+            channels_error = str(exc)
+        if channel_info:
+            rooms = _normalize_lightagent_wechat_rooms(channel_info.get("rooms") or [])
+            status["connected"] = bool(channel_info.get("connected"))
+            status["login_status"] = str(channel_info.get("login_status") or status.get("login_status") or "")
+            status["rooms"] = rooms
+            status["sendable_room_count"] = len([room for room in rooms if room.get("sendable")])
+            status["selected_room_ids"] = channel_info.get("selected_room_ids") or []
+            status["selected_room_names"] = channel_info.get("selected_room_names") or []
+        elif channels_error:
+            status["connected"] = False
+            status["channels_error"] = channels_error
+        return status
 
     @app.post("/api/lightagent/wechat/refresh")
     def refresh_lightagent_wechat():
@@ -949,9 +967,10 @@ def create_app(
                 rooms = _normalize_lightagent_wechat_rooms(extra.get("rooms") or [])
                 return {
                     "status": "success",
-                    "connected": bool(channel.get("connected") or channel.get("active")),
+                    "connected": _lightagent_wechat_group_connected(channel),
                     "login_status": str(channel.get("login_status") or ""),
                     "rooms": rooms,
+                    "sendable_room_count": len([room for room in rooms if room.get("sendable")]),
                     "selected_room_ids": extra.get("selected_room_ids") or [],
                     "selected_room_names": extra.get("selected_room_names") or [],
                 }
@@ -1542,13 +1561,23 @@ def _sync_lightagent_wechat_group_targets(
             if str(channel.get("name") or "") == "wechat_group":
                 wechat_group = channel
                 break
+        if not _lightagent_wechat_group_connected(wechat_group):
+            login_status = str((wechat_group or {}).get("login_status") or "unknown")
+            return {
+                "success": False,
+                "target": target_ids[0],
+                "targets": target_ids,
+                "source": source,
+                "login_status": login_status,
+                "message": f"LightAgent 个人微信未登录或未连接（当前状态：{login_status}），请先完成微信登录并同步群聊",
+            }
         extra = wechat_group.get("extra") if isinstance(wechat_group, dict) and isinstance(wechat_group.get("extra"), dict) else {}
         selected_ids = _merge_lightagent_room_ids(
             extra.get("stable_selected_room_ids"),
             extra.get("selected_room_ids"),
             target_ids,
         )
-        action = "save" if wechat_group and (wechat_group.get("connected") or wechat_group.get("active")) else "connect"
+        action = "save"
         result = _lightagent_web_request(
             repo,
             "POST",
@@ -1624,6 +1653,31 @@ def _merge_lightagent_room_ids(*values: Any) -> list[str]:
             seen.add(text)
             merged.append(text)
     return merged
+
+
+def _lightagent_wechat_group_channel_info(data: Any) -> dict[str, Any]:
+    channels = data.get("channels") if isinstance(data, dict) else []
+    for channel in channels or []:
+        if str(channel.get("name") or "") != "wechat_group":
+            continue
+        extra = channel.get("extra") if isinstance(channel.get("extra"), dict) else {}
+        return {
+            "connected": _lightagent_wechat_group_connected(channel),
+            "login_status": str(channel.get("login_status") or ""),
+            "rooms": extra.get("rooms") or [],
+            "selected_room_ids": extra.get("selected_room_ids") or [],
+            "selected_room_names": extra.get("selected_room_names") or [],
+        }
+    return {}
+
+
+def _lightagent_wechat_group_connected(channel: Any) -> bool:
+    if not isinstance(channel, dict):
+        return False
+    login_status = str(channel.get("login_status") or "").strip().lower()
+    if login_status:
+        return login_status in {"connected", "logged_in"}
+    return bool(channel.get("connected") or channel.get("active"))
 
 
 def _normalize_lightagent_wechat_rooms(rooms: Any) -> list[dict[str, Any]]:
