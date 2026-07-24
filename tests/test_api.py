@@ -4470,6 +4470,24 @@ def test_system_status_reports_runtime_and_next_events(tmp_path, monkeypatch):
     assert body["next_events"][0]["send_at"] == "2026-07-20T07:50:00+08:00"
 
 
+def test_system_status_counts_sqlite_utc_records_for_beijing_today(tmp_path, monkeypatch):
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 7, 20, 7, 40, tzinfo=tz)
+
+    monkeypatch.setattr(main_module, "datetime", FixedDateTime)
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_send_record(kind="custom", target="示例甲", status="success")
+    with repo._connect() as conn:
+        conn.execute("UPDATE send_records SET created_at = ? WHERE id = 1", ("2026-07-19 16:30:00",))
+
+    body = main_module._build_system_status(repo, scheduler_enabled=False, cjk_font_ready=True)
+
+    assert body["today_success_count"] == 1
+    assert body["today_failed_count"] == 0
+
+
 def test_system_status_sanitizes_wechat_ids_in_errors(tmp_path, monkeypatch):
     class FrozenDateTime(datetime):
         @classmethod

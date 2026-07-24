@@ -4889,7 +4889,7 @@ def _plan_all_events(repo: DutyRepository, target: date):
 
 def _build_system_status(repo: DutyRepository, scheduler_enabled: bool, cjk_font_ready: bool) -> dict[str, Any]:
     now = datetime.now(TZ)
-    today_start = now.strftime("%Y-%m-%d 00:00:00")
+    today_start = datetime.combine(now.date(), datetime.min.time(), tzinfo=TZ).astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%d %H:%M:%S")
     records_today = _public_send_records(repo, repo.list_send_records_since(today_start))
     failed_records = [record for record in records_today if record["status"] != "success"]
     patrol_config = repo.get_patrol_warning_config()
