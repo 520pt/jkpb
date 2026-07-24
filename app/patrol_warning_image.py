@@ -43,12 +43,26 @@ def render_patrol_warning_image(
     draw = ImageDraw.Draw(image)
 
     _rounded(draw, (LEFT, 22, WIDTH - LEFT, 86), 8, "#172033")
-    draw.text((LEFT + 20, 42), title, font=fonts["title"], fill="#ffffff")
-    draw.text((WIDTH - LEFT - 220, 45), now.strftime("%Y-%m-%d %H:%M"), font=fonts["small"], fill="#dbeafe")
+    _draw_text_in_box(draw, (LEFT, 22, WIDTH - LEFT, 86), title, fonts["title"], "#ffffff", padding_x=20)
+    _draw_text_in_box(
+        draw,
+        (WIDTH - LEFT - 240, 22, WIDTH - LEFT - 20, 86),
+        now.strftime("%Y-%m-%d %H:%M"),
+        fonts["small"],
+        "#dbeafe",
+        align="right",
+    )
 
     _rounded(draw, (LEFT, 106, WIDTH - LEFT, 206), 8, "#ffffff", "#d7deea")
     _rounded(draw, (LEFT + 18, 126, LEFT + 210, 186), 8, accent)
-    draw.text((LEFT + 40, 142), warning.warning_level_label or "预警", font=fonts["level"], fill="#ffffff")
+    _draw_text_in_box(
+        draw,
+        (LEFT + 18, 126, LEFT + 210, 186),
+        warning.warning_level_label or "预警",
+        fonts["level"],
+        "#ffffff",
+        align="center",
+    )
     draw.text((LEFT + 236, 127), route_text, font=fonts["body"], fill="#18212f")
     draw.text((LEFT + 236, 162), warning.warn_type_name or "公路巡查APP", font=fonts["small"], fill="#64748b")
 
@@ -70,7 +84,14 @@ def render_patrol_warning_image(
     band_color = "#c2410c" if image_mode == "end" else "#1d4ed8"
     _rounded(draw, (LEFT, 360, WIDTH - LEFT, 406), 8, band_color)
     draw.rectangle((LEFT, 396, WIDTH - LEFT, 406), fill=band_color)
-    draw.text((LEFT + 18, 373), _patrol_summary_text(warning, window_hours, image_mode), font=fonts["label"], fill="#ffffff")
+    _draw_text_in_box(
+        draw,
+        (LEFT, 360, WIDTH - LEFT, 406),
+        _patrol_summary_text(warning, window_hours, image_mode),
+        fonts["label"],
+        "#ffffff",
+        padding_x=18,
+    )
 
     metrics = [
         ("已结束", f"{elapsed_hours} 小时"),
@@ -82,8 +103,8 @@ def render_patrol_warning_image(
         x = LEFT + 22 + index * (metric_width + 20)
         y = 424
         _rounded(draw, (x, y, x + metric_width, y + 58), 8, "#fffaf7", "#f2d8ca")
-        draw.text((x + 14, y + 9), label, font=fonts["small"], fill="#9a3412")
-        draw.text((x + 90, y + 18), value, font=fonts["metric"], fill="#18212f")
+        _draw_text_in_box(draw, (x + 14, y, x + 86, y + 58), label, fonts["small"], "#9a3412")
+        _draw_text_in_box(draw, (x + 90, y, x + metric_width - 14, y + 58), value, fonts["metric"], "#18212f", align="center")
 
     output = BytesIO()
     image.save(output, format="PNG", optimize=True)
@@ -119,15 +140,38 @@ def _patrol_frequency_clause(warning: PatrolWarning) -> str:
 
 def _level_color(level: str) -> str:
     return {
-        "1": "#dc2626",
-        "2": "#ea580c",
-        "3": "#ca8a04",
-        "4": "#2563eb",
+        "1": "#2563eb",
+        "2": "#ca8a04",
+        "3": "#ea580c",
+        "4": "#dc2626",
     }.get(str(level or ""), "#475569")
 
 
 def _rounded(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], radius: int, fill: str, outline: str | None = None) -> None:
     draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline)
+
+
+def _draw_text_in_box(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    text: str,
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    fill: str,
+    *,
+    padding_x: int = 0,
+    align: str = "left",
+) -> None:
+    left, top, right, bottom = box
+    text_box = draw.textbbox((0, 0), str(text), font=font)
+    text_left, text_top, text_right, text_bottom = text_box
+    if align == "center":
+        x = (left + right - text_left - text_right) / 2
+    elif align == "right":
+        x = right - padding_x - text_right
+    else:
+        x = left + padding_x - text_left
+    y = (top + bottom - text_top - text_bottom) / 2
+    draw.text((x, y), str(text), font=font, fill=fill)
 
 
 def _wrap_text(value: str, max_width: int, font: ImageFont.FreeTypeFont | ImageFont.ImageFont) -> list[str]:

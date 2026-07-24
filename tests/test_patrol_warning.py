@@ -14,6 +14,7 @@ from app.patrol_warning import (
     normalize_warning,
     next_poll_time,
     token_cache_expires_at,
+    warning_from_dict,
 )
 
 
@@ -26,7 +27,7 @@ def test_normalizes_patrol_warning_fields_from_api_row():
             "Id": "warning-1",
             "RouteCode": "S41",
             "RouteName": "南涧－宁洱",
-            "WarningLevel": "2",
+            "WarningLevel": "3",
             "WarnTypeName": "暴雨预警",
             "PatrolRouteType": 1,
             "StartStake": 107.0,
@@ -61,7 +62,34 @@ def test_warning_level_prefers_color_text_over_numeric_code():
     )
 
     assert warning is not None
-    assert warning.warning_level == "2"
+    assert warning.warning_level == "3"
+    assert warning.warning_level_label == "橙色预警"
+
+
+def test_warning_level_numeric_code_uses_patrol_platform_order():
+    yellow = normalize_warning({"Id": "warning-yellow", "RouteCode": "S41", "WarningLevel": "2"}, TZ)
+    orange = normalize_warning({"Id": "warning-orange", "RouteCode": "S41", "WarningLevel": "3"}, TZ)
+
+    assert yellow is not None
+    assert yellow.warning_level_label == "黄色预警"
+    assert orange is not None
+    assert orange.warning_level_label == "橙色预警"
+
+
+def test_saved_warning_recomputes_level_from_raw_platform_code():
+    warning = warning_from_dict(
+        {
+            "key": "warning-orange",
+            "route_code": "S41",
+            "warning_level": "3",
+            "warning_level_label": "黄色预警",
+            "raw": {"WarningLevel": "3", "WarnTypeName": "暴雨预警"},
+        },
+        TZ,
+    )
+
+    assert warning is not None
+    assert warning.warning_level == "3"
     assert warning.warning_level_label == "橙色预警"
 
 
@@ -71,7 +99,7 @@ def test_builds_start_and_end_messages_from_warning_fields():
             "Id": "warning-1",
             "RouteCode": "S41",
             "RouteName": "南涧－宁洱",
-            "WarningLevel": "2",
+            "WarningLevel": "3",
             "PatrolRouteType": 1,
             "StartStake": 107,
             "EndStake": 137.73,
@@ -100,7 +128,7 @@ def test_builds_patrol_warning_messages_from_custom_templates():
             "Id": "warning-1",
             "RouteCode": "S41",
             "RouteName": "南涧－宁洱",
-            "WarningLevel": "2",
+            "WarningLevel": "3",
             "WarnTypeName": "暴雨预警",
             "PatrolFrequencyText": "2小时1次",
             "StartStake": 107,
@@ -168,7 +196,7 @@ def test_patrol_warning_end_image_uses_distinct_title_and_frequency():
             "Id": "warning-1",
             "RouteCode": "S41",
             "RouteName": "南涧－宁洱",
-            "WarningLevel": "2",
+            "WarningLevel": "3",
             "PatrolRouteType": 1,
             "StartStake": 107,
             "EndStake": 137.73,

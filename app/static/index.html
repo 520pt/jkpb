@@ -1159,6 +1159,58 @@
       max-height: 380px;
       overflow: auto;
     }
+    .settings-panel.reminder-card-panel {
+      align-items: stretch;
+      min-height: calc(100vh - 172px);
+    }
+    .side-block.reminder-list-panel {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      max-height: calc(100vh - 172px);
+    }
+    .reminder-card-list {
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      align-content: start;
+      flex: 1;
+      min-height: 0;
+      max-height: none;
+      padding: 8px 2px 2px 0;
+    }
+    .reminder-card-list .item.empty {
+      grid-column: 1 / -1;
+    }
+    .reminder-config-card {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      min-height: 142px;
+      padding: 10px;
+    }
+    .reminder-config-card strong {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.35;
+    }
+    .reminder-config-card small {
+      display: block;
+      line-height: 1.45;
+    }
+    .reminder-card-message {
+      min-height: 20px;
+      line-height: 1.45;
+      color: #111827;
+      word-break: break-word;
+    }
+    .reminder-card-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: auto;
+    }
+    .reminder-card-actions button {
+      width: 100%;
+    }
     .today-reminders {
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -1711,6 +1763,16 @@
       }
       .settings-panel,
       .settings-panel.single { grid-template-columns: 1fr; }
+      .settings-panel.reminder-card-panel {
+        min-height: 0;
+      }
+      .side-block.reminder-list-panel {
+        max-height: none;
+      }
+      .reminder-card-list {
+        grid-template-columns: 1fr;
+        max-height: 480px;
+      }
       .settings-card-grid { grid-template-columns: 1fr; }
       .notification-channel-switch {
         width: 100%;
@@ -2205,7 +2267,7 @@
             </div>
           </section>
 
-          <section class="settings-panel" id="monitorSettings">
+          <section class="settings-panel reminder-card-panel" id="monitorSettings">
             <div class="side-block">
               <h3>监控班提醒</h3>
               <p class="settings-panel-note">配置每个人的班前提醒和休息提醒。通知通道为个人微信群时，姓名可自动关联微信成员 ID；企业微信群机器人则使用手机号。</p>
@@ -2243,9 +2305,9 @@
               </div>
             </div>
 
-            <div class="side-block">
+            <div class="side-block reminder-list-panel">
               <h3>已配置监控班提醒</h3>
-              <div id="peopleList" class="people-list"></div>
+              <div id="peopleList" class="people-list reminder-card-list"></div>
             </div>
           </section>
 
@@ -2317,7 +2379,7 @@
             </div>
           </section>
 
-          <section class="settings-panel" id="customReminderSettings">
+          <section class="settings-panel reminder-card-panel" id="customReminderSettings">
             <div class="side-block">
               <h3>自定义提醒</h3>
               <p class="settings-panel-note">适合补充固定事项提醒，例如特定班次的检查或交接事项。</p>
@@ -2353,9 +2415,9 @@
               </div>
             </div>
 
-            <div class="side-block">
+            <div class="side-block reminder-list-panel">
               <h3>已配置自定义提醒</h3>
-              <div id="customReminderList" class="people-list"></div>
+              <div id="customReminderList" class="people-list reminder-card-list"></div>
             </div>
           </section>
 
@@ -3725,16 +3787,16 @@
     function renderMonitoredPeopleList() {
       if (!$("peopleList")) return;
       $("peopleList").innerHTML = state.monitoredPeople.map((person) => `
-        <div class="item">
+        <div class="item reminder-config-card">
           <strong>${escapeHtml(person.name)}</strong>
           <small>${person.enabled === false ? "已停用" : "已启用"} · ${monitorNotificationText(person)} · 每日提醒时间 ${escapeHtml(person.daily_time)} · 班次提前提醒 ${person.before_shift_minutes} 分钟 · 休息提醒 ${person.rest_reminder_enabled ? escapeHtml(person.rest_reminder_time) : "未启用"}</small>
           ${person.rest_reminder_enabled ? `<small>休息文案 ${escapeHtml(person.rest_message_template || "{name} {rest_status}")}</small>` : ""}
-          <div class="settings-actions">
+          <div class="settings-actions reminder-card-actions">
             <button type="button" data-edit-person="${escapeHtml(person.name)}">编辑</button>
             <button class="danger" type="button" data-delete-person="${escapeHtml(person.name)}">删除</button>
           </div>
         </div>
-      `).join("") || `<div class="item"><small>暂无人员</small></div>`;
+      `).join("") || `<div class="item empty"><small>暂无人员</small></div>`;
     }
 
     $("peopleList").addEventListener("click", async (event) => {
@@ -3804,16 +3866,16 @@
     function renderCustomRemindersList() {
       if (!$("customReminderList")) return;
       $("customReminderList").innerHTML = state.customReminders.map((reminder) => `
-        <div class="item">
+        <div class="item reminder-config-card">
           <strong>${escapeHtml(reminder.name)} · ${escapeHtml(customReminderShiftLabel(reminder.shift_code))} · ${escapeHtml(reminder.reminder_time)}</strong>
           <small>${customReminderNotificationText(reminder)} · ${reminder.enabled ? "已启用" : "已停用"}</small>
-          <div>${escapeHtml(reminder.message || "").replace(/\n/g, "<br>")}</div>
-          <div class="settings-actions">
+          <div class="reminder-card-message">${escapeHtml(reminder.message || "").replace(/\n/g, "<br>")}</div>
+          <div class="settings-actions reminder-card-actions">
             <button type="button" data-edit-custom-reminder="${reminder.id}">编辑</button>
             <button class="danger" type="button" data-delete-custom-reminder="${reminder.id}">删除</button>
           </div>
         </div>
-      `).join("") || `<div class="item"><small>暂无自定义提醒</small></div>`;
+      `).join("") || `<div class="item empty"><small>暂无自定义提醒</small></div>`;
     }
 
     $("saveCustomReminderBtn").addEventListener("click", async () => {

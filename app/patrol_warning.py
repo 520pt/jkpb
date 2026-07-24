@@ -23,10 +23,10 @@ class PatrolWarningError(RuntimeError):
 
 
 LEVEL_LABELS = {
-    "1": "红色预警",
-    "2": "橙色预警",
-    "3": "黄色预警",
-    "4": "蓝色预警",
+    "1": "蓝色预警",
+    "2": "黄色预警",
+    "3": "橙色预警",
+    "4": "红色预警",
 }
 LEVEL_TEXT_FIELDS = (
     "WarningLevelName",
@@ -114,20 +114,26 @@ def warning_from_dict(value: dict[str, Any], tz: ZoneInfo) -> PatrolWarning | No
     start_time = _parse_datetime(value.get("start_time"), tz)
     end_time = _parse_datetime(value.get("end_time"), tz)
     create_time = _parse_datetime(value.get("create_time"), tz)
+    raw = dict(value.get("raw") or {})
+    saved_level = str(value.get("warning_level") or "").strip()
+    saved_label = str(value.get("warning_level_label") or "").strip()
+    raw_warning_level = str(_first_value(raw, "WarningLevel", "warningLevel", "Level", "level") or "").strip()
+    warning_level = _warning_level_from_text_fields(raw) or raw_warning_level or _warning_level_from_text(saved_label) or saved_level
+    warning_level_label = LEVEL_LABELS.get(warning_level) or saved_label or (f"{warning_level}级预警" if warning_level else "预警")
     return PatrolWarning(
         key=str(value.get("key") or ""),
         route_code=str(value.get("route_code") or ""),
         route_name=str(value.get("route_name") or ""),
-        warning_level=str(value.get("warning_level") or ""),
-        warning_level_label=str(value.get("warning_level_label") or ""),
+        warning_level=warning_level,
+        warning_level_label=warning_level_label,
         warn_type_name=str(value.get("warn_type_name") or ""),
-        patrol_frequency_text=str(value.get("patrol_frequency_text") or _patrol_frequency_text(dict(value.get("raw") or {})) or ""),
+        patrol_frequency_text=str(value.get("patrol_frequency_text") or _patrol_frequency_text(raw) or ""),
         start_time=start_time,
         end_time=end_time,
         create_time=create_time,
         start_stake=str(value.get("start_stake") or ""),
         end_stake=str(value.get("end_stake") or ""),
-        raw=dict(value.get("raw") or {}),
+        raw=raw,
     )
 
 
@@ -254,13 +260,13 @@ def _warning_level_from_text(value: Any) -> str:
     if not text:
         return ""
     if "红" in text or "red" in text:
-        return "1"
-    if "橙" in text or "orange" in text:
-        return "2"
-    if "黄" in text or "yellow" in text:
-        return "3"
-    if "蓝" in text or "blue" in text:
         return "4"
+    if "橙" in text or "orange" in text:
+        return "3"
+    if "黄" in text or "yellow" in text:
+        return "2"
+    if "蓝" in text or "blue" in text:
+        return "1"
     return ""
 
 
