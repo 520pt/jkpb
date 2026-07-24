@@ -3632,6 +3632,58 @@ def test_system_status_reports_runtime_and_next_events(tmp_path, monkeypatch):
     assert body["next_events"][0]["send_at"] == "2026-07-20T07:50:00+08:00"
 
 
+def test_system_status_sanitizes_wechat_ids_in_errors(tmp_path, monkeypatch):
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 7, 24, 17, 37, tzinfo=tz)
+
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/notification-config",
+        json={
+            "sender_type": "lightagent",
+            "lightagent_targets": [
+                {"id": "wgr_notice", "name": "通知群"},
+                {"id": "wgr_second", "name": "第二通知群"},
+            ],
+        },
+    )
+    client.post(
+        "/api/personnel",
+        json={
+            "names": ["王路飞"],
+            "people": [
+                {
+                    "name": "王路飞",
+                    "wechat_group_runtime_sender_id": "@member-runtime",
+                    "wechat_group_member_name": "王路飞",
+                }
+            ],
+        },
+    )
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_send_record(
+        kind="daily_duty_test",
+        target="wgr_notice",
+        status="failed",
+        error="wgr_notice failed; wgr_second failed; @member-runtime failed",
+    )
+    repo.save_patrol_warning_state(last_error="wgr_notice patrol error")
+
+    body = client.get("/api/system-status").json()
+
+    assert body["today_failed_count"] == 1
+    assert "通知群" in body["last_error"]
+    assert "第二通知群" in body["last_error"]
+    assert "王路飞" in body["last_error"]
+    assert "wgr_" not in body["last_error"]
+    assert "@member-runtime" not in body["last_error"]
+    assert body["patrol_warning_monitor"]["last_error"] == "通知群 patrol error"
+
+
 def test_resend_failed_text_record_sends_again_and_records_result(tmp_path, monkeypatch):
     sent: dict[str, object] = {}
 

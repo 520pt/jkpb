@@ -4535,7 +4535,7 @@ def _plan_all_events(repo: DutyRepository, target: date):
 def _build_system_status(repo: DutyRepository, scheduler_enabled: bool, cjk_font_ready: bool) -> dict[str, Any]:
     now = datetime.now(TZ)
     today_start = now.strftime("%Y-%m-%d 00:00:00")
-    records_today = repo.list_send_records_since(today_start)
+    records_today = _public_send_records(repo, repo.list_send_records_since(today_start))
     failed_records = [record for record in records_today if record["status"] != "success"]
     patrol_config = repo.get_patrol_warning_config()
     patrol_state = repo.get_patrol_warning_state()
@@ -4562,7 +4562,7 @@ def _build_system_status(repo: DutyRepository, scheduler_enabled: bool, cjk_font
             "next_check_at": str(patrol_state.get("next_check_at") or ""),
             "backoff_until": str(patrol_state.get("backoff_until") or ""),
             "failure_count": int(patrol_state.get("failure_count") or 0),
-            "last_error": str(patrol_state.get("last_error") or ""),
+            "last_error": _sanitize_wechat_ids_for_display(repo, str(patrol_state.get("last_error") or "")),
             "token_configured": bool(str(patrol_state.get("token") or "").strip()),
             "token_expires_at": str(patrol_state.get("token_expires_at") or ""),
             "last_warning_key": str(patrol_state.get("warning_key") or ""),
