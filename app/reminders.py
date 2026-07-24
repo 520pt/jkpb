@@ -23,6 +23,7 @@ class ReminderEvent:
     send_at: datetime
     content: str
     mention_mobile: str = ""
+    mention_wechat_id: str = ""
     key_suffix: str = ""
 
 

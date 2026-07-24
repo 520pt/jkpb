@@ -2098,19 +2098,22 @@ async def _build_wechat_query_response(
         return _build_all_next_reminder_query_response(repo)
     if not _is_wechat_monitor_query(text):
         return {"success": False, "reply": _wechat_query_help_text(), "query_type": "unknown"}
-    person_name = requested_person_name or (str(person["name"]) if person else "")
+    reminder_query = _is_wechat_reminder_query(text)
+    person_name = requested_person_name or (str(person["name"]) if person and _is_wechat_self_scoped_query(text) else "")
     if not person_name:
         if _is_wechat_self_scoped_query(text):
             return _wechat_query_unbound_response(query)
         start, days = _wechat_query_range(text, query.target_date)
         if days > 1:
-            return _build_all_monitor_range_query_response(repo, start, days)
-        return _build_all_monitor_query_response(repo, start)
+            return _build_all_reminder_range_query_response(repo, start, days) if reminder_query else _build_all_monitor_range_query_response(repo, start, days)
+        return _build_all_reminder_query_response(repo, start) if reminder_query else _build_all_monitor_query_response(repo, start)
     start, days = _wechat_query_range(text, query.target_date)
+    if _is_wechat_generic_self_monitor_query(text) and not query.target_date:
+        start, days = _today_in_tz(), 7
     if days > 1:
-        return _build_person_monitor_range_query_response(repo, person_name, start, days)
+        return _build_person_reminder_range_query_response(repo, person_name, start, days) if reminder_query else _build_person_monitor_range_query_response(repo, person_name, start, days)
     target = start
-    return _build_person_monitor_query_response(repo, person_name, target)
+    return _build_person_reminder_query_response(repo, person_name, target) if reminder_query else _build_person_monitor_query_response(repo, person_name, target)
 
 
 def _handle_wechat_bridge_message(repo: DutyRepository, uploads: Path, message: dict[str, Any]) -> None:
@@ -2148,14 +2151,17 @@ def _handle_wechat_bridge_message(repo: DutyRepository, uploads: Path, message: 
     except Exception as exc:
         LOGGER.exception("内置微信桥处理群消息失败")
         result = {"success": False, "reply": f"查询失败：{exc}"}
+    replies = [str(item or "").strip() for item in (result.get("replies") or []) if str(item or "").strip()]
     reply = str(result.get("reply") or "").strip()
+    if not replies and reply:
+        replies = [reply]
     room_id = str(message.get("stable_room_id") or message.get("room_id") or "").strip()
     if not room_id:
         return
     image_path = _wechat_query_result_image_path(result, uploads)
     try:
-        if reply:
-            manager.send_text(room_id, reply)
+        for reply_text in replies:
+            manager.send_text(room_id, reply_text)
         if image_path:
             manager.send_image(room_id, str(image_path))
     except Exception:
@@ -2198,14 +2204,12 @@ async def _build_tunnel_mechanical_wechat_response(
     if not _is_tunnel_mechanical_wechat_request(text):
         return None
     template = _public_tunnel_mechanical_template(repo.get_tunnel_mechanical_template())
+    if _is_tunnel_mechanical_wechat_template_command(text):
+        return _tunnel_mechanical_wechat_template_response(template, query.target_date)
     if _is_tunnel_mechanical_wechat_result_query_command(text):
         return await _build_tunnel_mechanical_wechat_result_query_response(repo, query, text, template, uploads=uploads)
     if not _is_tunnel_mechanical_wechat_submit_command(text):
-        return {
-            "success": True,
-            "query_type": "tunnel_mechanical_template",
-            "reply": _tunnel_mechanical_wechat_template_reply(template, query.target_date),
-        }
+        return _tunnel_mechanical_wechat_template_response(template, query.target_date)
     if not template["assets"] or not template["people"]:
         return {
             "success": False,
@@ -2219,12 +2223,13 @@ async def _build_tunnel_mechanical_wechat_response(
     if not params.get("recorder"):
         missing.append("记录人")
     if missing:
+        example = _tunnel_mechanical_wechat_template_line(template, params["checkTime"])
         return {
             "success": False,
             "query_type": "tunnel_mechanical",
             "reply": (
                 "隧道机电录入参数不完整：缺少" + "、".join(missing) + "。\n"
-                "示例：隧道机电录入 日期2026-07-24 负责人张三 记录人李四 天气晴"
+                f"示例：{example}"
             ),
         }
     dry_run = "预览" in text
@@ -2394,16 +2399,33 @@ def _is_tunnel_mechanical_wechat_submit_command(text: str) -> bool:
     )
 
 
+def _is_tunnel_mechanical_wechat_template_command(text: str) -> bool:
+    return _is_tunnel_mechanical_wechat_request(text) and any(keyword in text for keyword in ("格式", "模板", "示例"))
+
+
 def _is_tunnel_mechanical_wechat_result_query_command(text: str) -> bool:
     return _is_tunnel_mechanical_wechat_request(text) and any(keyword in text for keyword in ("查询", "查"))
 
 
-def _tunnel_mechanical_wechat_template_reply(template: dict[str, Any], target_date: date | None = None) -> str:
-    defaults = template.get("defaults") if isinstance(template.get("defaults"), dict) else {}
+def _tunnel_mechanical_wechat_template_response(template: dict[str, Any], target_date: date | None = None) -> dict[str, Any]:
+    intro = _tunnel_mechanical_wechat_template_reply(template, target_date)
+    template_line = _tunnel_mechanical_wechat_template_line(template, target_date)
+    return {
+        "success": True,
+        "query_type": "tunnel_mechanical_template",
+        "reply": f"{intro}\n\n{template_line}",
+        "replies": [intro, template_line],
+        "template": template_line,
+    }
+
+
+def _tunnel_mechanical_wechat_template_line(template: dict[str, Any], target_date: date | None = None) -> str:
     check_time = (target_date or _today_in_tz()).isoformat()
-    checker = str(defaults.get("checker") or "").strip() or "张三"
-    recorder = str(defaults.get("recorder") or "").strip() or "李四"
-    weather = str(defaults.get("weather") or "").strip() or "晴"
+    return f"隧道机电录入 日期{check_time} 负责人罗富耀 记录人商邱宏 天气晴"
+
+
+def _tunnel_mechanical_wechat_template_reply(template: dict[str, Any], target_date: date | None = None) -> str:
+    check_time = (target_date or _today_in_tz()).isoformat()
     asset_count = len(template.get("assets") or [])
     people = [str(person.get("name") or "").strip() for person in (template.get("people") or []) if person.get("name")]
     people_line = f"\n可用人员：{'、'.join(people[:20])}" if people else ""
@@ -2413,8 +2435,7 @@ def _tunnel_mechanical_wechat_template_reply(template: dict[str, Any], target_da
         "查询结果图：\n"
         f"查询今日机电\n"
         f"查询{check_time}机电\n\n"
-        "录入记录：复制下面一行，把负责人、记录人、天气改好后发送：\n"
-        f"隧道机电录入 日期{check_time} 负责人{checker} 记录人{recorder} 天气{weather}\n"
+        "录入记录：下一条消息是可直接复制的录入模板，把日期、负责人、记录人、天气改好后发送。\n"
         f"只想预览请求，把“录入”改成“预览”。\n"
         f"登录失效时会自动重新登录；验证码识别失败会自动重试。"
         f"{asset_line}"
@@ -2513,8 +2534,14 @@ def _strip_leading_wechat_mentions(text: str) -> str:
     return value
 
 
-def _normalize_wechat_query_text(text: str) -> str:
+def _strip_wechat_mentions(text: str) -> str:
     value = _strip_leading_wechat_mentions(str(text or ""))
+    mention_pattern = r"@[^@\s\u2005\u2006\u2007\u2008\u2009\u200a，,。.!！?？：:]+"
+    return re.sub(mention_pattern, "", value).strip()
+
+
+def _normalize_wechat_query_text(text: str) -> str:
+    value = _strip_wechat_mentions(str(text or ""))
     return re.sub(r"\s+", "", value).strip("，,。.!！?？：:")
 
 
@@ -2556,6 +2583,24 @@ def _is_wechat_next_reminder_query(text: str) -> bool:
 def _is_wechat_self_scoped_query(text: str) -> bool:
     value = str(text or "").strip()
     return "我的" in value or value.startswith("我") or "我今天" in value or "我明天" in value or "我后天" in value
+
+
+def _is_wechat_reminder_query(text: str) -> bool:
+    value = str(text or "").strip()
+    return "提醒" in value and "监控" not in value and "排班" not in value
+
+
+def _is_wechat_generic_self_monitor_query(text: str) -> bool:
+    return str(text or "").strip() in {
+        "查询我的监控",
+        "查我的监控",
+        "我的监控",
+        "查询我的排班",
+        "我的排班",
+        "查询我的值班",
+        "我的值班",
+        "我的班",
+    }
 
 
 def _is_wechat_monitor_query(text: str) -> bool:
@@ -2723,7 +2768,7 @@ def _wechat_query_help_text() -> str:
         f"9. 查询{today}机电\n"
         "10. 查看隧道机电录入格式\n"
         "直接回复序号即可执行。\n"
-        f"录入格式：隧道机电录入 日期{today} 负责人张三 记录人李四 天气晴\n"
+        f"录入格式：{_tunnel_mechanical_wechat_template_line({}, _today_in_tz())}\n"
         "也可以问：我今天什么班、明天我上班吗、查询7月24日监控、查询罗熙云监控。\n"
         "说明：群成员可以查询全员或指定姓名；只有“我的监控/我的绑定”这类个人查询需要先绑定微信成员。"
     )
@@ -2843,6 +2888,21 @@ def _wechat_query_requested_person_name(repo: DutyRepository, text: str) -> str:
 
 
 def _build_person_monitor_query_response(repo: DutyRepository, person_name: str, target: date) -> dict[str, Any]:
+    return {
+        "success": True,
+        "query_type": "monitor",
+        "person_name": person_name,
+        "target_date": target.isoformat(),
+        "reply": "\n".join(
+            [
+                f"{person_name} {_wechat_query_date_label(target)} {_wechat_query_weekday(target)} 监控排班",
+                f"排班：{_person_roster_status_text(repo, person_name, target)}",
+            ]
+        ),
+    }
+
+
+def _build_person_reminder_query_response(repo: DutyRepository, person_name: str, target: date) -> dict[str, Any]:
     monitored = next((person for person in repo.list_monitored_people() if person["name"] == person_name), None)
     events = [event for event in _plan_all_events(repo, target) if event.person_name == person_name]
     roster_status = _person_roster_status_text(repo, person_name, target)
@@ -2874,7 +2934,7 @@ def _build_person_monitor_query_response(repo: DutyRepository, person_name: str,
         lines.append("计划提醒：无")
     return {
         "success": True,
-        "query_type": "monitor",
+        "query_type": "reminder",
         "person_name": person_name,
         "target_date": target.isoformat(),
         "reply": "\n".join(lines),
@@ -2882,9 +2942,28 @@ def _build_person_monitor_query_response(repo: DutyRepository, person_name: str,
 
 
 def _build_person_monitor_range_query_response(repo: DutyRepository, person_name: str, start: date, days: int) -> dict[str, Any]:
+    lines = [
+        f"{person_name} {start:%Y-%m-%d} 起 {days} 天监控排班",
+    ]
+    for offset in range(days):
+        target = start + timedelta(days=offset)
+        lines.append(
+            f"- {_wechat_query_date_label(target)} {_wechat_query_weekday(target)}：{_person_roster_status_text(repo, person_name, target)}"
+        )
+    return {
+        "success": True,
+        "query_type": "monitor_range",
+        "person_name": person_name,
+        "start_date": start.isoformat(),
+        "days": days,
+        "reply": "\n".join(lines),
+    }
+
+
+def _build_person_reminder_range_query_response(repo: DutyRepository, person_name: str, start: date, days: int) -> dict[str, Any]:
     monitored = next((person for person in repo.list_monitored_people() if person["name"] == person_name), None)
     lines = [
-        f"{person_name} {start:%Y-%m-%d} 起 {days} 天监控汇总",
+        f"{person_name} {start:%Y-%m-%d} 起 {days} 天提醒汇总",
         _wechat_query_monitor_config_line(monitored),
     ]
     for offset in range(days):
@@ -2895,12 +2974,10 @@ def _build_person_monitor_range_query_response(repo: DutyRepository, person_name
             event_times += f"等{len(events)}条"
         if not event_times:
             event_times = "无计划提醒"
-        lines.append(
-            f"- {target:%m-%d} {_wechat_query_weekday(target)}：{_person_roster_status_text(repo, person_name, target)}；{event_times}"
-        )
+        lines.append(f"- {_wechat_query_date_label(target)} {_wechat_query_weekday(target)}：{_person_roster_status_text(repo, person_name, target)}；{event_times}")
     return {
         "success": True,
-        "query_type": "monitor_range",
+        "query_type": "reminder_range",
         "person_name": person_name,
         "start_date": start.isoformat(),
         "days": days,
@@ -2917,7 +2994,6 @@ def _wechat_query_all_person_names_for_date(repo: DutyRepository, target: date) 
 
 
 def _build_all_monitor_query_response(repo: DutyRepository, target: date) -> dict[str, Any]:
-    events = _plan_all_events(repo, target)
     names = _wechat_query_all_person_names_for_date(repo, target)
     if not names:
         return {
@@ -2926,7 +3002,42 @@ def _build_all_monitor_query_response(repo: DutyRepository, target: date) -> dic
             "target_date": target.isoformat(),
             "reply": f"{target:%Y-%m-%d} 暂无人员排班或监控提醒配置。",
         }
-    lines = [f"{target:%Y-%m-%d} 全员监控/提醒汇总"]
+    lines = [f"{_wechat_query_date_label(target)} {_wechat_query_weekday(target)} 监控排班"]
+    lines.extend(_wechat_query_shift_summary_lines(repo, target))
+    return {
+        "success": True,
+        "query_type": "monitor_all",
+        "target_date": target.isoformat(),
+        "reply": "\n".join(lines),
+    }
+
+
+def _build_all_monitor_range_query_response(repo: DutyRepository, start: date, days: int) -> dict[str, Any]:
+    lines = [f"{start:%Y-%m-%d} 起 {days} 天监控排班"]
+    for offset in range(days):
+        target = start + timedelta(days=offset)
+        lines.append(f"- {_wechat_query_date_label(target)} {_wechat_query_weekday(target)}")
+        lines.extend(f"  {line}" for line in _wechat_query_shift_summary_lines(repo, target))
+    return {
+        "success": True,
+        "query_type": "monitor_all_range",
+        "start_date": start.isoformat(),
+        "days": days,
+        "reply": "\n".join(lines),
+    }
+
+
+def _build_all_reminder_query_response(repo: DutyRepository, target: date) -> dict[str, Any]:
+    events = _plan_all_events(repo, target)
+    names = _wechat_query_all_person_names_for_date(repo, target)
+    if not names and not events:
+        return {
+            "success": True,
+            "query_type": "reminder_all",
+            "target_date": target.isoformat(),
+            "reply": f"{target:%Y-%m-%d} 暂无人员排班或提醒配置。",
+        }
+    lines = [f"{_wechat_query_date_label(target)} {_wechat_query_weekday(target)} 全员提醒汇总"]
     for name in names[:30]:
         person_events = [event for event in events if event.person_name == name]
         event_times = "、".join(f"{event.send_at:%H:%M}{_wechat_query_event_label(event.kind)}" for event in person_events[:4])
@@ -2937,13 +3048,13 @@ def _build_all_monitor_query_response(repo: DutyRepository, target: date) -> dic
         lines.append(f"- 另有 {len(names) - 30} 人未显示")
     return {
         "success": True,
-        "query_type": "monitor_all",
+        "query_type": "reminder_all",
         "target_date": target.isoformat(),
         "reply": "\n".join(lines),
     }
 
 
-def _build_all_monitor_range_query_response(repo: DutyRepository, start: date, days: int) -> dict[str, Any]:
+def _build_all_reminder_range_query_response(repo: DutyRepository, start: date, days: int) -> dict[str, Any]:
     lines = [f"{start:%Y-%m-%d} 起 {days} 天全员提醒汇总"]
     for offset in range(days):
         target = start + timedelta(days=offset)
@@ -2951,10 +3062,10 @@ def _build_all_monitor_range_query_response(repo: DutyRepository, start: date, d
         preview = "、".join(f"{event.person_name}{event.send_at:%H:%M}" for event in events[:6])
         if len(events) > 6:
             preview += f"等{len(events)}条"
-        lines.append(f"- {target:%m-%d} {_wechat_query_weekday(target)}：{preview or '无计划提醒'}")
+        lines.append(f"- {_wechat_query_date_label(target)} {_wechat_query_weekday(target)}：{preview or '无计划提醒'}")
     return {
         "success": True,
-        "query_type": "monitor_all_range",
+        "query_type": "reminder_all_range",
         "start_date": start.isoformat(),
         "days": days,
         "reply": "\n".join(lines),
@@ -3025,6 +3136,39 @@ def _wechat_query_monitor_config_line(monitored: dict[str, Any] | None) -> str:
 
 def _wechat_query_weekday(target: date) -> str:
     return "周" + "一二三四五六日"[target.weekday()]
+
+
+def _wechat_query_date_label(target: date) -> str:
+    today = _today_in_tz()
+    if target == today:
+        return f"今天 {target:%Y-%m-%d}"
+    if target == today + timedelta(days=1):
+        return f"明天 {target:%Y-%m-%d}"
+    if target == today + timedelta(days=2):
+        return f"后天 {target:%Y-%m-%d}"
+    return f"{target:%Y-%m-%d}"
+
+
+def _wechat_query_shift_summary_lines(repo: DutyRepository, target: date) -> list[str]:
+    rows = _roster_rows_for_date(repo, target)
+    if not rows:
+        return ["暂无排班"]
+    early = [row["name"] for row in rows if row["code"] == "早"]
+    middle = [row["name"] for row in rows if row["code"] == "中"]
+    night = [row["name"] for row in rows if row["code"] in {"晚", "夜"}]
+    rest = [row["name"] for row in rows if _is_rest_code(row["code"])]
+    known = set(early) | set(middle) | set(night) | set(rest)
+    other = [row["name"] for row in rows if row["name"] not in known and str(row.get("code") or "").strip()]
+    lines = [
+        f"早班：{_join_names(early)}",
+        f"中班：{_join_names(middle)}",
+        f"晚班：{_join_names(night)}",
+    ]
+    if rest:
+        lines.append(f"休息：{_join_names(rest)}")
+    if other:
+        lines.append(f"其他：{_join_names(other)}")
+    return lines
 
 
 def _person_roster_status_text(repo: DutyRepository, person_name: str, target: date) -> str:
@@ -4685,6 +4829,7 @@ def _plan_custom_reminder_events(repo: DutyRepository, assignments: list[ShiftAs
                     send_at=datetime.combine(target, _parse_hhmm(reminder_time), tzinfo=TZ),
                     content=content,
                     mention_mobile=str(reminder.get("mention_mobile") or "").strip(),
+                    mention_wechat_id=str(reminder.get("wechat_group_runtime_sender_id") or "").strip(),
                     key_suffix=str(reminder.get("id") or ""),
                 )
             )
@@ -5052,10 +5197,19 @@ def _mobile_for_event(event: ReminderEvent, mobile_lookup: dict[str, str]) -> st
 
 def _mentions_for_event(client: Any, event: ReminderEvent, mobile_lookup: dict[str, str], wechat_lookup: dict[str, str]) -> list[str]:
     if _is_personal_wechat_notify_client(client):
-        sender_id = wechat_lookup.get(event.person_name, "")
+        sender_id = event.mention_wechat_id.strip() or wechat_lookup.get(event.person_name, "")
         return [sender_id] if sender_id else []
     mobile = _mobile_for_event(event, mobile_lookup)
     return [mobile] if mobile else []
+
+
+def _send_content_for_event(client: Any, event: ReminderEvent, mentions: list[str]) -> str:
+    content = event.content
+    if _is_personal_wechat_notify_client(client) and event.kind == "custom" and not mentions:
+        name = str(event.person_name or "").strip()
+        if name and not content.lstrip().startswith("@"):
+            return f"@{name}\n{content}"
+    return content
 
 
 def _bound_wechat_sender_ids(repo: DutyRepository) -> list[str]:
@@ -5382,7 +5536,8 @@ async def _send_due_reminders(repo: DutyRepository) -> None:
             if event.kind == "daily_duty" and webhook_client:
                 await webhook_client.send_image(render_daily_duty_image(_build_daily_duty_preview(repo, now.date())))
             elif webhook_client:
-                await webhook_client.send_text(event.content, _mentions_for_event(webhook_client, event, mobile_lookup, wechat_lookup))
+                mentions = _mentions_for_event(webhook_client, event, mobile_lookup, wechat_lookup)
+                await webhook_client.send_text(_send_content_for_event(webhook_client, event, mentions), mentions)
             elif person and app_client:
                 await app_client.send_text(person["wecom_userid"], event.content)
             else:

@@ -2084,7 +2084,7 @@ def test_wechat_query_help_returns_numbered_menu(tmp_path, monkeypatch):
     assert "7. 查询我的绑定" in body["reply"]
     assert "9. 查询2026-07-24机电" in body["reply"]
     assert "回复序号即可执行" in body["reply"]
-    assert "录入格式：隧道机电录入 日期2026-07-24 负责人张三 记录人李四 天气晴" in body["reply"]
+    assert "录入格式：隧道机电录入 日期2026-07-24 负责人罗富耀 记录人商邱宏 天气晴" in body["reply"]
 
 
 def test_wechat_query_numbered_menu_selection_runs_command(tmp_path, monkeypatch):
@@ -2140,8 +2140,35 @@ def test_wechat_query_tunnel_mechanical_returns_fill_template(tmp_path, monkeypa
     assert body["query_type"] == "tunnel_mechanical_template"
     assert "隧道机电功能" in body["reply"]
     assert "查询今日机电" in body["reply"]
-    assert "隧道机电录入 日期2026-07-23 负责人张三 记录人李四 天气晴" in body["reply"]
+    assert body["template"] == "隧道机电录入 日期2026-07-23 负责人罗富耀 记录人商邱宏 天气晴"
+    assert body["replies"][-1] == "隧道机电录入 日期2026-07-23 负责人罗富耀 记录人商邱宏 天气晴"
     assert "当前模板资产：1 条" in body["reply"]
+
+
+def test_wechat_query_tunnel_mechanical_format_command_sends_copyable_template_separately(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2026, 7, 24))
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    _import_tunnel_template(client)
+
+    async def fail_submit(repo, request, **kwargs):
+        raise AssertionError("format request must not submit")
+
+    monkeypatch.setattr(main_module, "_submit_tunnel_mechanical", fail_submit)
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "隧道机电录入格式"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["query_type"] == "tunnel_mechanical_template"
+    assert body["replies"][0].startswith("隧道机电功能")
+    assert body["replies"][1] == "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人商邱宏 天气晴"
 
 
 def test_wechat_query_tunnel_mechanical_accepts_bot_name_starting_with_at(tmp_path, monkeypatch):
@@ -2283,8 +2310,122 @@ def test_wechat_bridge_group_command_requires_at_mention(tmp_path, monkeypatch):
             "is_at": True,
         },
     )
+    main_module._handle_wechat_bridge_message(
+        repo,
+        uploads,
+        {
+            "room_id": "room@@runtime",
+            "stable_room_id": "wgr_feature",
+            "sender_id": "wgm_member",
+            "runtime_sender_id": "@member",
+            "text": "查询今日机电@闷葫芦\u2005",
+            "is_at": True,
+        },
+    )
+    main_module._handle_wechat_bridge_message(
+        repo,
+        uploads,
+        {
+            "room_id": "room@@runtime",
+            "stable_room_id": "wgr_feature",
+            "sender_id": "wgm_member",
+            "runtime_sender_id": "@member",
+            "text": "查询@闷葫芦\u2005",
+            "is_at": True,
+        },
+    )
 
-    assert calls == ["@闷葫芦 查询今日机电", "@闷葫芦 8", "@闷葫芦 绑定商邱宏"]
+    assert calls == [
+        "@闷葫芦 查询今日机电",
+        "@闷葫芦 8",
+        "@闷葫芦 绑定商邱宏",
+        "查询今日机电@闷葫芦",
+        "查询@闷葫芦",
+    ]
+
+
+def test_wechat_bridge_sends_multiple_text_replies(tmp_path, monkeypatch):
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    uploads = tmp_path / "uploads"
+    uploads.mkdir()
+    sent: list[tuple[str, str]] = []
+
+    async def fake_build_wechat_query_response(repo_arg, query, *, uploads):
+        return {
+            "success": True,
+            "replies": [
+                "隧道机电功能",
+                "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人商邱宏 天气晴",
+            ],
+            "reply": "fallback should not be sent when replies exist",
+        }
+
+    class DummyManager:
+        def send_text(self, room_id, text, *, mention_ids=None):
+            sent.append((room_id, text))
+
+        def send_image(self, room_id, path):
+            raise AssertionError("no image should not send")
+
+    monkeypatch.setattr(main_module, "_build_wechat_query_response", fake_build_wechat_query_response)
+    monkeypatch.setattr(main_module, "get_wechat_bridge_manager", lambda: DummyManager())
+
+    main_module._handle_wechat_bridge_message(
+        repo,
+        uploads,
+        {
+            "room_id": "room@@runtime",
+            "stable_room_id": "wgr_feature",
+            "sender_id": "wgm_member",
+            "runtime_sender_id": "@member",
+            "text": "@闷葫芦 隧道机电录入格式",
+            "is_at": True,
+        },
+    )
+
+    assert sent == [
+        ("wgr_feature", "隧道机电功能"),
+        ("wgr_feature", "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人商邱宏 天气晴"),
+    ]
+
+
+def test_wechat_bridge_bind_command_replies_success(tmp_path, monkeypatch):
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_personnel_names(["商邱宏"])
+    uploads = tmp_path / "uploads"
+    uploads.mkdir()
+    sent: list[tuple[str, str]] = []
+
+    class DummyManager:
+        def send_text(self, room_id, text, *, mention_ids=None):
+            sent.append((room_id, text))
+
+        def send_image(self, room_id, path):
+            raise AssertionError("no image should not send")
+
+    monkeypatch.setattr(main_module, "get_wechat_bridge_manager", lambda: DummyManager())
+
+    main_module._handle_wechat_bridge_message(
+        repo,
+        uploads,
+        {
+            "room_id": "room@@runtime",
+            "stable_room_id": "wgr_feature",
+            "room_name": "功能群",
+            "sender_id": "wgm_stable_member",
+            "stable_member_id": "wgm_stable_member",
+            "runtime_sender_id": "@runtime-member",
+            "sender_name": "商邱宏微信",
+            "text": "@闷葫芦 绑定商邱宏",
+            "is_at": True,
+        },
+    )
+
+    assert sent and sent[0][0] == "wgr_feature"
+    assert "绑定成功：商邱宏" in sent[0][1]
+    bound = next(person for person in repo.list_personnel() if person["name"] == "商邱宏")
+    assert bound["wechat_group_member_id"] == "wgm_stable_member"
+    assert bound["wechat_group_runtime_sender_id"] == "@runtime-member"
 
 
 def test_wechat_query_triggers_tunnel_mechanical_submit(tmp_path, monkeypatch):
@@ -2518,9 +2659,150 @@ def test_wechat_query_returns_bound_person_monitor_plan(tmp_path, monkeypatch):
     assert body["person_name"] == "Alice"
     assert body["target_date"] == "2025-09-16"
     assert "Alice 2025-09-16" in body["reply"]
-    assert "08:00" in body["reply"]
-    assert "07:40" in body["reply"]
-    assert "07:50" in body["reply"]
+    assert "排班：中班 08:00至16:00" in body["reply"]
+    assert "每日提醒" not in body["reply"]
+
+
+def test_wechat_query_my_monitor_returns_near_seven_day_roster(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2025, 9, 15))
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/personnel",
+        json={
+            "names": ["Alice"],
+            "people": [{"name": "Alice", "wechat_group_runtime_sender_id": "@member-1"}],
+        },
+    )
+    client.post(
+        "/api/rosters/confirm",
+        json={
+            "year": 2025,
+            "month": 9,
+            "grid": [{"name": "Alice", "days": {"15": "早", "16": "中", "17": "晚", "18": "休"}}],
+        },
+    )
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "查询我的监控", "runtime_sender_id": "@member-1"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["query_type"] == "monitor_range"
+    assert body["person_name"] == "Alice"
+    assert body["start_date"] == "2025-09-15"
+    assert body["days"] == 7
+    assert "今天 2025-09-15" in body["reply"]
+    assert "明天 2025-09-16" in body["reply"]
+    assert "后天 2025-09-17" in body["reply"]
+    assert "早班 00:00至08:00" in body["reply"]
+    assert "中班 08:00至16:00" in body["reply"]
+    assert "夜班 16:00至00:00" in body["reply"]
+    assert "提醒" not in body["reply"]
+
+
+def test_wechat_monitor_commands_do_not_return_reminder_plan(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2025, 9, 15))
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/personnel",
+        json={
+            "names": ["Alice", "Bob", "Cindy"],
+            "people": [{"name": "Alice", "wechat_group_runtime_sender_id": "@member-1"}],
+        },
+    )
+    client.post("/api/people", json={"name": "Alice", "daily_time": "07:40", "before_shift_minutes": 10, "enabled": True})
+    client.post("/api/people", json={"name": "Bob", "daily_time": "08:10", "before_shift_minutes": 5, "enabled": True})
+    client.post(
+        "/api/rosters/confirm",
+        json={
+            "year": 2025,
+            "month": 9,
+            "grid": [
+                {"name": "Alice", "days": {"15": "早", "16": "中", "17": "晚", "18": "休"}},
+                {"name": "Bob", "days": {"15": "中", "16": "晚", "17": "早"}},
+                {"name": "Cindy", "days": {"15": "晚", "16": "早", "17": "中"}},
+            ],
+        },
+    )
+
+    cases = [
+        ("查询我的监控", "monitor_range"),
+        ("我的监控", "monitor_range"),
+        ("查询明日监控", "monitor_all"),
+        ("查询本周监控", "monitor_all_range"),
+        ("查询未来7天", "monitor_all_range"),
+        ("查询未来7天监控", "monitor_all_range"),
+        ("查询罗熙云监控", "monitor"),
+    ]
+    client.post("/api/personnel", json={"names": ["Alice", "Bob", "Cindy", "罗熙云"]})
+    client.post(
+        "/api/rosters/confirm",
+        json={
+            "year": 2025,
+            "month": 9,
+            "overwrite": True,
+            "grid": [
+                {"name": "Alice", "days": {"15": "早", "16": "中", "17": "晚", "18": "休"}},
+                {"name": "Bob", "days": {"15": "中", "16": "晚", "17": "早"}},
+                {"name": "Cindy", "days": {"15": "晚", "16": "早", "17": "中"}},
+                {"name": "罗熙云", "days": {"15": "中"}},
+            ],
+        },
+    )
+
+    for text, query_type in cases:
+        response = client.post(
+            "/api/wechat-query",
+            headers={"X-Duty-Query-Token": "unit-token"},
+            json={"text": text, "runtime_sender_id": "@member-1"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["success"] is True, text
+        assert body["query_type"] == query_type, text
+        assert "监控排班" in body["reply"], text
+        assert "计划提醒" not in body["reply"], text
+        assert "每日提醒" not in body["reply"], text
+        assert "班前提醒" not in body["reply"], text
+
+
+def test_wechat_reminder_commands_are_the_only_ones_returning_reminder_plan(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2025, 9, 15))
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/personnel",
+        json={
+            "names": ["Alice"],
+            "people": [{"name": "Alice", "wechat_group_runtime_sender_id": "@member-1"}],
+        },
+    )
+    client.post("/api/people", json={"name": "Alice", "daily_time": "07:40", "before_shift_minutes": 10, "enabled": True})
+    client.post(
+        "/api/rosters/confirm",
+        json={"year": 2025, "month": 9, "grid": [{"name": "Alice", "days": {"15": "早", "16": "中"}}]},
+    )
+
+    for text in ("查询今日提醒", "查询我的提醒", "查询下次提醒"):
+        response = client.post(
+            "/api/wechat-query",
+            headers={"X-Duty-Query-Token": "unit-token"},
+            json={"text": text, "runtime_sender_id": "@member-1"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["success"] is True, text
+        assert body["query_type"] in {"reminder_all", "reminder", "next_reminder"}, text
+        assert "提醒" in body["reply"], text
 
 
 def test_wechat_query_returns_named_person_monitor_plan(tmp_path, monkeypatch):
@@ -2606,11 +2888,54 @@ def test_wechat_query_allows_unbound_group_member_to_query_all_today_reminders(t
     assert response.status_code == 200
     body = response.json()
     assert body["success"] is True
-    assert body["query_type"] == "monitor_all"
+    assert body["query_type"] == "reminder_all"
     assert body["target_date"] == "2025-09-16"
     assert "Alice" in body["reply"]
     assert "Bob" in body["reply"]
     assert "还没有识别到" not in body["reply"]
+
+
+def test_wechat_query_tomorrow_monitor_returns_all_shift_summary_even_when_bound(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2025, 9, 15))
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/personnel",
+        json={
+            "names": ["Alice", "Bob", "Cindy"],
+            "people": [{"name": "Alice", "wechat_group_runtime_sender_id": "@member-1"}],
+        },
+    )
+    client.post(
+        "/api/rosters/confirm",
+        json={
+            "year": 2025,
+            "month": 9,
+            "grid": [
+                {"name": "Alice", "days": {"16": "早"}},
+                {"name": "Bob", "days": {"16": "中"}},
+                {"name": "Cindy", "days": {"16": "晚"}},
+            ],
+        },
+    )
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "查询明日监控@闷葫芦\u2005", "runtime_sender_id": "@member-1"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["query_type"] == "monitor_all"
+    assert body["target_date"] == "2025-09-16"
+    assert "明天 2025-09-16" in body["reply"]
+    assert "早班：Alice" in body["reply"]
+    assert "中班：Bob" in body["reply"]
+    assert "晚班：Cindy" in body["reply"]
+    assert "提醒" not in body["reply"]
 
 
 def test_wechat_query_allows_unbound_group_member_to_query_all_range(tmp_path, monkeypatch):
@@ -2637,7 +2962,9 @@ def test_wechat_query_allows_unbound_group_member_to_query_all_range(tmp_path, m
     assert body["query_type"] == "monitor_all_range"
     assert body["start_date"] == "2025-09-15"
     assert body["days"] == 3
-    assert "全员提醒汇总" in body["reply"]
+    assert "监控排班" in body["reply"]
+    assert "早班：Alice" in body["reply"]
+    assert "中班：Alice" in body["reply"]
 
 
 def test_wechat_query_allows_unbound_group_member_to_query_all_next_reminders(tmp_path, monkeypatch):
@@ -2848,12 +3175,12 @@ def test_wechat_query_returns_future_range_summary(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["query_type"] == "monitor_range"
+    assert body["query_type"] == "monitor_all_range"
     assert body["start_date"] == "2025-09-15"
     assert body["days"] == 3
-    assert "09-15" in body["reply"]
-    assert "09-16" in body["reply"]
-    assert "09-17" in body["reply"]
+    assert "今天 2025-09-15" in body["reply"]
+    assert "明天 2025-09-16" in body["reply"]
+    assert "后天 2025-09-17" in body["reply"]
     assert "休息" in body["reply"]
 
 
@@ -3906,6 +4233,109 @@ def test_due_custom_reminder_sends_with_saved_personnel_mobile(tmp_path, monkeyp
     assert records[0]["kind"] == "custom"
     assert records[0]["target"] == "示例甲"
     assert records[0]["status"] == "success"
+
+
+def test_due_custom_reminder_sends_with_saved_wechat_member(tmp_path, monkeypatch):
+    sent: dict[str, object] = {}
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2025, 9, 16, 21, 0, 25, tzinfo=tz)
+
+    class FakePersonalWechatClient:
+        is_wechat_bridge = True
+
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            sent["content"] = content
+            sent["mentions"] = mentioned_mobile_list
+
+        async def send_image(self, image_bytes: bytes):
+            raise AssertionError("自定义提醒不应该发送图片")
+
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(
+        sender_type="lightagent",
+        webhook_url="",
+        lightagent_url="https://lightagent.test/api/push/send",
+        lightagent_token="push-token",
+        lightagent_target="wgr_notice",
+        lightagent_targets=[{"id": "wgr_notice", "name": "通知群"}],
+    )
+    repo.save_roster_month(
+        2025,
+        9,
+        [{"name": "示例甲", "days": {"16": "晚"}}],
+        "uploads/month.png",
+    )
+    repo.save_custom_reminder(
+        name="示例甲",
+        mention_mobile="",
+        wechat_group_room_id="wgr_notice",
+        wechat_group_room_name="通知群",
+        wechat_group_member_id="stable-member-1",
+        wechat_group_runtime_sender_id="@member-runtime",
+        wechat_group_member_name="示例甲微信",
+        shift_code="night",
+        reminder_time="21:00",
+        message="需要关闭隧道灯",
+        enabled=True,
+    )
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(main_module, "_wecom_webhook_client_from_repo", lambda repo: FakePersonalWechatClient())
+
+    asyncio.run(main_module._send_due_reminders(repo))
+
+    assert sent["content"] == "需要关闭隧道灯"
+    assert sent["mentions"] == ["@member-runtime"]
+    records = repo.list_send_records()
+    assert records[0]["kind"] == "custom"
+    assert records[0]["status"] == "success"
+
+
+def test_due_custom_reminder_without_wechat_binding_adds_visible_at_name(tmp_path, monkeypatch):
+    sent: dict[str, object] = {}
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2025, 9, 16, 21, 0, 25, tzinfo=tz)
+
+    class FakePersonalWechatClient:
+        is_wechat_bridge = True
+
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            sent["content"] = content
+            sent["mentions"] = mentioned_mobile_list
+
+        async def send_image(self, image_bytes: bytes):
+            raise AssertionError("自定义提醒不应该发送图片")
+
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(
+        sender_type="lightagent",
+        webhook_url="",
+        lightagent_url="https://lightagent.test/api/push/send",
+        lightagent_token="push-token",
+        lightagent_target="wgr_notice",
+        lightagent_targets=[{"id": "wgr_notice", "name": "通知群"}],
+    )
+    repo.save_roster_month(2025, 9, [{"name": "示例甲", "days": {"16": "晚"}}], "uploads/month.png")
+    repo.save_custom_reminder(
+        name="示例甲",
+        mention_mobile="",
+        shift_code="night",
+        reminder_time="21:00",
+        message="需要关闭隧道灯",
+        enabled=True,
+    )
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(main_module, "_wecom_webhook_client_from_repo", lambda repo: FakePersonalWechatClient())
+
+    asyncio.run(main_module._send_due_reminders(repo))
+
+    assert sent["content"] == "@示例甲\n需要关闭隧道灯"
+    assert sent["mentions"] == []
 
 
 def test_list_confirmed_rosters_after_import(tmp_path):

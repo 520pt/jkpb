@@ -268,6 +268,11 @@ def test_custom_reminder_roundtrip_updates_personnel_contact(tmp_path: Path):
             "enabled": True,
             "created_at": repo.list_custom_reminders()[0]["created_at"],
             "updated_at": repo.list_custom_reminders()[0]["updated_at"],
+            "wechat_group_room_id": "room-1",
+            "wechat_group_room_name": "通知群",
+            "wechat_group_member_id": "stable-member-1",
+            "wechat_group_runtime_sender_id": "@member-1",
+            "wechat_group_member_name": "示例甲微信",
         }
     ]
     assert repo.list_personnel() == [

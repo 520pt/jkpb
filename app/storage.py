@@ -878,14 +878,25 @@ class DutyRepository:
         return cursor.rowcount > 0
 
     def list_custom_reminders(self, enabled_only: bool = False) -> list[dict[str, Any]]:
-        query = "SELECT * FROM custom_reminders"
+        query = """
+            SELECT
+                custom_reminders.*,
+                personnel_names.wechat_group_room_id,
+                personnel_names.wechat_group_room_name,
+                personnel_names.wechat_group_member_id,
+                personnel_names.wechat_group_runtime_sender_id,
+                personnel_names.wechat_group_member_name
+            FROM custom_reminders
+            LEFT JOIN personnel_names ON personnel_names.name = custom_reminders.name
+        """
         if enabled_only:
-            query += " WHERE enabled = 1"
-        query += " ORDER BY name, shift_code, reminder_time, id"
+            query += " WHERE custom_reminders.enabled = 1"
+        query += " ORDER BY custom_reminders.name, custom_reminders.shift_code, custom_reminders.reminder_time, custom_reminders.id"
         with self._connect() as conn:
             rows = conn.execute(query).fetchall()
-        return [
-            {
+        reminders = []
+        for row in rows:
+            item = {
                 "id": row["id"],
                 "name": row["name"],
                 "mention_mobile": row["mention_mobile"],
@@ -896,8 +907,17 @@ class DutyRepository:
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
             }
-            for row in rows
-        ]
+            wechat_fields = {
+                "wechat_group_room_id": row["wechat_group_room_id"],
+                "wechat_group_room_name": row["wechat_group_room_name"],
+                "wechat_group_member_id": row["wechat_group_member_id"],
+                "wechat_group_runtime_sender_id": row["wechat_group_runtime_sender_id"],
+                "wechat_group_member_name": row["wechat_group_member_name"],
+            }
+            if any(str(value or "").strip() for value in wechat_fields.values()):
+                item.update(wechat_fields)
+            reminders.append(item)
+        return reminders
 
     def save_notification_config(
         self,
