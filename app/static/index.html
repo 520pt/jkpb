@@ -4204,6 +4204,37 @@
       return `昵称未识别 · ${shortWechatId(id)}`;
     }
 
+    function lightAgentRoomStableId(room) {
+      return String((room && (room.id || room.stable_room_id || room.room_id)) || "").trim();
+    }
+
+    function lightAgentRoomRuntimeId(room) {
+      const stableId = lightAgentRoomStableId(room);
+      let runtimeId = String((room && (room.runtime_room_id || room.runtime_id)) || "").trim();
+      if (!runtimeId && stableId && !stableId.startsWith("wgr_")) runtimeId = stableId;
+      if (runtimeId.startsWith("wgr_")) return "";
+      return runtimeId;
+    }
+
+    function lightAgentRoomSendable(room) {
+      if (room && typeof room.sendable === "boolean") return room.sendable;
+      return !!lightAgentRoomRuntimeId(room);
+    }
+
+    function lightAgentRoomName(room) {
+      const id = lightAgentRoomStableId(room) || lightAgentRoomRuntimeId(room);
+      return String((room && room.name) || id).trim();
+    }
+
+    function lightAgentRoomById(id) {
+      const text = String(id || "").trim();
+      return (state.lightAgentRooms || []).find((room) => {
+        return [lightAgentRoomStableId(room), lightAgentRoomRuntimeId(room)]
+          .filter(Boolean)
+          .includes(text);
+      }) || null;
+    }
+
     function renderLightAgentRooms() {
       const select = $("lightAgentRoomSelect");
       const featureSelect = $("featureChannelRoomSelect");
@@ -4215,9 +4246,11 @@
       }
       const current = $("lightAgentTarget").value.trim();
       select.innerHTML = `<option value="">请选择微信群</option>` + (state.lightAgentRooms || []).map((room) => {
-        const id = String(room.id || room.stable_room_id || room.runtime_room_id || "").trim();
-        const name = String(room.name || id).trim();
-        return `<option value="${escapeHtml(id)}" data-room-name="${escapeHtml(name)}" ${id && id === current ? "selected" : ""}>${escapeHtml(name)} · ${escapeHtml(id)}</option>`;
+        const id = lightAgentRoomStableId(room) || lightAgentRoomRuntimeId(room);
+        const name = lightAgentRoomName(room);
+        const sendable = lightAgentRoomSendable(room);
+        const suffix = sendable ? "" : "（当前不可发送）";
+        return `<option value="${escapeHtml(id)}" data-room-name="${escapeHtml(name)}" data-sendable="${sendable ? "true" : "false"}" ${id && id === current ? "selected" : ""}>${escapeHtml(name)} · ${escapeHtml(id)}${escapeHtml(suffix)}</option>`;
       }).join("");
       renderNotificationTargetRooms();
     }
@@ -4227,9 +4260,12 @@
       if (!select) return;
       const current = $("notificationTargetRoomId").value.trim();
       select.innerHTML = `<option value="">请选择通知微信群</option>` + (state.lightAgentRooms || []).map((room) => {
-        const id = String(room.id || room.stable_room_id || room.runtime_room_id || "").trim();
-        const name = String(room.name || id).trim();
-        return `<option value="${escapeHtml(id)}" data-room-name="${escapeHtml(name)}" ${id && id === current ? "selected" : ""}>${escapeHtml(name)} · ${escapeHtml(id)}</option>`;
+        const id = lightAgentRoomStableId(room) || lightAgentRoomRuntimeId(room);
+        const name = lightAgentRoomName(room);
+        const sendable = lightAgentRoomSendable(room);
+        const disabled = sendable ? "" : "disabled";
+        const suffix = sendable ? "" : "（当前不可发送）";
+        return `<option value="${escapeHtml(id)}" data-room-name="${escapeHtml(name)}" data-sendable="${sendable ? "true" : "false"}" ${disabled} ${id && id === current ? "selected" : ""}>${escapeHtml(name)} · ${escapeHtml(id)}${escapeHtml(suffix)}</option>`;
       }).join("");
     }
 
@@ -4238,9 +4274,11 @@
       if (!select) return;
       const current = $("featureChannelRoomId").value.trim();
       select.innerHTML = `<option value="">请选择交互功能微信群</option>` + (state.lightAgentRooms || []).map((room) => {
-        const id = String(room.id || room.stable_room_id || room.runtime_room_id || "").trim();
-        const name = String(room.name || id).trim();
-        return `<option value="${escapeHtml(id)}" data-room-name="${escapeHtml(name)}" ${id && id === current ? "selected" : ""}>${escapeHtml(name)} · ${escapeHtml(id)}</option>`;
+        const id = lightAgentRoomStableId(room) || lightAgentRoomRuntimeId(room);
+        const name = lightAgentRoomName(room);
+        const sendable = lightAgentRoomSendable(room);
+        const suffix = sendable ? "" : "（当前不可发送）";
+        return `<option value="${escapeHtml(id)}" data-room-name="${escapeHtml(name)}" data-sendable="${sendable ? "true" : "false"}" ${id && id === current ? "selected" : ""}>${escapeHtml(name)} · ${escapeHtml(id)}${escapeHtml(suffix)}</option>`;
       }).join("");
     }
 
@@ -4288,14 +4326,18 @@
       state.notificationTargetRooms = rooms;
       const firstRoom = rooms[0] || {};
       $("lightAgentTarget").value = firstRoom.id || "";
-      const activeRoomIds = new Set((state.lightAgentRooms || []).map((room) => String(room.id || room.stable_room_id || room.runtime_room_id || "").trim()).filter(Boolean));
+      const syncedRoomIds = new Set((state.lightAgentRooms || []).flatMap((room) => [lightAgentRoomStableId(room), lightAgentRoomRuntimeId(room)]).filter(Boolean));
+      const sendableRoomIds = new Set((state.lightAgentRooms || []).filter(lightAgentRoomSendable).flatMap((room) => [lightAgentRoomStableId(room), lightAgentRoomRuntimeId(room)]).filter(Boolean));
       box.innerHTML = rooms.map((room) => {
         const label = room.name || room.id;
-        const active = !activeRoomIds.size || activeRoomIds.has(room.id);
-        const note = active ? room.id : `${room.id} · 未在当前同步群聊中，可能已失效`;
+        const synced = !syncedRoomIds.size || syncedRoomIds.has(room.id);
+        const sendable = !sendableRoomIds.size ? synced : sendableRoomIds.has(room.id);
+        const note = sendable
+          ? room.id
+          : (synced ? `${room.id} · 当前不可发送，请在群内发言后重新同步` : `${room.id} · 未在当前同步群聊中，可能已失效`);
         return `<div class="item">
           <strong>${escapeHtml(label)}</strong>
-          <small class="${active ? "" : "status error"}">${escapeHtml(note)}</small>
+          <small class="${sendable ? "" : "status error"}">${escapeHtml(note)}</small>
           <button type="button" data-remove-notification-room="${escapeHtml(room.id)}">移除</button>
         </div>`;
       }).join("") || `<div class="item"><small>还没有添加通知微信群</small></div>`;
@@ -4314,6 +4356,12 @@
       const name = $("notificationTargetRoomName").value.trim() || (option ? String(option.dataset.roomName || "").trim() : "");
       if (!id) {
         $("notificationStatus").textContent = "请先选择或输入通知群 ID";
+        $("notificationStatus").className = "status error";
+        return;
+      }
+      const matchedRoom = lightAgentRoomById(id);
+      if (matchedRoom && !lightAgentRoomSendable(matchedRoom)) {
+        $("notificationStatus").textContent = "该微信群当前不可发送，请先让该群内任意账号发言后重新同步群聊，再添加为通知群";
         $("notificationStatus").className = "status error";
         return;
       }
@@ -4446,7 +4494,8 @@
       if (!response.ok) throw new Error(body.detail || "同步群聊失败");
       state.lightAgentRooms = body.rooms || [];
       if (!$("lightAgentTarget").value.trim() && state.lightAgentRooms.length) {
-        $("lightAgentTarget").value = String(state.lightAgentRooms[0].id || state.lightAgentRooms[0].stable_room_id || "").trim();
+        const firstSendableRoom = state.lightAgentRooms.find(lightAgentRoomSendable) || state.lightAgentRooms[0];
+        $("lightAgentTarget").value = lightAgentRoomStableId(firstSendableRoom) || lightAgentRoomRuntimeId(firstSendableRoom);
       }
       renderLightAgentRooms();
       renderFeatureChannelRooms();

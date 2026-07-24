@@ -4180,19 +4180,26 @@ class ChannelsHandler:
             runtime_room_id = str(
                 room.get("runtime_room_id")
                 or room.get("runtime_id")
-                or room.get("id")
                 or ""
             ).strip()
+            raw_room_id = str(room.get("id") or "").strip()
+            if not runtime_room_id and raw_room_id and not raw_room_id.startswith("wgr_"):
+                runtime_room_id = raw_room_id
             stable_room_id = str(
                 room.get("stable_room_id")
                 or room.get("stable_id")
                 or ""
             ).strip()
+            if not stable_room_id and raw_room_id.startswith("wgr_"):
+                stable_room_id = raw_room_id
+            if runtime_room_id.startswith("wgr_"):
+                runtime_room_id = ""
             if not stable_room_id and not runtime_room_id:
                 continue
             room["id"] = stable_room_id or runtime_room_id
             room["stable_room_id"] = stable_room_id
             room["runtime_room_id"] = runtime_room_id
+            room["sendable"] = bool(runtime_room_id)
             room["binding_status"] = str(
                 room.get("binding_status")
                 or room.get("identity_status")
@@ -6923,6 +6930,8 @@ def _resolve_push_target_room_id(group_channel, target):
     for room in rooms or []:
         stable_id = str(room.get("stable_room_id") or room.get("id") or "").strip()
         runtime_id = str(room.get("runtime_room_id") or room.get("room_id") or "").strip()
+        if runtime_id.startswith("wgr_"):
+            runtime_id = ""
         if stable_id == room_id and runtime_id:
             return runtime_id
     return ""

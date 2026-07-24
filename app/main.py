@@ -946,11 +946,12 @@ def create_app(
         for channel in channels or []:
             if str(channel.get("name") or "") == "wechat_group":
                 extra = channel.get("extra") if isinstance(channel.get("extra"), dict) else {}
+                rooms = _normalize_lightagent_wechat_rooms(extra.get("rooms") or [])
                 return {
                     "status": "success",
                     "connected": bool(channel.get("connected") or channel.get("active")),
                     "login_status": str(channel.get("login_status") or ""),
-                    "rooms": extra.get("rooms") or [],
+                    "rooms": rooms,
                     "selected_room_ids": extra.get("selected_room_ids") or [],
                     "selected_room_names": extra.get("selected_room_names") or [],
                 }
@@ -1573,6 +1574,27 @@ def _sync_lightagent_wechat_group_targets(
                 "selected_room_ids": returned_ids,
                 "message": "LightAgent 已响应，但未确认目标群已进入个人微信群选中列表",
             }
+        returned_rooms = _normalize_lightagent_wechat_rooms(returned_extra.get("rooms") or extra.get("rooms") or [])
+        if returned_rooms:
+            sendable_ids = {
+                str(room.get("id") or "").strip()
+                for room in returned_rooms
+                if room.get("sendable") and str(room.get("id") or "").strip()
+            }
+            inactive_targets = [
+                target
+                for target in target_ids
+                if target.startswith("wgr_") and target not in sendable_ids
+            ]
+            if inactive_targets:
+                return {
+                    "success": False,
+                    "target": target_ids[0],
+                    "targets": target_ids,
+                    "inactive_targets": inactive_targets,
+                    "selected_room_ids": returned_ids or selected_ids,
+                    "message": "LightAgent 已同步群配置，但目标群当前没有可发送会话。请先在这些微信群内发一条消息后重新同步群聊，或移除失效群。",
+                }
         return {
             "success": True,
             "target": target_ids[0],
@@ -1602,6 +1624,36 @@ def _merge_lightagent_room_ids(*values: Any) -> list[str]:
             seen.add(text)
             merged.append(text)
     return merged
+
+
+def _normalize_lightagent_wechat_rooms(rooms: Any) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    if not isinstance(rooms, list):
+        return normalized
+    for item in rooms:
+        if not isinstance(item, dict):
+            continue
+        room = dict(item)
+        raw_id = str(room.get("id") or room.get("room_id") or "").strip()
+        stable_room_id = str(room.get("stable_room_id") or room.get("stable_id") or "").strip()
+        runtime_room_id = str(room.get("runtime_room_id") or room.get("runtime_id") or "").strip()
+        if not stable_room_id and raw_id.startswith("wgr_"):
+            stable_room_id = raw_id
+        if not runtime_room_id and raw_id and not raw_id.startswith("wgr_"):
+            runtime_room_id = raw_id
+        if runtime_room_id.startswith("wgr_"):
+            runtime_room_id = ""
+        room_id = stable_room_id or runtime_room_id or raw_id
+        if not room_id:
+            continue
+        room["id"] = room_id
+        room["stable_room_id"] = stable_room_id
+        room["runtime_room_id"] = runtime_room_id
+        room["sendable"] = bool(runtime_room_id)
+        if not room["sendable"]:
+            room["sendable_reason"] = "当前没有可发送会话，请先在群内发言后重新同步群聊"
+        normalized.append(room)
+    return normalized
 
 
 def _looks_like_wechat_runtime_id(value: str) -> bool:
