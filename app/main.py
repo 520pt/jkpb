@@ -51,6 +51,8 @@ from app.storage import (
 )
 from app.tunnel_mechanical_image import render_tunnel_mechanical_result_image
 from app.wecom import LightAgentNotifyClient, WeComClient, WeComError, WeComWebhookClient
+from app.wechat_bridge.manager import get_wechat_bridge_manager, wechat_bridge_enabled
+from app.wechat_bridge.notify import WechatBridgeNotifyClient
 
 
 TZ = ZoneInfo(os.getenv("TZ", "Asia/Shanghai"))
@@ -134,6 +136,7 @@ class NotificationConfigRequest(BaseModel):
 class NotificationTestRequest(BaseModel):
     test_mobile: str = ""
     test_wechat_member_id: str = ""
+    test_wechat_member_name: str = ""
 
 
 class FeatureChannelRoomRequest(BaseModel):
@@ -343,6 +346,10 @@ def create_app(
     app.state.upload_dir = uploads
     app.state.scheduler_enabled = start_scheduler
     app.state.cjk_font_ready = has_cjk_font()
+    app.state.wechat_bridge_enabled = wechat_bridge_enabled()
+    app.state.wechat_bridge = get_wechat_bridge_manager() if app.state.wechat_bridge_enabled else None
+    if app.state.wechat_bridge:
+        app.state.wechat_bridge.set_message_handler(lambda message: _handle_wechat_bridge_message(repo, uploads, message))
     if not app.state.cjk_font_ready:
         LOGGER.warning("未检测到中文字体，今日在岗图片可能出现乱码或方块")
 
@@ -603,9 +610,10 @@ def create_app(
 
     @app.get("/api/patrol-warning-config")
     def get_patrol_warning_config():
+        config = repo.get_patrol_warning_config()
         return {
-            "config": _public_patrol_warning_config(repo.get_patrol_warning_config()),
-            "state": _public_patrol_warning_state(repo.get_patrol_warning_state()),
+            "config": _public_patrol_warning_config(config),
+            "state": _public_patrol_warning_state(repo.get_patrol_warning_state(), config),
         }
 
     @app.post("/api/patrol-warning-config")
@@ -634,7 +642,7 @@ def create_app(
         return {
             "success": True,
             "config": _public_patrol_warning_config(repo.get_patrol_warning_config()),
-            "state": _public_patrol_warning_state(repo.get_patrol_warning_state()),
+            "state": _public_patrol_warning_state(repo.get_patrol_warning_state(), repo.get_patrol_warning_config()),
         }
 
     @app.post("/api/patrol-warning-config/test")
@@ -647,21 +655,28 @@ def create_app(
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         if latest is not None:
             repo.save_patrol_warning_state(warning=latest.as_dict())
+        public_latest = latest.as_dict() if latest and _patrol_warning_in_display_window(
+            latest,
+            config,
+            now=datetime.now(TZ),
+        ) else None
         return {
             "success": True,
             "stats": stats,
-            "latest": latest.as_dict() if latest else None,
+            "latest": public_latest,
         }
 
     @app.get("/api/patrol-warning-image")
     def patrol_warning_image(mode: str = "auto"):
+        config = repo.get_patrol_warning_config()
+        now = datetime.now(TZ)
         warning = warning_from_dict(dict(repo.get_patrol_warning_state().get("warning") or {}), TZ)
-        if warning is None:
+        if warning is None or not _patrol_warning_in_display_window(warning, config, now=now):
             raise HTTPException(status_code=404, detail="暂无已监测到的公路巡查预警")
         image = render_patrol_warning_image(
             warning,
-            now=datetime.now(TZ),
-            window_hours=int(repo.get_patrol_warning_config().get("end_reminder_window_hours") or 48),
+            now=now,
+            window_hours=int(config.get("end_reminder_window_hours") or 48),
             mode=mode,
         )
         return Response(content=image, media_type="image/png")
@@ -686,9 +701,9 @@ def create_app(
         if webhook_client is None:
             raise HTTPException(status_code=400, detail="请先配置企业微信群机器人地址")
         warning = warning_from_dict(dict(repo.get_patrol_warning_state().get("warning") or {}), TZ)
-        if warning is None:
-            raise HTTPException(status_code=400, detail="暂无已监测到的预警，请等待后台监测到预警后再发送")
         now = datetime.now(TZ)
+        if warning is None or not _patrol_warning_in_display_window(warning, config, now=now):
+            raise HTTPException(status_code=400, detail="暂无已监测到的预警，请等待后台监测到预警后再发送")
         mode = "end" if request.mode == "end" else "start"
         content = _build_patrol_warning_content(warning, config, now=now, mode=mode)
         try:
@@ -852,18 +867,21 @@ def create_app(
         if _normalize_notification_sender_type(str(config.get("sender_type") or "")) == "lightagent":
             target = request.test_wechat_member_id.strip() or target
             mentions = [request.test_wechat_member_id.strip()] if request.test_wechat_member_id.strip() else []
+        record_target = target or "测试消息"
+        if _normalize_notification_sender_type(str(config.get("sender_type") or "")) == "lightagent":
+            record_target = _wechat_test_record_target(repo, target, request.test_wechat_member_name.strip())
         try:
             await notification_client.send_text(content, mentions)
             repo.save_send_record(
                 kind="notification_test",
-                target=target or "测试消息",
+                target=record_target,
                 status="success",
                 content=content,
             )
         except WeComError as exc:
             repo.save_send_record(
                 kind="notification_test",
-                target=target or "测试消息",
+                target=record_target,
                 status="failed",
                 content=content,
                 error=str(exc),
@@ -872,7 +890,7 @@ def create_app(
         except Exception as exc:
             repo.save_send_record(
                 kind="notification_test",
-                target=target or "测试消息",
+                target=record_target,
                 status="failed",
                 content=content,
                 error=f"测试发送失败：{exc}",
@@ -933,6 +951,8 @@ def create_app(
 
     @app.get("/api/lightagent/wechat/status")
     def lightagent_wechat_status():
+        if app.state.wechat_bridge:
+            return app.state.wechat_bridge.status_snapshot()
         status = _lightagent_web_request(repo, "GET", "/api/wechat_group/qrlogin")
         channels_error = ""
         channel_info: dict[str, Any] = {}
@@ -955,10 +975,25 @@ def create_app(
 
     @app.post("/api/lightagent/wechat/refresh")
     def refresh_lightagent_wechat():
+        if app.state.wechat_bridge:
+            app.state.wechat_bridge.refresh_rooms()
+            return app.state.wechat_bridge.status_snapshot()
         return _lightagent_web_request(repo, "POST", "/api/wechat_group/qrlogin", json_body={"action": "refresh"})
 
     @app.get("/api/lightagent/wechat/rooms")
     def lightagent_wechat_rooms():
+        if app.state.wechat_bridge:
+            app.state.wechat_bridge.refresh_rooms()
+            snapshot = app.state.wechat_bridge.status_snapshot()
+            return {
+                "status": "success",
+                "connected": bool(snapshot.get("connected")),
+                "login_status": str(snapshot.get("login_status") or ""),
+                "rooms": snapshot.get("rooms") or [],
+                "sendable_room_count": snapshot.get("sendable_room_count") or 0,
+                "selected_room_ids": snapshot.get("selected_room_ids") or [],
+                "selected_room_names": snapshot.get("selected_room_names") or [],
+            }
         data = _lightagent_web_request(repo, "GET", "/api/channels")
         channels = data.get("channels") if isinstance(data, dict) else []
         for channel in channels or []:
@@ -981,6 +1016,11 @@ def create_app(
         room_text = str(room_id or "").strip()
         if not room_text:
             raise HTTPException(status_code=400, detail="room_id is required")
+        if app.state.wechat_bridge:
+            return {
+                "status": "success",
+                "members": app.state.wechat_bridge.get_room_members(room_text, limit=500),
+            }
         data = _lightagent_web_request(
             repo,
             "GET",
@@ -1027,7 +1067,7 @@ def create_app(
 
     @app.get("/api/send-records")
     def list_send_records(limit: int = 100):
-        return {"records": repo.list_send_records(limit)}
+        return {"records": _public_send_records(repo, repo.list_send_records(limit))}
 
     @app.post("/api/send-records/{record_id}/resend")
     async def resend_send_record(record_id: int):
@@ -1049,6 +1089,18 @@ def create_app(
     def preview_reminders(request: PreviewRequest):
         target = request.target_date or _today_in_tz()
         return _reminder_events_response(repo, target, now=datetime.now(TZ))
+
+    if app.state.wechat_bridge:
+        @app.on_event("startup")
+        def start_wechat_bridge():
+            try:
+                app.state.wechat_bridge.start()
+            except Exception:
+                LOGGER.exception("内置微信桥启动失败")
+
+        @app.on_event("shutdown")
+        def stop_wechat_bridge():
+            app.state.wechat_bridge.stop()
 
     if start_scheduler:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -1455,6 +1507,7 @@ def _public_feature_channel_config(config: dict[str, Any]) -> dict[str, Any]:
     primary_room = rooms[0] if rooms else {}
     return {
         "enabled": bool(config.get("enabled", True)),
+        "wechat_bridge_enabled": wechat_bridge_enabled(),
         "lightagent_web_url": str(config.get("lightagent_web_url") or ""),
         "lightagent_web_password_configured": bool(str(config.get("lightagent_web_password") or "").strip()),
         "wechat_group_room_id": str(primary_room.get("id") or ""),
@@ -1553,6 +1606,47 @@ def _sync_lightagent_wechat_group_targets(
     target_ids = _merge_lightagent_room_ids(targets)
     if not target_ids:
         return {"success": True, "skipped": True, "reason": "empty_targets"}
+    if wechat_bridge_enabled():
+        manager = get_wechat_bridge_manager()
+        snapshot = manager.status_snapshot()
+        if not snapshot.get("connected"):
+            login_status = str(snapshot.get("login_status") or "unknown")
+            return {
+                "success": False,
+                "target": target_ids[0],
+                "targets": target_ids,
+                "source": source,
+                "login_status": login_status,
+                "message": f"内置微信桥未登录或未连接（当前状态：{login_status}），请先完成微信登录并同步群聊",
+            }
+        sendable_ids = {
+            str(room.get("id") or "").strip()
+            for room in snapshot.get("rooms") or []
+            if room.get("sendable") and str(room.get("id") or "").strip()
+        }
+        inactive_targets = [
+            target
+            for target in target_ids
+            if target.startswith("wgr_") and target not in sendable_ids
+        ]
+        if inactive_targets:
+            return {
+                "success": False,
+                "target": target_ids[0],
+                "targets": target_ids,
+                "source": source,
+                "inactive_targets": inactive_targets,
+                "message": "内置微信桥已登录，但目标群当前不可发送。请重新同步群聊，或移除失效群。",
+            }
+        return {
+            "success": True,
+            "target": target_ids[0],
+            "targets": target_ids,
+            "source": source,
+            "selected_room_ids": target_ids,
+            "action": "local_bridge",
+            "restarted": False,
+        }
     try:
         data = _lightagent_web_request(repo, "GET", "/api/channels")
         channels = data.get("channels") if isinstance(data, dict) else []
@@ -1719,6 +1813,11 @@ def _looks_like_wechat_runtime_id(value: str) -> bool:
         or text.startswith("wxid_")
         or re.fullmatch(r"[A-Za-z0-9_-]{18,}", text)
     )
+
+
+def _looks_like_wechat_room_id(value: str) -> bool:
+    text = str(value or "").strip()
+    return bool(text.startswith("wgr_") or text.startswith("@@") or text.startswith("room@@"))
 
 
 def _normalize_lightagent_wechat_members(members: Any) -> list[dict[str, Any]]:
@@ -1981,8 +2080,7 @@ async def _build_wechat_query_response(
             "person_name": person["name"],
             "reply": (
                 f"已绑定：{person['name']}\n"
-                f"微信成员：{person.get('wechat_group_member_name') or query.sender_name or '未记录'}\n"
-                f"成员ID：{person.get('wechat_group_runtime_sender_id') or query.runtime_sender_id or query.sender_id}"
+                f"微信成员：{_clean_wechat_member_display_name(str(person.get('wechat_group_member_name') or query.sender_name or ''), str(person.get('wechat_group_runtime_sender_id') or query.runtime_sender_id or query.sender_id or '')) or '已绑定'}"
             ),
         }
     if _is_wechat_next_reminder_query(text):
@@ -1998,6 +2096,76 @@ async def _build_wechat_query_response(
         return _build_person_monitor_range_query_response(repo, str(person["name"]), start, days)
     target = start
     return _build_person_monitor_query_response(repo, str(person["name"]), target)
+
+
+def _handle_wechat_bridge_message(repo: DutyRepository, uploads: Path, message: dict[str, Any]) -> None:
+    if message.get("my_msg"):
+        return
+    text = str(message.get("text") or "").strip()
+    if not text:
+        return
+    normalized = _normalize_wechat_query_text(text)
+    if not _looks_like_duty_wechat_command(normalized):
+        return
+    LOGGER.warning(
+        "内置微信桥收到功能命令：room=%s sender=%s text=%s",
+        message.get("stable_room_id") or message.get("room_id") or "",
+        message.get("sender_name") or message.get("sender_id") or "",
+        text,
+    )
+    manager = get_wechat_bridge_manager()
+    query = WechatQueryRequest(
+        text=text,
+        room_id=str(message.get("room_id") or ""),
+        stable_room_id=str(message.get("stable_room_id") or ""),
+        sender_id=str(message.get("sender_id") or ""),
+        runtime_sender_id=str(message.get("runtime_sender_id") or ""),
+        sender_name=str(message.get("sender_name") or ""),
+    )
+    try:
+        result = asyncio.run(_build_wechat_query_response(repo, query, uploads=uploads))
+    except HTTPException as exc:
+        result = {"success": False, "reply": str(exc.detail)}
+    except Exception as exc:
+        LOGGER.exception("内置微信桥处理群消息失败")
+        result = {"success": False, "reply": f"查询失败：{exc}"}
+    reply = str(result.get("reply") or "").strip()
+    room_id = str(message.get("stable_room_id") or message.get("room_id") or "").strip()
+    if not room_id:
+        return
+    image_path = _wechat_query_result_image_path(result, uploads)
+    try:
+        if reply:
+            manager.send_text(room_id, reply)
+        if image_path:
+            manager.send_image(room_id, str(image_path))
+    except Exception:
+        LOGGER.exception("内置微信桥发送查询回复失败")
+
+
+def _looks_like_duty_wechat_command(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return False
+    return any(
+        checker(value)
+        for checker in (
+            _is_tunnel_mechanical_wechat_request,
+            _is_wechat_query_help,
+            _is_wechat_binding_query,
+            _is_wechat_next_reminder_query,
+            _is_wechat_monitor_query,
+        )
+    )
+
+
+def _wechat_query_result_image_path(result: dict[str, Any], uploads: Path) -> Path | None:
+    image_url = str(result.get("image_url") or result.get("result_image_url") or "").strip()
+    if not image_url.startswith("/api/uploads/"):
+        return None
+    filename = Path(image_url).name
+    path = uploads / filename
+    return path if path.exists() else None
 
 
 async def _build_tunnel_mechanical_wechat_response(
@@ -2512,8 +2680,8 @@ def _wechat_query_help_text() -> str:
 
 
 def _wechat_query_unbound_response(query: WechatQueryRequest) -> dict[str, Any]:
-    sender_id = str(query.runtime_sender_id or query.sender_id or query.stable_member_id or "").strip()
-    suffix = f"\n当前微信成员ID：{sender_id}" if sender_id else ""
+    sender_name = _clean_wechat_member_display_name(str(query.sender_name or ""), str(query.runtime_sender_id or query.sender_id or ""))
+    suffix = f"\n当前微信成员：{sender_name}" if sender_name else ""
     return {
         "success": False,
         "query_type": "unbound",
@@ -2694,15 +2862,20 @@ def _public_notification_config(config: dict[str, Any]) -> dict[str, Any]:
     lightagent_target = lightagent_targets[0]["id"] if lightagent_targets else ""
     lightagent_token = str(config.get("lightagent_token", "")).strip()
     sender_type = _normalize_notification_sender_type(str(config.get("sender_type") or "wecom_webhook"))
-    active_configured = bool(webhook_url) if sender_type == "wecom_webhook" else bool(lightagent_url and lightagent_targets)
+    active_configured = (
+        bool(webhook_url)
+        if sender_type == "wecom_webhook"
+        else bool(lightagent_targets and (lightagent_url or wechat_bridge_enabled()))
+    )
     return {
         "sender_type": sender_type,
+        "wechat_bridge_enabled": wechat_bridge_enabled(),
         "webhook_url": "",
         "webhook_configured": bool(webhook_url),
         "webhook_display": "已配置" if webhook_url else "未配置",
         "lightagent_url": lightagent_url,
-        "lightagent_configured": bool(lightagent_url and lightagent_targets),
-        "lightagent_display": "已配置" if lightagent_url and lightagent_targets else "未配置",
+        "lightagent_configured": bool(lightagent_targets and (lightagent_url or wechat_bridge_enabled())),
+        "lightagent_display": "已配置" if lightagent_targets and (lightagent_url or wechat_bridge_enabled()) else "未配置",
         "lightagent_token_configured": bool(lightagent_token),
         "lightagent_target": lightagent_target,
         "lightagent_targets": lightagent_targets,
@@ -2737,10 +2910,16 @@ def _public_patrol_warning_config(config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _public_patrol_warning_state(state: dict[str, Any]) -> dict[str, Any]:
+def _public_patrol_warning_state(state: dict[str, Any], config: dict[str, Any] | None = None) -> dict[str, Any]:
+    warning = warning_from_dict(dict(state.get("warning") or {}), TZ)
+    public_warning = (
+        warning.as_dict()
+        if warning is not None and _patrol_warning_in_display_window(warning, config or {}, now=datetime.now(TZ))
+        else {}
+    )
     return {
         "warning_key": str(state.get("warning_key") or ""),
-        "warning": dict(state.get("warning") or {}),
+        "warning": public_warning,
         "last_checked_at": str(state.get("last_checked_at") or ""),
         "last_start_sent_key": str(state.get("last_start_sent_key") or ""),
         "last_end_reminder_slot": str(state.get("last_end_reminder_slot") or ""),
@@ -3972,6 +4151,8 @@ def _plan_patrol_warning_display_events(repo: DutyRepository, target: date, *, n
     warning = warning_from_dict(dict(repo.get_patrol_warning_state().get("warning") or {}), TZ)
     if warning is None:
         return []
+    if not _patrol_warning_in_display_window(warning, config, now=now):
+        return []
 
     events: list[ReminderEvent] = []
     target_name = warning.route_code or warning.route_name or str(config.get("route_code") or "公路巡查预警")
@@ -4007,6 +4188,16 @@ def _plan_patrol_warning_display_events(repo: DutyRepository, target: date, *, n
     return events
 
 
+def _patrol_warning_in_display_window(warning: Any, config: dict[str, Any], *, now: datetime) -> bool:
+    if warning is None:
+        return False
+    end_time = getattr(warning, "end_time", None)
+    if not end_time:
+        return True
+    window_hours = max(1, int((config or {}).get("end_reminder_window_hours") or 48))
+    return now <= end_time + timedelta(hours=window_hours)
+
+
 def _today_reminder_group_statuses(repo: DutyRepository, target: date, events: list[ReminderEvent]) -> list[dict[str, str]]:
     statuses: list[dict[str, str]] = []
     event_kinds = {event.kind for event in events}
@@ -4024,8 +4215,12 @@ def _today_reminder_group_statuses(repo: DutyRepository, target: date, events: l
         statuses.append({"key": "patrol_warning", "message": "公路巡查预警监测未启用"})
     elif not has_patrol_events:
         warning = warning_from_dict(dict(repo.get_patrol_warning_state().get("warning") or {}), TZ)
-        message = "暂无已监测到的公路巡查预警" if warning is None else f"{target:%Y-%m-%d} 没有公路巡查预警提醒"
-        statuses.append({"key": "patrol_warning", "message": message})
+        if warning is None:
+            statuses.append({"key": "patrol_warning", "message": "暂无已监测到的公路巡查预警"})
+        elif _patrol_warning_in_display_window(warning, patrol_config, now=datetime.now(TZ)):
+            statuses.append({"key": "patrol_warning", "message": f"{target:%Y-%m-%d} 没有公路巡查预警提醒"})
+        else:
+            pass
 
     if not repo.list_custom_reminders(enabled_only=True):
         statuses.append({"key": "custom", "message": "未配置自定义提醒"})
@@ -4350,6 +4545,7 @@ def _build_system_status(repo: DutyRepository, scheduler_enabled: bool, cjk_font
         "webhook_configured": bool(notification_config.get("webhook_configured")),
         "notification_configured": bool(notification_config.get("notification_configured")),
         "notification_sender_type": str(notification_config.get("sender_type") or "wecom_webhook"),
+        "wechat_bridge_enabled": wechat_bridge_enabled(),
         "cjk_font_ready": cjk_font_ready,
         "roster_month_count": repo.count_roster_months(),
         "monitored_people_count": repo.count_monitored_people(),
@@ -4643,7 +4839,7 @@ def _mobile_for_event(event: ReminderEvent, mobile_lookup: dict[str, str]) -> st
 
 
 def _mentions_for_event(client: Any, event: ReminderEvent, mobile_lookup: dict[str, str], wechat_lookup: dict[str, str]) -> list[str]:
-    if isinstance(client, LightAgentNotifyClient):
+    if _is_personal_wechat_notify_client(client):
         sender_id = wechat_lookup.get(event.person_name, "")
         return [sender_id] if sender_id else []
     mobile = _mobile_for_event(event, mobile_lookup)
@@ -4659,6 +4855,162 @@ def _bound_wechat_sender_ids(repo: DutyRepository) -> list[str]:
     return ids
 
 
+def _clean_wechat_member_display_name(name: str, sender_id: str = "") -> str:
+    text = str(name or "").strip()
+    if not text:
+        return ""
+    target_id = str(sender_id or "").strip()
+    if target_id and target_id in text:
+        text = text.replace(target_id, "").strip()
+    text = re.sub(r"\s*[·|/\\-]\s*$", "", text).strip()
+    text = re.sub(r"\s*[（(]\s*[)）]\s*$", "", text).strip()
+    return "" if _looks_like_wechat_runtime_id(text) else text
+
+
+def _wechat_test_record_target(repo: DutyRepository, sender_id: str, sender_name: str = "") -> str:
+    name = _clean_wechat_member_display_name(sender_name, sender_id)
+    if name and name != str(sender_id or "").strip():
+        return name
+    target_id = str(sender_id or "").strip()
+    if not target_id:
+        return "测试消息"
+    for person in repo.list_personnel():
+        if target_id == str(person.get("wechat_group_runtime_sender_id") or "").strip():
+            label = _clean_wechat_member_display_name(
+                str(person.get("wechat_group_member_name") or person.get("name") or "").strip(),
+                target_id,
+            )
+            if label and label != target_id:
+                return label
+    config = _notification_config_with_env_defaults(repo.get_notification_config())
+    rooms = _normalize_feature_channel_rooms(config.get("lightagent_targets"))
+    legacy_room_id = str(config.get("lightagent_target") or "").strip()
+    if legacy_room_id:
+        rooms = _normalize_feature_channel_rooms(rooms + [{"id": legacy_room_id}])
+    if wechat_bridge_enabled():
+        manager = get_wechat_bridge_manager()
+        for room in rooms:
+            for member in manager.get_room_members(room["id"], limit=500):
+                member_id = str(member.get("runtime_sender_id") or member.get("sender_id") or "").strip()
+                if member_id != target_id:
+                    continue
+                label = str(
+                    member.get("display_name")
+                    or member.get("sender_nickname")
+                    or member.get("name")
+                    or member.get("room_alias")
+                    or ""
+                ).strip()
+                label = _clean_wechat_member_display_name(label, target_id)
+                return label if label and label != target_id else "测试消息"
+    return "测试消息" if target_id.startswith("@") else target_id
+
+
+def _wechat_room_display_lookup(repo: DutyRepository) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+
+    def add_room(room: Any) -> None:
+        if not isinstance(room, dict):
+            return
+        name = str(room.get("name") or room.get("room_name") or room.get("wechat_group_room_name") or room.get("topic") or "").strip()
+        ids = [
+            room.get("id"),
+            room.get("room_id"),
+            room.get("stable_room_id"),
+            room.get("runtime_room_id"),
+            room.get("runtime_id"),
+            room.get("wechat_group_room_id"),
+        ]
+        for value in ids:
+            room_id = str(value or "").strip()
+            if room_id and name and room_id != name:
+                lookup[room_id] = name
+
+    notification = _notification_config_with_env_defaults(repo.get_notification_config())
+    for room in _normalize_feature_channel_rooms(notification.get("lightagent_targets")):
+        add_room(room)
+    legacy_notification = str(notification.get("lightagent_target") or "").strip()
+    if legacy_notification:
+        add_room({"id": legacy_notification})
+
+    feature = _feature_channel_config_with_env_defaults(repo.get_feature_channel_config())
+    for room in _feature_channel_config_rooms(feature):
+        add_room(room)
+
+    if wechat_bridge_enabled():
+        try:
+            manager = get_wechat_bridge_manager()
+            for room in manager.status_snapshot().get("rooms") or []:
+                add_room(room)
+        except Exception:
+            pass
+    return lookup
+
+
+def _wechat_member_display_lookup(repo: DutyRepository) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+    for person in repo.list_personnel():
+        ids = [
+            str(person.get("wechat_group_runtime_sender_id") or "").strip(),
+            str(person.get("wechat_group_member_id") or "").strip(),
+        ]
+        for sender_id in ids:
+            if not sender_id:
+                continue
+            label = _clean_wechat_member_display_name(
+                str(person.get("wechat_group_member_name") or person.get("name") or "").strip(),
+                sender_id,
+            )
+            if label:
+                lookup[sender_id] = label
+    return lookup
+
+
+def _wechat_display_lookup(repo: DutyRepository) -> dict[str, str]:
+    lookup = _wechat_room_display_lookup(repo)
+    lookup.update(_wechat_member_display_lookup(repo))
+    return lookup
+
+
+def _sanitize_wechat_ids_for_display(repo: DutyRepository, text: str) -> str:
+    value = str(text or "")
+    if not value:
+        return ""
+    lookup = _wechat_display_lookup(repo)
+    for raw_id, label in sorted(lookup.items(), key=lambda item: len(item[0]), reverse=True):
+        if raw_id and label:
+            value = value.replace(raw_id, label)
+    value = re.sub(r"wgr_[A-Za-z0-9_]+", "微信群", value)
+    value = re.sub(r"(?<!\\w)@[A-Za-z0-9_-]{16,}", "微信成员", value)
+    value = re.sub(r"room@@[A-Za-z0-9_-]+", "微信群", value)
+    value = re.sub(r"@@[A-Za-z0-9_-]+", "微信群", value)
+    return value
+
+
+def _wechat_room_record_target(repo: DutyRepository, room_id: str) -> str:
+    target_id = str(room_id or "").strip()
+    if not target_id:
+        return "微信群"
+    return _wechat_room_display_lookup(repo).get(target_id) or "微信群"
+
+
+def _public_send_records(repo: DutyRepository, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [_public_send_record(repo, record) for record in records]
+
+
+def _public_send_record(repo: DutyRepository, record: dict[str, Any]) -> dict[str, Any]:
+    item = dict(record)
+    target = str(item.get("target") or "").strip()
+    if _looks_like_wechat_room_id(target):
+        item["target"] = _wechat_room_record_target(repo, target)
+    elif _looks_like_wechat_runtime_id(target):
+        item["target"] = _wechat_test_record_target(repo, target)
+    for key in ("content", "error"):
+        if item.get(key):
+            item[key] = _sanitize_wechat_ids_for_display(repo, str(item.get(key) or ""))
+    return item
+
+
 def _lightagent_room_member_sender_ids(repo: DutyRepository) -> list[str]:
     config = _notification_config_with_env_defaults(repo.get_notification_config())
     rooms = _normalize_feature_channel_rooms(config.get("lightagent_targets"))
@@ -4668,6 +5020,15 @@ def _lightagent_room_member_sender_ids(repo: DutyRepository) -> list[str]:
     room_ids = [room["id"] for room in rooms if room.get("id")]
     if not room_ids:
         return []
+    if wechat_bridge_enabled():
+        manager = get_wechat_bridge_manager()
+        ids = []
+        for room_id in room_ids:
+            for member in manager.get_room_members(room_id, limit=500):
+                sender_id = str(member.get("runtime_sender_id") or member.get("sender_id") or "").strip()
+                if sender_id and sender_id not in ids:
+                    ids.append(sender_id)
+        return ids or _bound_wechat_sender_ids(repo)
     ids = []
     failed = False
     for room_id in room_ids:
@@ -4692,7 +5053,7 @@ def _lightagent_room_member_sender_ids(repo: DutyRepository) -> list[str]:
     return _bound_wechat_sender_ids(repo)
 
 def _patrol_warning_mentions_for_client(repo: DutyRepository, config: dict[str, Any], client: Any) -> list[str]:
-    if isinstance(client, LightAgentNotifyClient):
+    if _is_personal_wechat_notify_client(client):
         if bool(config.get("mention_all", True)):
             return _lightagent_room_member_sender_ids(repo)
         names_or_ids = [part for part in re.split(r"[\s,，;；]+", str(config.get("mention_mobiles") or "")) if part]
@@ -4704,6 +5065,12 @@ def _patrol_warning_mentions_for_client(repo: DutyRepository, config: dict[str, 
                 mentions.append(sender_id)
         return mentions
     return _patrol_warning_mentions(config)
+
+
+def _is_personal_wechat_notify_client(client: Any) -> bool:
+    return isinstance(client, (LightAgentNotifyClient, WechatBridgeNotifyClient)) or bool(
+        getattr(client, "is_wechat_bridge", False)
+    )
 
 
 async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> dict[str, Any]:
@@ -4835,13 +5202,17 @@ def _notification_client_from_config(config: dict[str, Any]):
     config = _notification_config_with_env_defaults(config)
     sender_type = _normalize_notification_sender_type(str(config.get("sender_type") or "wecom_webhook"))
     if sender_type == "lightagent":
-        endpoint_url = str(config.get("lightagent_url", "")).strip()
         targets = _normalize_feature_channel_rooms(config.get("lightagent_targets"))
         legacy_target = str(config.get("lightagent_target", "")).strip()
         if legacy_target:
             targets = _normalize_feature_channel_rooms(targets + [{"id": legacy_target}])
         target_ids = [room["id"] for room in targets if room.get("id")]
-        if not endpoint_url or not target_ids:
+        if not target_ids:
+            return None
+        if wechat_bridge_enabled():
+            return WechatBridgeNotifyClient(targets=target_ids)
+        endpoint_url = str(config.get("lightagent_url", "")).strip()
+        if not endpoint_url:
             return None
         return LightAgentNotifyClient(
             endpoint_url=endpoint_url,

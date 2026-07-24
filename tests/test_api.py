@@ -87,8 +87,8 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert "autofillMonitorContactByName" in html
     assert "monitorWechatBindingPayload" in html
     assert "monitorWechatBindingText" in html
-    assert "同步 LightAgent 群失败" in html
-    assert "功能通道已保存，但同步 LightAgent 群失败" in html
+    assert "同步${wechatGatewayLabel()}群失败" in html
+    assert "功能通道已保存，但同步${wechatGatewayLabel()}群失败" in html
     assert 'id="patrolWarningSettings"' in html
     assert 'id="patrolLoginUrl"' in html
     assert 'id="patrolRouteCode" placeholder="S41"' in html
@@ -936,6 +936,55 @@ def test_today_reminders_include_patrol_warning_events(tmp_path, monkeypatch):
     assert patrol_events
     assert all(event["image_url"].startswith("/api/patrol-warning-image") for event in patrol_events)
     assert any("mode=end" in event["image_url"] for event in patrol_events if event["kind"] == "patrol_warning_end")
+
+
+def test_expired_patrol_warning_is_hidden_after_window(tmp_path, monkeypatch):
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 7, 24, 3, 0, tzinfo=tz)
+
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_patrol_warning_config(
+        enabled=True,
+        login_url="https://example.test/login",
+        warning_url="https://example.test/warninginfo/findPage",
+        username="station-user",
+        password="secret",
+        route_code="S41",
+        end_reminder_interval_hours=6,
+        end_reminder_window_hours=48,
+    )
+    repo.save_patrol_warning_state(
+        warning={
+            "key": "warning-1",
+            "route_code": "S41",
+            "route_name": "Route A",
+            "warning_level": "3",
+            "warning_level_label": "Yellow",
+            "warn_type_name": "Rain",
+            "start_time": "2026-07-21T01:00:00+08:00",
+            "end_time": "2026-07-22T02:00:00+08:00",
+            "create_time": "2026-07-21T01:10:00+08:00",
+            "start_stake": "K107.000",
+            "end_stake": "K137.730",
+        }
+    )
+    client = TestClient(app)
+
+    config_response = client.get("/api/patrol-warning-config")
+    today_response = client.get("/api/reminders/today")
+    image_response = client.get("/api/patrol-warning-image")
+
+    assert config_response.status_code == 200
+    assert config_response.json()["state"]["warning"] == {}
+    assert today_response.status_code == 200
+    today_body = today_response.json()
+    assert not any(event["kind"].startswith("patrol_warning_") for event in today_body["events"])
+    assert not any(status["key"] == "patrol_warning" for status in today_body["group_statuses"])
+    assert image_response.status_code == 404
 
 
 def test_confirm_roster_prunes_nonexistent_days_for_common_february(tmp_path):
@@ -2262,7 +2311,8 @@ def test_wechat_query_reports_unbound_sender(tmp_path, monkeypatch):
     body = response.json()
     assert body["success"] is False
     assert body["query_type"] == "unbound"
-    assert "@missing-member" in body["reply"]
+    assert "还没有找到你的微信成员绑定" in body["reply"]
+    assert "@missing-member" not in body["reply"]
 
 
 def test_wechat_query_accepts_natural_date_shift_question(tmp_path, monkeypatch):
@@ -2901,6 +2951,110 @@ def test_notification_config_test_returns_json_error_when_send_fails(tmp_path, m
     assert records[0]["kind"] == "notification_test"
     assert records[0]["status"] == "failed"
     assert records[0]["error"] == "测试发送失败：network down"
+
+
+def test_personal_wechat_notification_test_records_member_name(tmp_path, monkeypatch):
+    sent = {}
+
+    class FakeWechatClient:
+        is_wechat_bridge = True
+
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            sent["content"] = content
+            sent["mentions"] = mentioned_mobile_list
+
+    monkeypatch.setattr("app.main._notification_client_from_config", lambda config: FakeWechatClient())
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/notification-config",
+        json={
+            "sender_type": "lightagent",
+            "lightagent_targets": [{"id": "wgr_notice", "name": "通知群"}],
+        },
+    )
+
+    response = client.post(
+        "/api/notification-config/test",
+        json={"test_wechat_member_id": "@member-runtime", "test_wechat_member_name": "王路飞 · @member-runtime"},
+    )
+
+    assert response.status_code == 200
+    assert sent["mentions"] == ["@member-runtime"]
+    records = client.get("/api/send-records").json()["records"]
+    assert records[0]["kind"] == "notification_test"
+    assert records[0]["target"] == "王路飞"
+
+
+def test_send_records_display_wechat_runtime_id_as_member_name(tmp_path):
+    data_dir = tmp_path / "data"
+    app = create_app(data_dir=data_dir, upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/personnel",
+        json={
+            "names": ["王路飞"],
+            "people": [
+                {
+                    "name": "王路飞",
+                    "wechat_group_runtime_sender_id": "@member-runtime",
+                    "wechat_group_member_name": "王路飞 · @member-runtime",
+                }
+            ],
+        },
+    )
+    repo = DutyRepository(data_dir / "duty-reminder.db")
+    repo.save_send_record(kind="notification_test", target="@member-runtime", status="success")
+
+    records = client.get("/api/send-records").json()["records"]
+
+    assert records[0]["target"] == "王路飞"
+
+
+def test_send_records_display_wechat_room_ids_as_room_names(tmp_path):
+    data_dir = tmp_path / "data"
+    app = create_app(data_dir=data_dir, upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/notification-config",
+        json={
+            "sender_type": "lightagent",
+            "lightagent_targets": [
+                {"id": "wgr_notice", "name": "通知群"},
+                {"id": "wgr_second", "name": "第二通知群"},
+            ],
+        },
+    )
+    client.post(
+        "/api/personnel",
+        json={
+            "names": ["王路飞"],
+            "people": [
+                {
+                    "name": "王路飞",
+                    "wechat_group_runtime_sender_id": "@member-runtime",
+                    "wechat_group_member_name": "王路飞",
+                }
+            ],
+        },
+    )
+    repo = DutyRepository(data_dir / "duty-reminder.db")
+    repo.save_send_record(
+        kind="daily_duty_test",
+        target="wgr_notice",
+        status="failed",
+        error="wgr_notice: target room is not active; wgr_second: target room is not active; @member-runtime failed",
+    )
+
+    record = client.get("/api/send-records").json()["records"][0]
+
+    assert record["target"] == "通知群"
+    assert "通知群" in record["error"]
+    assert "第二通知群" in record["error"]
+    assert "王路飞" in record["error"]
+    assert "wgr_" not in record["target"]
+    assert "wgr_" not in record["error"]
+    assert "@member-runtime" not in record["error"]
 
 
 def test_reminder_preview_uses_notification_message_template(tmp_path):

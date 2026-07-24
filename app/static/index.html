@@ -2082,7 +2082,7 @@
                 <div id="lightAgentNotificationFields" class="lightagent-notify-layout hidden">
                   <div class="lightagent-notify-card stack">
                     <h3>推送配置</h3>
-                    <label>LightAgent 推送地址 <input id="lightAgentUrl" placeholder="例如 http://127.0.0.1:9899/api/push/send" /></label>
+                    <label id="lightAgentUrlField">LightAgent 推送地址 <input id="lightAgentUrl" placeholder="例如 http://127.0.0.1:9899/api/push/send" /></label>
                     <div class="field-grid">
                       <label>通知微信群
                         <select id="notificationTargetRoomSelect"></select>
@@ -2095,7 +2095,7 @@
                       <button type="button" id="addNotificationTargetRoomBtn">添加通知群</button>
                     </div>
                     <div id="notificationTargetRoomList" class="list"></div>
-                    <label>推送 token <input id="lightAgentToken" type="password" placeholder="已配置时可留空" /></label>
+                    <label id="lightAgentTokenField">推送 token <input id="lightAgentToken" type="password" placeholder="已配置时可留空" /></label>
                     <label>测试@成员
                       <select id="testWechatMember"></select>
                     </label>
@@ -2136,13 +2136,13 @@
 
           <section class="settings-panel single" id="featureChannelSettings">
             <div class="side-block wide">
-              <h3>微信群交互配置</h3>
+              <h3>微信交互功能</h3>
               <p class="settings-panel-note">用于微信里主动触发的功能，例如“隧道机电”“查询今日机电”“查询 2026-07-22机电”和排班导入。这里可以配置多个微信群。</p>
               <div class="stack">
                 <label class="checkbox-label"><span>启用微信群功能通道</span><input id="featureChannelEnabled" type="checkbox" /></label>
                 <div class="field-grid">
-                  <label>LightAgent Web 地址 <input id="featureLightAgentWebUrl" placeholder="例如 http://127.0.0.1:9899" /></label>
-                  <label>Web 密码 <input id="featureLightAgentWebPassword" type="password" placeholder="已配置时可留空" /></label>
+                  <label id="featureLightAgentWebUrlField">LightAgent Web 地址 <input id="featureLightAgentWebUrl" placeholder="例如 http://127.0.0.1:9899" /></label>
+                  <label id="featureLightAgentWebPasswordField">Web 密码 <input id="featureLightAgentWebPassword" type="password" placeholder="已配置时可留空" /></label>
                 </div>
                 <div class="field-grid">
                   <label>交互功能微信群
@@ -2173,7 +2173,7 @@
           <section class="settings-panel" id="monitorSettings">
             <div class="side-block">
               <h3>监控班提醒</h3>
-              <p class="settings-panel-note">配置每个人的班前提醒和休息提醒。通知通道为 LightAgent 时，姓名可自动关联微信成员 ID；企业微信群机器人则使用手机号。</p>
+              <p class="settings-panel-note">配置每个人的班前提醒和休息提醒。通知通道为个人微信群时，姓名可自动关联微信成员 ID；企业微信群机器人则使用手机号。</p>
               <div class="stack">
                 <div class="field-grid">
                   <label>姓名 <input id="personName" list="personnelNameOptions" placeholder="选择或输入姓名" /></label>
@@ -2474,6 +2474,7 @@
       lightAgentMembers: [],
       lightAgentWechatStatusTimer: null,
       lightAgentWechatConnected: false,
+      wechatBridgeEnabled: false,
       featureChannelConfig: null,
       featureChannelRooms: [],
       todayReminderEvents: [],
@@ -3883,12 +3884,12 @@
 
     function monitorWechatBindingText(person) {
       const id = String(person.wechat_group_runtime_sender_id || "").trim();
-      const name = String(person.wechat_group_member_name || "").trim();
-      const room = String(person.wechat_group_room_name || person.wechat_group_room_id || "").trim();
+      const name = cleanWechatVisibleName(person.wechat_group_member_name || "", id);
+      const room = cleanWechatVisibleName(person.wechat_group_room_name || "", person.wechat_group_room_id || "");
       if (!id) return "未绑定";
       const label = name || "已绑定";
       const roomText = room ? ` · 群：${room}` : "";
-      return `${escapeHtml(label)} · ID：${escapeHtml(id)}${escapeHtml(roomText)}`;
+      return `${escapeHtml(label)}${escapeHtml(roomText)}`;
     }
 
     function currentLightAgentRoomForMonitorBinding() {
@@ -3909,13 +3910,14 @@
       const members = state.lightAgentMembers || [];
       const hasSelectedInMembers = members.some((member) => wechatMemberRuntimeId(member) === selected);
       const savedOption = selected && !hasSelectedInMembers
-        ? `<option value="${escapeHtml(selected)}" data-stable-member-id="${escapeHtml(saved.wechat_group_member_id || "")}" data-member-name="${escapeHtml(saved.wechat_group_member_name || selected)}" selected>${escapeHtml(saved.wechat_group_member_name || "已保存成员")} · ${escapeHtml(shortWechatId(selected))}</option>`
+        ? `<option value="${escapeHtml(selected)}" data-stable-member-id="${escapeHtml(saved.wechat_group_member_id || "")}" data-member-name="${escapeHtml(cleanWechatVisibleName(saved.wechat_group_member_name || "", selected))}" selected>${escapeHtml(cleanWechatVisibleName(saved.wechat_group_member_name || "", selected) || "已保存成员")}</option>`
         : "";
       select.innerHTML = `<option value="">未绑定个人微信群成员</option>` + savedOption + members.map((member) => {
         const id = wechatMemberRuntimeId(member);
         const label = wechatMemberDisplayText(member);
+        const memberName = wechatMemberLabel(member);
         const stableId = String(member.stable_member_id || member.wechat_group_member_id || "").trim();
-        return `<option value="${escapeHtml(id)}" data-stable-member-id="${escapeHtml(stableId)}" data-member-name="${escapeHtml(label)}" ${id && id === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
+        return `<option value="${escapeHtml(id)}" data-stable-member-id="${escapeHtml(stableId)}" data-member-name="${escapeHtml(memberName)}" ${id && id === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
       }).join("");
       idInput.value = selected || "";
     }
@@ -3929,13 +3931,14 @@
       const members = state.lightAgentMembers || [];
       const hasSelectedInMembers = members.some((member) => wechatMemberRuntimeId(member) === selected);
       const savedOption = selected && !hasSelectedInMembers
-        ? `<option value="${escapeHtml(selected)}" data-stable-member-id="${escapeHtml(saved.wechat_group_member_id || "")}" data-member-name="${escapeHtml(saved.wechat_group_member_name || selected)}" selected>${escapeHtml(saved.wechat_group_member_name || "已保存成员")} · ${escapeHtml(shortWechatId(selected))}</option>`
+        ? `<option value="${escapeHtml(selected)}" data-stable-member-id="${escapeHtml(saved.wechat_group_member_id || "")}" data-member-name="${escapeHtml(cleanWechatVisibleName(saved.wechat_group_member_name || "", selected))}" selected>${escapeHtml(cleanWechatVisibleName(saved.wechat_group_member_name || "", selected) || "已保存成员")}</option>`
         : "";
       select.innerHTML = `<option value="">未绑定个人微信群成员</option>` + savedOption + members.map((member) => {
         const id = wechatMemberRuntimeId(member);
         const label = wechatMemberDisplayText(member);
+        const memberName = wechatMemberLabel(member);
         const stableId = String(member.stable_member_id || member.wechat_group_member_id || "").trim();
-        return `<option value="${escapeHtml(id)}" data-stable-member-id="${escapeHtml(stableId)}" data-member-name="${escapeHtml(label)}" ${id && id === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
+        return `<option value="${escapeHtml(id)}" data-stable-member-id="${escapeHtml(stableId)}" data-member-name="${escapeHtml(memberName)}" ${id && id === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
       }).join("");
       idInput.value = selected || "";
     }
@@ -4185,7 +4188,18 @@
       ];
       const id = wechatMemberRuntimeId(member);
       const label = candidates.map((value) => String(value || "").trim()).find((value) => value && value !== id);
-      return label || "";
+      return cleanWechatVisibleName(label || "", id);
+    }
+
+    function cleanWechatVisibleName(name, id = "") {
+      let text = String(name || "").trim();
+      const rawId = String(id || "").trim();
+      if (!text) return "";
+      if (rawId && text.includes(rawId)) text = text.replace(rawId, "").trim();
+      text = text.replace(/\s*[·|/\\-]\s*$/, "").trim();
+      text = text.replace(/\s*[（(]\s*[)）]\s*$/, "").trim();
+      if (/^(@|@@|wxid_|wgr_|room@@)/.test(text)) return "";
+      return text;
     }
 
     function wechatMemberRuntimeId(member) {
@@ -4251,7 +4265,7 @@
         const name = lightAgentRoomName(room);
         const sendable = lightAgentRoomSendable(room);
         const suffix = sendable ? "" : "（当前不可发送）";
-        return `<option value="${escapeHtml(id)}" data-room-name="${escapeHtml(name)}" data-sendable="${sendable ? "true" : "false"}" ${id && id === current ? "selected" : ""}>${escapeHtml(name)} · ${escapeHtml(id)}${escapeHtml(suffix)}</option>`;
+        return `<option value="${escapeHtml(id)}" data-room-name="${escapeHtml(name)}" data-sendable="${sendable ? "true" : "false"}" ${id && id === current ? "selected" : ""}>${escapeHtml(name || "未命名微信群")}${escapeHtml(suffix)}</option>`;
       }).join("");
       renderNotificationTargetRooms();
     }
@@ -4266,7 +4280,7 @@
         const sendable = lightAgentRoomSendable(room);
         const disabled = sendable ? "" : "disabled";
         const suffix = sendable ? "" : "（当前不可发送）";
-        return `<option value="${escapeHtml(id)}" data-room-name="${escapeHtml(name)}" data-sendable="${sendable ? "true" : "false"}" ${disabled} ${id && id === current ? "selected" : ""}>${escapeHtml(name)} · ${escapeHtml(id)}${escapeHtml(suffix)}</option>`;
+        return `<option value="${escapeHtml(id)}" data-room-name="${escapeHtml(name)}" data-sendable="${sendable ? "true" : "false"}" ${disabled} ${id && id === current ? "selected" : ""}>${escapeHtml(name || "未命名微信群")}${escapeHtml(suffix)}</option>`;
       }).join("");
     }
 
@@ -4279,7 +4293,7 @@
         const name = lightAgentRoomName(room);
         const sendable = lightAgentRoomSendable(room);
         const suffix = sendable ? "" : "（当前不可发送）";
-        return `<option value="${escapeHtml(id)}" data-room-name="${escapeHtml(name)}" data-sendable="${sendable ? "true" : "false"}" ${id && id === current ? "selected" : ""}>${escapeHtml(name)} · ${escapeHtml(id)}${escapeHtml(suffix)}</option>`;
+        return `<option value="${escapeHtml(id)}" data-room-name="${escapeHtml(name)}" data-sendable="${sendable ? "true" : "false"}" ${id && id === current ? "selected" : ""}>${escapeHtml(name || "未命名微信群")}${escapeHtml(suffix)}</option>`;
       }).join("");
     }
 
@@ -4304,10 +4318,10 @@
       const rooms = normalizeFeatureChannelRooms(state.featureChannelRooms || []);
       state.featureChannelRooms = rooms;
       box.innerHTML = rooms.map((room) => {
-        const label = room.name || room.id;
+        const label = cleanWechatVisibleName(room.name || "", room.id) || "未命名微信群";
         return `<div class="item">
           <strong>${escapeHtml(label)}</strong>
-          <small>${escapeHtml(room.id)}</small>
+          <small>交互功能群</small>
           <button type="button" data-remove-feature-room="${escapeHtml(room.id)}">移除</button>
         </div>`;
       }).join("") || `<div class="item"><small>还没有添加交互功能微信群</small></div>`;
@@ -4330,12 +4344,12 @@
       const syncedRoomIds = new Set((state.lightAgentRooms || []).flatMap((room) => [lightAgentRoomStableId(room), lightAgentRoomRuntimeId(room)]).filter(Boolean));
       const sendableRoomIds = new Set((state.lightAgentRooms || []).filter(lightAgentRoomSendable).flatMap((room) => [lightAgentRoomStableId(room), lightAgentRoomRuntimeId(room)]).filter(Boolean));
       box.innerHTML = rooms.map((room) => {
-        const label = room.name || room.id;
+        const label = cleanWechatVisibleName(room.name || "", room.id) || "未命名微信群";
         const synced = !syncedRoomIds.size || syncedRoomIds.has(room.id);
         const sendable = state.lightAgentWechatConnected && (!sendableRoomIds.size ? synced : sendableRoomIds.has(room.id));
         const note = sendable
-          ? room.id
-          : (!state.lightAgentWechatConnected ? `${room.id} · LightAgent 微信未登录或未连接` : (synced ? `${room.id} · 当前不可发送，请在群内发言后重新同步` : `${room.id} · 未在当前同步群聊中，可能已失效`));
+          ? "已同步，可发送"
+          : (!state.lightAgentWechatConnected ? `${wechatGatewayLabel()}未登录或未连接` : (synced ? "当前不可发送，请在群内发言后重新同步" : "未在当前同步群聊中，可能已失效"));
         return `<div class="item">
           <strong>${escapeHtml(label)}</strong>
           <small class="${sendable ? "" : "status error"}">${escapeHtml(note)}</small>
@@ -4368,7 +4382,7 @@
       }
       state.notificationTargetRooms = normalizeFeatureChannelRooms([...(state.notificationTargetRooms || []), { id, name }]);
       renderNotificationTargetRoomList();
-      $("notificationStatus").textContent = `已添加通知群：${name || id}`;
+      $("notificationStatus").textContent = `已添加通知群：${cleanWechatVisibleName(name, id) || "未命名微信群"}`;
       $("notificationStatus").className = "status ok";
     }
 
@@ -4383,7 +4397,7 @@
       }
       state.featureChannelRooms = normalizeFeatureChannelRooms([...(state.featureChannelRooms || []), { id, name }]);
       renderFeatureChannelRoomList();
-      $("featureChannelStatus").textContent = `已添加功能群：${name || id}`;
+      $("featureChannelStatus").textContent = `已添加功能群：${cleanWechatVisibleName(name, id) || "未命名微信群"}`;
       $("featureChannelStatus").className = "status ok";
     }
 
@@ -4392,7 +4406,8 @@
       const options = `<option value="">不@测试成员</option>` + members.map((member) => {
         const id = wechatMemberRuntimeId(member);
         const label = wechatMemberDisplayText(member);
-        return `<option value="${escapeHtml(id)}">${escapeHtml(label)}</option>`;
+        const memberName = wechatMemberLabel(member);
+        return `<option value="${escapeHtml(id)}" data-member-name="${escapeHtml(memberName)}">${escapeHtml(label)}</option>`;
       }).join("");
       if ($("testWechatMember")) $("testWechatMember").innerHTML = options;
       if ($("lightAgentMemberList")) {
@@ -4400,7 +4415,7 @@
           const id = wechatMemberRuntimeId(member);
           const label = wechatMemberLabel(member);
           const title = label || "昵称未识别";
-          const note = label ? `ID：${id}` : `LightAgent 当前只返回了成员 ID：${id}`;
+          const note = label ? "已识别微信成员" : `${wechatGatewayLabel()}当前只返回了成员标识，请让该成员在群内发言后重新同步`;
           return `<div class="wechat-member-card"><strong>${escapeHtml(title)}</strong><small>${escapeHtml(note)}</small></div>`;
         }).join("") || `<div class="wechat-member-card"><small>登录微信并同步成员后显示群成员</small></div>`;
       }
@@ -4421,10 +4436,12 @@
         const options = `<option value="">未绑定</option>` + members.map((member) => {
           const id = wechatMemberRuntimeId(member);
           const label = wechatMemberDisplayText(member);
+          const memberName = wechatMemberLabel(member);
           const stableId = String(member.stable_member_id || member.wechat_group_member_id || "").trim();
-          return `<option value="${escapeHtml(id)}" data-stable-member-id="${escapeHtml(stableId)}" data-member-name="${escapeHtml(label)}" ${id && id === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
+          return `<option value="${escapeHtml(id)}" data-stable-member-id="${escapeHtml(stableId)}" data-member-name="${escapeHtml(memberName)}" ${id && id === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
         }).join("");
-        const savedText = saved.wechat_group_member_name ? `当前：${escapeHtml(saved.wechat_group_member_name)}` : "当前未绑定";
+        const savedName = cleanWechatVisibleName(saved.wechat_group_member_name || "", selected);
+        const savedText = savedName ? `当前：${escapeHtml(savedName)}` : "当前未绑定";
         return `<div class="wechat-binding-card">
           <strong>${escapeHtml(name)}</strong>
           <small>${savedText}</small>
@@ -4841,11 +4858,11 @@
       if (showStatus) $("notificationStatus").textContent = "正在保存...";
       if ($("notificationSenderType").value === "lightagent") {
         try {
-          if (showStatus) $("notificationStatus").textContent = "正在确认 LightAgent 微信状态...";
+          if (showStatus) $("notificationStatus").textContent = `正在确认${wechatGatewayLabel()}状态...`;
           await syncLightAgentWechatStateForNotification({ required: false });
         } catch (error) {
           if (showStatus) {
-            $("notificationStatus").textContent = `读取 LightAgent 微信状态失败：${error.message || error}`;
+            $("notificationStatus").textContent = `读取${wechatGatewayLabel()}状态失败：${error.message || error}`;
             $("notificationStatus").className = "status error";
           }
         }
@@ -4870,7 +4887,7 @@
         const sync = body.lightagent_sync || {};
         const syncFailed = body.success && sync.success === false;
         $("notificationStatus").textContent = syncFailed
-          ? `已保存通知配置，但同步 LightAgent 群失败：${sync.message || "请确认 LightAgent 已登录并已同步群列表"}`
+          ? `已保存通知配置，但同步${wechatGatewayLabel()}群失败：${sync.message || `请确认${wechatGatewayLabel()}已登录并已同步群列表`}`
           : (body.success ? "已保存通知配置" : "保存失败");
         $("notificationStatus").className = `status ${body.success && !syncFailed ? "ok" : "error"}`;
       }
@@ -4888,6 +4905,8 @@
       $("wecomNotificationFields").classList.toggle("hidden", isLightAgent);
       $("wecomTestMobileFields").classList.toggle("hidden", isLightAgent);
       $("lightAgentNotificationFields").classList.toggle("hidden", !isLightAgent);
+      $("lightAgentUrlField").classList.toggle("hidden", !isLightAgent || state.wechatBridgeEnabled);
+      $("lightAgentTokenField").classList.toggle("hidden", !isLightAgent || state.wechatBridgeEnabled);
       updateMonitorNotificationFields();
       updateCustomReminderNotificationFields();
     }
@@ -4907,7 +4926,7 @@
       await loadLightAgentRooms(false);
       if (!options.required) return state.lightAgentWechatConnected;
       if (!state.lightAgentWechatConnected) {
-        throw new Error("LightAgent 微信未登录或未连接，请先完成微信登录并同步群聊");
+        throw new Error(`${wechatGatewayLabel()}未登录或未连接，请先完成微信登录并同步群聊`);
       }
       const targets = normalizeFeatureChannelRooms(state.notificationTargetRooms || []);
       if (!targets.length) {
@@ -4918,7 +4937,7 @@
         return !room || !lightAgentRoomSendable(room);
       });
       if (badTargets.length) {
-        throw new Error(`以下通知群当前不可发送：${badTargets.map((room) => room.name || room.id).join("、")}。请重新同步群聊或移除失效群。`);
+        throw new Error(`以下通知群当前不可发送：${badTargets.map((room) => cleanWechatVisibleName(room.name || "", room.id) || "未命名微信群").join("、")}。请重新同步群聊或移除失效群。`);
       }
       return true;
     }
@@ -4940,7 +4959,8 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             test_mobile: $("testMobile").value.trim(),
-            test_wechat_member_id: $("testWechatMember").value.trim()
+            test_wechat_member_id: $("testWechatMember").value.trim(),
+            test_wechat_member_name: $("testWechatMember").selectedOptions[0] ? String($("testWechatMember").selectedOptions[0].dataset.memberName || "").trim() : ""
           })
         });
         const text = await response.text();
@@ -4992,6 +5012,7 @@
       const response = await fetch("/api/notification-config");
       const body = await response.json();
       state.notificationConfig = body.config || {};
+      state.wechatBridgeEnabled = Boolean(body.config && body.config.wechat_bridge_enabled);
       $("notificationSenderType").value = body.config && body.config.sender_type ? body.config.sender_type : "wecom_webhook";
       $("webhookUrl").value = "";
       $("webhookUrl").placeholder = body.config && body.config.webhook_configured ? "已配置，如需修改请输入新地址" : "未配置，保存时请输入机器人地址";
@@ -5051,7 +5072,7 @@
         const sync = body.lightagent_sync || {};
         const syncFailed = sync.success === false;
         $("featureChannelStatus").textContent = syncFailed
-          ? `功能通道已保存，但同步 LightAgent 群失败：${sync.message || "请确认 LightAgent 已登录并已同步群列表"}`
+          ? `功能通道已保存，但同步${wechatGatewayLabel()}群失败：${sync.message || `请确认${wechatGatewayLabel()}已登录并已同步群列表`}`
           : "功能通道已保存";
         $("featureChannelStatus").className = `status ${syncFailed ? "error" : "ok"}`;
       }
@@ -5060,10 +5081,13 @@
 
     function renderFeatureChannelConfig(config) {
       config = config || {};
+      state.wechatBridgeEnabled = Boolean(config.wechat_bridge_enabled);
       $("featureChannelEnabled").checked = config.enabled !== false;
       $("featureLightAgentWebUrl").value = config.lightagent_web_url || "";
       $("featureLightAgentWebPassword").value = "";
       $("featureLightAgentWebPassword").placeholder = config.lightagent_web_password_configured ? "已配置，如需修改请输入新密码" : "未配置";
+      $("featureLightAgentWebUrlField").classList.toggle("hidden", state.wechatBridgeEnabled);
+      $("featureLightAgentWebPasswordField").classList.toggle("hidden", state.wechatBridgeEnabled);
       state.featureChannelRooms = normalizeFeatureChannelRooms(config.wechat_group_rooms || (config.wechat_group_room_id ? [{ id: config.wechat_group_room_id, name: config.wechat_group_room_name || "" }] : []));
       const primaryRoom = state.featureChannelRooms[0] || {};
       $("featureChannelRoomId").value = primaryRoom.id || "";
@@ -5714,12 +5738,17 @@
       return value ? "正常" : "未启用";
     }
 
+    function wechatGatewayLabel() {
+      return state.wechatBridgeEnabled ? "内置个人微信" : "LightAgent 个人微信群";
+    }
+
     async function loadSystemStatus() {
       $("systemStatusText").textContent = "正在加载...";
       try {
         const response = await fetch("/api/system-status");
         const body = await response.json();
         if (!response.ok) throw new Error(body.detail || "加载失败");
+        state.wechatBridgeEnabled = Boolean(body.wechat_bridge_enabled);
         $("systemStatusSummary").textContent = `北京时间 ${formatIsoMinute(body.now_beijing)}`;
         $("systemStatusText").textContent = body.today_failed_count ? `今日失败 ${body.today_failed_count} 条：${body.last_error || "请查看发送记录"}` : "系统状态正常";
         $("systemStatusText").className = `status ${body.today_failed_count ? "error" : "ok"}`;
@@ -5727,7 +5756,7 @@
         const patrolScheduleText = patrol.backoff_until
           ? `退避到 ${formatIsoMinute(patrol.backoff_until)}`
           : (patrol.next_check_at ? `下次检查 ${formatIsoMinute(patrol.next_check_at)}` : "尚未安排检查");
-        const notificationLabel = body.notification_sender_type === "lightagent" ? "LightAgent 个人微信群" : "企业微信群机器人";
+        const notificationLabel = body.notification_sender_type === "lightagent" ? wechatGatewayLabel() : "企业微信群机器人";
         const cards = [
           ["北京时间", formatIsoMinute(body.now_beijing), body.timezone || ""],
           ["定时任务", yesNo(body.scheduler_enabled), body.scheduler_enabled ? "会自动发送到期提醒" : "当前不会自动发送"],

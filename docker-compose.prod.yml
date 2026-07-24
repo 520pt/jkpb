@@ -1,55 +1,24 @@
 services:
-  # LightAgent：负责个人微信登录、微信群发送、微信群交互查询。
-  lightagent:
-    image: ghcr.io/520pt/jkpb-lightagent:latest
-    container_name: lightagent
-    restart: unless-stopped
-    ports:
-      # LightAgent 管理后台端口，浏览器访问 http://服务器IP:9899
-      - "9899:9899"
-    environment:
-      # LightAgent 管理后台登录密码。
-      # duty-reminder 也会用这个密码读取微信群绑定信息，两边必须一致。
-      LIGHTAGENT_WEB_PASSWORD: 520pt
-
-      # duty-reminder 推送消息/图片到 LightAgent 时使用的 token。
-      # duty-reminder 里的 LIGHTAGENT_PUSH_TOKEN 必须和这里一致。
-      LIGHTAGENT_PUSH_TOKEN: 520pt
-
-      # LightAgent 调用 duty-reminder 微信查询接口时使用的 token。
-      # duty-reminder 里的 DUTY_REMINDER_QUERY_TOKEN 必须和这里一致。
-      DUTY_REMINDER_QUERY_TOKEN: 520pt
-
-      # 可选：DeepSeek API Key。只影响 AI 自由回复能力。
-      # 隧道机电查询、今日在岗提醒、固定关键词查询不依赖这个 key。
-      DEEPSEEK_API_KEY: ""
-    volumes:
-      # 保存 LightAgent 运行数据、微信登录状态、微信群绑定信息。
-      - ./lightagent:/home/agent/lightagent
-
-  # duty-reminder：负责后台页面、提醒配置、图片生成、隧道机电查询。
+  # duty-reminder：后台页面、提醒配置、图片生成、隧道机电查询、内置个人微信群通知。
   duty-reminder:
     image: ghcr.io/520pt/jkpb:latest
     container_name: duty-reminder
     restart: unless-stopped
     ports:
-      # duty-reminder 后台端口，浏览器访问 http://服务器IP:2222
+      # 后台端口，浏览器访问 http://服务器IP:2222
       - "2222:8080"
     environment:
-      # duty-reminder 后台登录账号和密码。
+      # 后台登录账号和密码。
       ADMIN_USERNAME: 520pt
       ADMIN_PASSWORD: 520pt
 
-      # LightAgent 管理后台登录密码。
-      # 必须和 lightagent 里的 LIGHTAGENT_WEB_PASSWORD 一致。
-      LIGHTAGENT_WEB_PASSWORD: 520pt
+      # 启用内置个人微信群桥，不需要再单独部署 LightAgent。
+      WECHAT_BRIDGE_ENABLED: "true"
 
-      # 推送消息/图片到 LightAgent 的 token。
-      # 必须和 lightagent 里的 LIGHTAGENT_PUSH_TOKEN 一致。
-      LIGHTAGENT_PUSH_TOKEN: 520pt
+      # 微信登录态、群映射、成员映射保存目录。
+      WECHAT_BRIDGE_DATA_DIR: /app/wechat
 
-      # 微信查询接口 token。
-      # 必须和 lightagent 里的 DUTY_REMINDER_QUERY_TOKEN 一致。
+      # 微信查询接口内部 token，默认即可；只要不要暴露给外部即可。
       DUTY_REMINDER_QUERY_TOKEN: 520pt
     volumes:
       # 保存数据库、提醒配置、排班数据、隧道机电配置。
@@ -57,5 +26,6 @@ services:
 
       # 保存上传文件和生成的提醒图片；项目会按默认保留天数自动清理旧图片。
       - ./uploads:/app/uploads
-    depends_on:
-      - lightagent
+
+      # 保存个人微信扫码登录状态、群 ID 映射、成员 ID 映射。
+      - ./wechat:/app/wechat
