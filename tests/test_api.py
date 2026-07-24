@@ -87,6 +87,8 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert "autofillMonitorContactByName" in html
     assert "monitorWechatBindingPayload" in html
     assert "monitorWechatBindingText" in html
+    assert "同步 LightAgent 群失败" in html
+    assert "功能通道已保存，但同步 LightAgent 群失败" in html
     assert 'id="patrolWarningSettings"' in html
     assert 'id="patrolLoginUrl"' in html
     assert 'id="patrolRouteCode" placeholder="S41"' in html
@@ -1126,6 +1128,11 @@ def test_lightagent_notification_config_hides_secret_fields_and_tests_send(tmp_p
             sent["mobiles"] = mentioned_mobile_list
 
     monkeypatch.setattr("app.main.LightAgentNotifyClient", FakeLightAgentClient)
+    monkeypatch.setattr(
+        main_module,
+        "_lightagent_web_request",
+        lambda repo, method, path, *, params=None, json_body=None: {"channels": []} if method == "GET" else {"status": "success"},
+    )
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
 
@@ -1159,6 +1166,99 @@ def test_lightagent_notification_config_hides_secret_fields_and_tests_send(tmp_p
         "token": "push-token",
         "content": "示例甲 2025-09-16 中班",
         "mobiles": ["@wechat-member-1"],
+    }
+
+
+def test_lightagent_notification_config_syncs_target_to_wechat_group_channel(tmp_path, monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    def fake_lightagent_web_request(repo, method, path, *, params=None, json_body=None):
+        calls.append({"method": method, "path": path, "params": params, "json_body": json_body})
+        if method == "GET" and path == "/api/channels":
+            return {
+                "channels": [
+                    {
+                        "name": "wechat_group",
+                        "connected": True,
+                        "active": True,
+                        "extra": {
+                            "stable_selected_room_ids": ["wgr_existing"],
+                            "selected_room_ids": ["wgr_existing"],
+                        },
+                    }
+                ]
+            }
+        if method == "POST" and path == "/api/channels":
+            selected = json_body["config"]["wechat_group_stable_room_ids"]
+            return {
+                "status": "success",
+                "restarted": False,
+                "extra": {
+                    "stable_selected_room_ids": selected,
+                    "selected_room_ids": selected,
+                },
+            }
+        raise AssertionError(f"unexpected LightAgent request: {method} {path}")
+
+    monkeypatch.setattr(main_module, "_lightagent_web_request", fake_lightagent_web_request)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/notification-config",
+        json={
+            "sender_type": "lightagent",
+            "lightagent_url": "http://lightagent:9899/api/push/send",
+            "lightagent_token": "push-token",
+            "lightagent_target": "wgr_notice",
+            "message_template": "{name}",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["lightagent_sync"]["success"] is True
+    assert body["lightagent_sync"]["selected_room_ids"] == ["wgr_existing", "wgr_notice"]
+    assert calls[-1] == {
+        "method": "POST",
+        "path": "/api/channels",
+        "params": None,
+        "json_body": {
+            "action": "save",
+            "channel": "wechat_group",
+            "config": {"wechat_group_stable_room_ids": ["wgr_existing", "wgr_notice"]},
+        },
+    }
+
+
+def test_lightagent_notification_config_reports_sync_failure_without_losing_save(tmp_path, monkeypatch):
+    def fake_lightagent_web_request(repo, method, path, *, params=None, json_body=None):
+        raise RuntimeError("room service unavailable")
+
+    monkeypatch.setattr(main_module, "_lightagent_web_request", fake_lightagent_web_request)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/notification-config",
+        json={
+            "sender_type": "lightagent",
+            "lightagent_url": "http://lightagent:9899/api/push/send",
+            "lightagent_target": "wgr_notice",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["config"]["lightagent_target"] == "wgr_notice"
+    assert body["lightagent_sync"] == {
+        "success": False,
+        "target": "wgr_notice",
+        "targets": ["wgr_notice"],
+        "source": "notification",
+        "message": "room service unavailable",
     }
 
 
@@ -1304,7 +1404,37 @@ def test_wechat_query_requires_token(tmp_path, monkeypatch):
 
 
 def test_feature_channel_config_hides_password_and_restricts_wechat_room(tmp_path, monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    def fake_lightagent_web_request(repo, method, path, *, params=None, json_body=None):
+        calls.append({"method": method, "path": path, "params": params, "json_body": json_body})
+        if method == "GET" and path == "/api/channels":
+            return {
+                "channels": [
+                    {
+                        "name": "wechat_group",
+                        "connected": True,
+                        "active": True,
+                        "extra": {
+                            "stable_selected_room_ids": ["wgr_notice"],
+                            "selected_room_ids": ["wgr_notice"],
+                        },
+                    }
+                ]
+            }
+        if method == "POST" and path == "/api/channels":
+            selected = json_body["config"]["wechat_group_stable_room_ids"]
+            return {
+                "status": "success",
+                "extra": {
+                    "stable_selected_room_ids": selected,
+                    "selected_room_ids": selected,
+                },
+            }
+        raise AssertionError(f"unexpected LightAgent request: {method} {path}")
+
     monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    monkeypatch.setattr(main_module, "_lightagent_web_request", fake_lightagent_web_request)
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
 
@@ -1338,6 +1468,13 @@ def test_feature_channel_config_hides_password_and_restricts_wechat_room(tmp_pat
     )
 
     assert save_response.status_code == 200
+    assert save_response.json()["lightagent_sync"]["success"] is True
+    assert save_response.json()["lightagent_sync"]["selected_room_ids"] == ["wgr_notice", "wgr_feature", "wgr_second"]
+    assert calls[-1]["json_body"] == {
+        "action": "save",
+        "channel": "wechat_group",
+        "config": {"wechat_group_stable_room_ids": ["wgr_notice", "wgr_feature", "wgr_second"]},
+    }
     config = get_response.json()["config"]
     assert config["lightagent_web_url"] == "http://lightagent.test"
     assert config["lightagent_web_password_configured"] is True
@@ -1346,6 +1483,40 @@ def test_feature_channel_config_hides_password_and_restricts_wechat_room(tmp_pat
     assert second_room.status_code == 200
     assert wrong_room.status_code == 403
     assert "功能群" in wrong_room.json()["detail"]
+
+
+def test_feature_channel_config_reports_lightagent_sync_failure_without_losing_save(tmp_path, monkeypatch):
+    def fake_lightagent_web_request(repo, method, path, *, params=None, json_body=None):
+        raise RuntimeError("LightAgent offline")
+
+    monkeypatch.setattr(main_module, "_lightagent_web_request", fake_lightagent_web_request)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/feature-channel-config",
+        json={
+            "enabled": True,
+            "wechat_group_room_id": "wgr_feature",
+            "wechat_group_room_name": "功能群",
+            "wechat_group_rooms": [{"id": "wgr_feature", "name": "功能群"}],
+            "allow_tunnel_mechanical": True,
+            "allow_duty_query": True,
+            "allow_roster_import": True,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["config"]["wechat_group_room_id"] == "wgr_feature"
+    assert body["lightagent_sync"] == {
+        "success": False,
+        "target": "wgr_feature",
+        "targets": ["wgr_feature"],
+        "source": "feature_channel",
+        "message": "LightAgent offline",
+    }
 
 
 def test_feature_channel_can_disable_tunnel_mechanical_query(tmp_path, monkeypatch):

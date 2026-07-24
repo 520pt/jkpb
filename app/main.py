@@ -779,19 +779,25 @@ def create_app(
     @app.post("/api/notification-config")
     def save_notification_config(request: NotificationConfigRequest):
         existing = _notification_config_with_env_defaults(repo.get_notification_config())
+        sender_type = request.sender_type.strip() or str(existing.get("sender_type", "wecom_webhook"))
         webhook_url = request.webhook_url.strip() or str(existing.get("webhook_url", "")).strip()
         lightagent_url = request.lightagent_url.strip() or str(existing.get("lightagent_url", "")).strip()
         lightagent_token = request.lightagent_token.strip() or str(existing.get("lightagent_token", "")).strip()
         lightagent_target = request.lightagent_target.strip() or str(existing.get("lightagent_target", "")).strip()
         repo.save_notification_config(
-            sender_type=request.sender_type.strip() or str(existing.get("sender_type", "wecom_webhook")),
+            sender_type=sender_type,
             webhook_url=webhook_url,
             lightagent_url=lightagent_url,
             lightagent_token=lightagent_token,
             lightagent_target=lightagent_target,
             message_template=request.message_template.strip() or DEFAULT_MESSAGE_TEMPLATE,
         )
-        return {"success": True, "config": _public_notification_config(repo.get_notification_config())}
+        lightagent_sync = _sync_lightagent_notification_target(repo, sender_type, lightagent_target)
+        return {
+            "success": True,
+            "config": _public_notification_config(repo.get_notification_config()),
+            "lightagent_sync": lightagent_sync,
+        }
 
     @app.post("/api/notification-config/test")
     async def test_notification_config(request: NotificationTestRequest):
@@ -870,7 +876,12 @@ def create_app(
             allow_duty_query=bool(request.allow_duty_query),
             allow_roster_import=bool(request.allow_roster_import),
         )
-        return {"success": True, "config": _public_feature_channel_config(repo.get_feature_channel_config())}
+        lightagent_sync = _sync_lightagent_feature_channel_rooms(repo, bool(request.enabled), rooms)
+        return {
+            "success": True,
+            "config": _public_feature_channel_config(repo.get_feature_channel_config()),
+            "lightagent_sync": lightagent_sync,
+        }
 
     @app.post("/api/feature-channel-config/test")
     async def test_feature_channel_config():
@@ -1419,6 +1430,108 @@ def _lightagent_web_request(
     if isinstance(data, dict) and data.get("status") == "error":
         raise HTTPException(status_code=502, detail=str(data.get("message") or "LightAgent Web 请求失败"))
     return data if isinstance(data, dict) else {"status": "success", "data": data}
+
+
+def _sync_lightagent_notification_target(repo: DutyRepository, sender_type: str, target: str) -> dict[str, Any]:
+    if _normalize_notification_sender_type(sender_type) != "lightagent":
+        return {"success": True, "skipped": True, "reason": "not_lightagent"}
+    target = str(target or "").strip()
+    if not target:
+        return {"success": True, "skipped": True, "reason": "empty_target"}
+    return _sync_lightagent_wechat_group_targets(repo, [target], source="notification")
+
+
+def _sync_lightagent_feature_channel_rooms(
+    repo: DutyRepository,
+    enabled: bool,
+    rooms: list[dict[str, str]],
+) -> dict[str, Any]:
+    if not enabled:
+        return {"success": True, "skipped": True, "reason": "feature_channel_disabled"}
+    room_ids = [str(room.get("id") or "").strip() for room in rooms or [] if str(room.get("id") or "").strip()]
+    if not room_ids:
+        return {"success": True, "skipped": True, "reason": "empty_rooms"}
+    return _sync_lightagent_wechat_group_targets(repo, room_ids, source="feature_channel")
+
+
+def _sync_lightagent_wechat_group_targets(
+    repo: DutyRepository,
+    targets: list[str],
+    *,
+    source: str,
+) -> dict[str, Any]:
+    target_ids = _merge_lightagent_room_ids(targets)
+    if not target_ids:
+        return {"success": True, "skipped": True, "reason": "empty_targets"}
+    try:
+        data = _lightagent_web_request(repo, "GET", "/api/channels")
+        channels = data.get("channels") if isinstance(data, dict) else []
+        wechat_group = None
+        for channel in channels or []:
+            if str(channel.get("name") or "") == "wechat_group":
+                wechat_group = channel
+                break
+        extra = wechat_group.get("extra") if isinstance(wechat_group, dict) and isinstance(wechat_group.get("extra"), dict) else {}
+        selected_ids = _merge_lightagent_room_ids(
+            extra.get("stable_selected_room_ids"),
+            extra.get("selected_room_ids"),
+            target_ids,
+        )
+        action = "save" if wechat_group and (wechat_group.get("connected") or wechat_group.get("active")) else "connect"
+        result = _lightagent_web_request(
+            repo,
+            "POST",
+            "/api/channels",
+            json_body={
+                "action": action,
+                "channel": "wechat_group",
+                "config": {"wechat_group_stable_room_ids": selected_ids},
+            },
+        )
+        returned_extra = result.get("extra") if isinstance(result, dict) and isinstance(result.get("extra"), dict) else {}
+        returned_ids = _merge_lightagent_room_ids(
+            returned_extra.get("stable_selected_room_ids"),
+            returned_extra.get("selected_room_ids"),
+        )
+        missing_targets = [target for target in target_ids if target.startswith("wgr_") and returned_ids and target not in returned_ids]
+        if missing_targets:
+            return {
+                "success": False,
+                "target": target_ids[0],
+                "targets": target_ids,
+                "missing_targets": missing_targets,
+                "selected_room_ids": returned_ids,
+                "message": "LightAgent 已响应，但未确认目标群已进入个人微信群选中列表",
+            }
+        return {
+            "success": True,
+            "target": target_ids[0],
+            "targets": target_ids,
+            "source": source,
+            "action": action,
+            "selected_room_ids": selected_ids,
+            "restarted": bool(result.get("restarted")) if isinstance(result, dict) else False,
+        }
+    except HTTPException as exc:
+        return {"success": False, "target": target_ids[0], "targets": target_ids, "source": source, "message": str(exc.detail)}
+    except Exception as exc:
+        return {"success": False, "target": target_ids[0], "targets": target_ids, "source": source, "message": str(exc)}
+
+
+def _merge_lightagent_room_ids(*values: Any) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value is None:
+            continue
+        items = value if isinstance(value, list) else [value]
+        for item in items:
+            text = str(item or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            merged.append(text)
+    return merged
 
 
 def _looks_like_wechat_runtime_id(value: str) -> bool:

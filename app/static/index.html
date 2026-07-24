@@ -3807,8 +3807,12 @@
       });
       const body = await response.json();
       if (showStatus) {
-        $("notificationStatus").textContent = body.success ? "已保存通知配置" : "保存失败";
-        $("notificationStatus").className = `status ${body.success ? "ok" : "error"}`;
+        const sync = body.lightagent_sync || {};
+        const syncFailed = body.success && sync.success === false;
+        $("notificationStatus").textContent = syncFailed
+          ? `已保存通知配置，但同步 LightAgent 群失败：${sync.message || "请确认 LightAgent 已登录并已同步群列表"}`
+          : (body.success ? "已保存通知配置" : "保存失败");
+        $("notificationStatus").className = `status ${body.success && !syncFailed ? "ok" : "error"}`;
       }
       return body.success;
     }
@@ -3932,8 +3936,12 @@
       state.featureChannelConfig = body.config || {};
       renderFeatureChannelConfig(state.featureChannelConfig);
       if (showStatus) {
-        $("featureChannelStatus").textContent = "功能通道已保存";
-        $("featureChannelStatus").className = "status ok";
+        const sync = body.lightagent_sync || {};
+        const syncFailed = sync.success === false;
+        $("featureChannelStatus").textContent = syncFailed
+          ? `功能通道已保存，但同步 LightAgent 群失败：${sync.message || "请确认 LightAgent 已登录并已同步群列表"}`
+          : "功能通道已保存";
+        $("featureChannelStatus").className = `status ${syncFailed ? "error" : "ok"}`;
       }
       return true;
     }
