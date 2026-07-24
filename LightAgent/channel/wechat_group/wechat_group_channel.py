@@ -837,11 +837,13 @@ class WechatGroupChannel(ChatChannel):
         )
         if not text or not self._looks_like_duty_reminder_text(text):
             return False
-        endpoint = os.environ.get("DUTY_REMINDER_QUERY_URL", "http://duty-reminder:8080/api/wechat-query").strip()
+        configured_endpoint = os.environ.get("DUTY_REMINDER_QUERY_URL", "").strip()
+        duty_base_url = os.environ.get("DUTY_REMINDER_BASE_URL", "http://duty-reminder:8080").strip().rstrip("/")
+        endpoint = configured_endpoint or (f"{duty_base_url}/api/wechat-query" if duty_base_url else "")
         token = os.environ.get("DUTY_REMINDER_QUERY_TOKEN", "520pt").strip()
         timeout = float(os.environ.get("DUTY_REMINDER_QUERY_TIMEOUT", "30") or 30)
         if not endpoint:
-            self.client.send_text(getattr(msg, "runtime_room_id", "") or msg.other_user_id, "监控查询未配置：缺少 DUTY_REMINDER_QUERY_URL")
+            self.client.send_text(getattr(msg, "runtime_room_id", "") or msg.other_user_id, "监控查询未配置：缺少 DUTY_REMINDER_BASE_URL")
             return True
         payload = {
             "text": text,

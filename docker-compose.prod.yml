@@ -13,9 +13,7 @@ services:
       WEB_PORT: "9899"
       WEB_PASSWORD: 520pt
       LIGHTAGENT_PUSH_TOKEN: 520pt
-      DUTY_REMINDER_QUERY_URL: http://duty-reminder:8080/api/wechat-query
-      DUTY_REMINDER_ROSTER_IMPORT_URL: http://duty-reminder:8080/api/wechat-roster/import
-      DUTY_REMINDER_ROSTER_CONFIRM_URL: http://duty-reminder:8080/api/wechat-roster/confirm
+      DUTY_REMINDER_BASE_URL: http://duty-reminder:8080
       DUTY_REMINDER_QUERY_TOKEN: 520pt
       AGENT: "true"
       MODEL: deepseek-v4-flash
@@ -39,11 +37,9 @@ services:
       ADMIN_USERNAME: 520pt
       ADMIN_PASSWORD: 520pt
       NOTIFICATION_SENDER_TYPE: lightagent
-      LIGHTAGENT_NOTIFY_URL: http://lightagent:9899/api/push/send
-      LIGHTAGENT_WEB_URL: http://lightagent:9899
+      LIGHTAGENT_BASE_URL: http://lightagent:9899
       LIGHTAGENT_WEB_PASSWORD: 520pt
       LIGHTAGENT_PUSH_TOKEN: 520pt
-      LIGHTAGENT_NOTIFY_TARGET: ""
       DUTY_REMINDER_QUERY_TOKEN: 520pt
     volumes:
       - ./data:/app/data

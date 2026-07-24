@@ -124,13 +124,19 @@ class LightAgentNotifyClient:
         self,
         *,
         endpoint_url: str,
-        target: str,
+        target: str = "",
+        targets: list[str] | None = None,
         token: str = "",
         channel: str = "wechat_group",
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
         self.endpoint_url = endpoint_url.strip()
-        self.target = target.strip()
+        self.targets = []
+        for value in [target, *(targets or [])]:
+            text = str(value or "").strip()
+            if text and text not in self.targets:
+                self.targets.append(text)
+        self.target = self.targets[0] if self.targets else ""
         self.token = token.strip()
         self.channel = channel.strip() or "wechat_group"
         self.http_client = http_client or httpx.AsyncClient(timeout=10, trust_env=False)
@@ -156,21 +162,22 @@ class LightAgentNotifyClient:
     async def _post(self, payload: dict[str, object]) -> None:
         if not self.endpoint_url:
             raise WeComError("LightAgent 推送地址未配置")
-        if not self.target:
+        if not self.targets:
             raise WeComError("LightAgent 目标群 room_id 未配置")
         headers = {"Authorization": f"Bearer {self.token}"} if self.token else None
-        body = {"channel": self.channel, "target": self.target, **payload}
-        try:
-            response = await self.http_client.post(self.endpoint_url, json=body, headers=headers)
-        except httpx.HTTPError as exc:
-            raise WeComError(f"LightAgent 推送连接失败：{exc.__class__.__name__}") from exc
-        if response.status_code >= 400:
-            raise WeComError(f"LightAgent 推送失败：HTTP {response.status_code}")
-        try:
-            data = response.json()
-        except ValueError:
-            return
-        if data.get("errcode") not in (None, 0):
-            raise WeComError(f"LightAgent 推送失败：{data.get('errmsg', 'unknown error')}")
-        if data.get("success") is False or data.get("ok") is False:
-            raise WeComError(f"LightAgent 推送失败：{data.get('error') or data.get('detail') or 'unknown error'}")
+        for target in self.targets:
+            body = {"channel": self.channel, "target": target, **payload}
+            try:
+                response = await self.http_client.post(self.endpoint_url, json=body, headers=headers)
+            except httpx.HTTPError as exc:
+                raise WeComError(f"LightAgent 推送连接失败：{exc.__class__.__name__}") from exc
+            if response.status_code >= 400:
+                raise WeComError(f"LightAgent 推送失败：HTTP {response.status_code}")
+            try:
+                data = response.json()
+            except ValueError:
+                continue
+            if data.get("errcode") not in (None, 0):
+                raise WeComError(f"LightAgent 推送失败：{data.get('errmsg', 'unknown error')}")
+            if data.get("success") is False or data.get("ok") is False:
+                raise WeComError(f"LightAgent 推送失败：{data.get('error') or data.get('detail') or 'unknown error'}")

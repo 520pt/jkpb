@@ -95,8 +95,16 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'id="patrolWarningImageMeta"' in html
     assert 'id="patrolSendContentMode"' in html
     assert '<option value="image">仅图片</option>' in html
-    assert 'data-tab="tunnelMechanical">隧道机电每日录入' in html
+    assert 'data-tab="tunnelMechanical">隧道机电' in html
+    assert 'data-tab="settings">配置中心' in html
+    assert 'id="settingsOverview"' in html
+    assert "微信群交互配置" in html
     assert 'id="tunnelMechanicalPage"' in html
+    assert 'id="tunnelEntryPanel"' in html
+    assert 'id="tunnelTemplatePanel"' in html
+    assert 'data-tunnel-panel-target="tunnelEntryPanel"' in html
+    assert 'data-tunnel-panel-target="tunnelTemplatePanel"' in html
+    assert "switchTunnelMechanicalPanel" in html
     assert 'id="submitTunnelMechanicalBtn"' in html
     assert 'id="tunnelMechanicalUsername"' in html
     assert 'id="importTunnelMechanicalTemplateBtn"' in html
@@ -107,7 +115,7 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'id="tunnelMechanicalResultDateConfirmBtn"' in html
     assert '$("queryTunnelMechanicalResultBtn").addEventListener("click", openTunnelMechanicalResultDateModal);' in html
     assert "async function queryTunnelMechanicalResultImage(queryDate)" in html
-    assert "payload.checkTime = queryDate || beijingDateInputValue();" in html
+    assert "checkTime: queryDate || beijingDateInputValue()," in html
     assert 'id="loadTunnelMechanicalCaptchaBtn"' in html
     assert 'id="testTunnelMechanicalLoginBtn"' in html
     assert "tunnel-asset-card" in html
@@ -116,6 +124,9 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'id="featureChannelRoomSelect"' in html
     assert 'id="addFeatureChannelRoomBtn"' in html
     assert 'id="featureChannelRoomList"' in html
+    assert 'id="notificationTargetRoomSelect"' in html
+    assert 'id="addNotificationTargetRoomBtn"' in html
+    assert 'id="notificationTargetRoomList"' in html
     assert 'id="saveFeatureChannelBtn"' in html
     assert 'loadTunnelMechanicalTemplates' in html
     assert 'loadTunnelMechanicalConfig' in html
@@ -731,6 +742,76 @@ def test_tunnel_mechanical_result_image_relogs_in_when_cached_token_expired(tmp_
     assert seen_authorizations == ["Bearer expired-token", "Bearer fresh-token"]
 
 
+def test_tunnel_mechanical_result_image_queries_by_date_only(tmp_path, monkeypatch):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    repo: DutyRepository = app.state.repo
+    repo.save_tunnel_mechanical_state(
+        access_token="token-1",
+        token_expires_at=(datetime.now(main_module.TZ) + timedelta(hours=1)).isoformat(),
+    )
+    _import_tunnel_template(
+        client,
+        {**TEST_TUNNEL_TEMPLATE, "base_url": "https://example.test", "list_path": "/prod-api/patrol/deviceCheck/list"},
+    )
+    captured_params = []
+
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {
+                "code": 200,
+                "rows": [
+                    {
+                        "assetName": "未勾选隧道",
+                        "checkTime": "2026-07-24",
+                        "checker": "平台负责人",
+                        "recorder": "平台记录人",
+                        "result": 1,
+                    }
+                ],
+            }
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url, headers=None, params=None):
+            captured_params.append(params)
+            return FakeResponse()
+
+    monkeypatch.setattr(main_module.httpx, "AsyncClient", FakeAsyncClient)
+
+    response = client.post(
+        "/api/tunnel-mechanical/result-image",
+        json={
+            "base_url": "https://example.test",
+            "checkTime": "2026-07-24",
+            "weather": "晴",
+            "checkerId": "1001",
+            "checker": "张三",
+            "recorderId": "1002",
+            "recorder": "李四",
+            "rows": [],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["result_rows"][0]["assetName"] == "未勾选隧道"
+    assert body["result_rows"][0]["checker"] == "平台负责人"
+    assert captured_params[0] == {"pageNum": "1", "pageSize": "50", "checkTime": "2026-07-24"}
+
+
 def test_today_reminders_endpoint_returns_today_plan(tmp_path):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
@@ -1118,9 +1199,10 @@ def test_lightagent_notification_config_hides_secret_fields_and_tests_send(tmp_p
     sent: dict[str, object] = {}
 
     class FakeLightAgentClient:
-        def __init__(self, *, endpoint_url: str, target: str, token: str = ""):
+        def __init__(self, *, endpoint_url: str, target: str = "", targets: list[str] | None = None, token: str = ""):
             sent["endpoint_url"] = endpoint_url
             sent["target"] = target
+            sent["targets"] = targets or []
             sent["token"] = token
 
         async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
@@ -1143,6 +1225,7 @@ def test_lightagent_notification_config_hides_secret_fields_and_tests_send(tmp_p
             "lightagent_url": "https://lightagent.test/api/push/send",
             "lightagent_token": "push-token",
             "lightagent_target": "room-1",
+            "lightagent_targets": [{"id": "room-1", "name": "通知群"}, {"id": "room-2", "name": "第二通知群"}],
             "message_template": "{name} {date} {shift_label}",
         },
     )
@@ -1159,10 +1242,15 @@ def test_lightagent_notification_config_hides_secret_fields_and_tests_send(tmp_p
     assert public_config["lightagent_configured"] is True
     assert public_config["lightagent_token_configured"] is True
     assert public_config["lightagent_target"] == "room-1"
+    assert public_config["lightagent_targets"] == [
+        {"id": "room-1", "name": "通知群"},
+        {"id": "room-2", "name": "第二通知群"},
+    ]
     assert test_response.status_code == 200
     assert sent == {
         "endpoint_url": "https://lightagent.test/api/push/send",
-        "target": "room-1",
+        "target": "",
+        "targets": ["room-1", "room-2"],
         "token": "push-token",
         "content": "示例甲 2025-09-16 中班",
         "mobiles": ["@wechat-member-1"],
@@ -1210,7 +1298,10 @@ def test_lightagent_notification_config_syncs_target_to_wechat_group_channel(tmp
             "sender_type": "lightagent",
             "lightagent_url": "http://lightagent:9899/api/push/send",
             "lightagent_token": "push-token",
-            "lightagent_target": "wgr_notice",
+            "lightagent_targets": [
+                {"id": "wgr_notice", "name": "通知群"},
+                {"id": "wgr_second", "name": "第二通知群"},
+            ],
             "message_template": "{name}",
         },
     )
@@ -1219,7 +1310,7 @@ def test_lightagent_notification_config_syncs_target_to_wechat_group_channel(tmp
     body = response.json()
     assert body["success"] is True
     assert body["lightagent_sync"]["success"] is True
-    assert body["lightagent_sync"]["selected_room_ids"] == ["wgr_existing", "wgr_notice"]
+    assert body["lightagent_sync"]["selected_room_ids"] == ["wgr_existing", "wgr_notice", "wgr_second"]
     assert calls[-1] == {
         "method": "POST",
         "path": "/api/channels",
@@ -1227,7 +1318,7 @@ def test_lightagent_notification_config_syncs_target_to_wechat_group_channel(tmp
         "json_body": {
             "action": "save",
             "channel": "wechat_group",
-            "config": {"wechat_group_stable_room_ids": ["wgr_existing", "wgr_notice"]},
+            "config": {"wechat_group_stable_room_ids": ["wgr_existing", "wgr_notice", "wgr_second"]},
         },
     }
 
@@ -1266,9 +1357,10 @@ def test_lightagent_notification_env_defaults_are_used_for_empty_database(tmp_pa
     sent: dict[str, object] = {}
 
     class FakeLightAgentClient:
-        def __init__(self, *, endpoint_url: str, target: str, token: str = ""):
+        def __init__(self, *, endpoint_url: str, target: str = "", targets: list[str] | None = None, token: str = ""):
             sent["endpoint_url"] = endpoint_url
             sent["target"] = target
+            sent["targets"] = targets or []
             sent["token"] = token
 
         async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
@@ -1276,7 +1368,7 @@ def test_lightagent_notification_env_defaults_are_used_for_empty_database(tmp_pa
             sent["mobiles"] = mentioned_mobile_list
 
     monkeypatch.setenv("NOTIFICATION_SENDER_TYPE", "lightagent")
-    monkeypatch.setenv("LIGHTAGENT_NOTIFY_URL", "http://lightagent:9899/api/push/send")
+    monkeypatch.setenv("LIGHTAGENT_BASE_URL", "http://lightagent:9899")
     monkeypatch.setenv("LIGHTAGENT_PUSH_TOKEN", "push-token")
     monkeypatch.setenv("LIGHTAGENT_NOTIFY_TARGET", "room-1")
     monkeypatch.setattr("app.main.LightAgentNotifyClient", FakeLightAgentClient)
@@ -1299,9 +1391,11 @@ def test_lightagent_notification_env_defaults_are_used_for_empty_database(tmp_pa
     assert public_config["lightagent_configured"] is True
     assert public_config["lightagent_token_configured"] is True
     assert public_config["lightagent_target"] == "room-1"
+    assert public_config["lightagent_targets"] == [{"id": "room-1", "name": ""}]
     assert test_response.status_code == 200
     assert sent["endpoint_url"] == "http://lightagent:9899/api/push/send"
-    assert sent["target"] == "room-1"
+    assert sent["target"] == ""
+    assert sent["targets"] == ["room-1"]
     assert sent["token"] == "push-token"
 
 

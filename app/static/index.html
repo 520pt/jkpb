@@ -661,6 +661,14 @@
       background: #eaf1ff;
       color: var(--blue);
     }
+    .settings-nav-group {
+      margin: 14px 0 6px;
+      color: #7a8494;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+    .settings-nav-group:first-of-type { margin-top: 0; }
     .settings-grid {
       padding: 14px;
     }
@@ -671,7 +679,150 @@
       grid-template-columns: minmax(360px, 1fr) minmax(360px, 1fr);
     }
     .settings-panel.active { display: grid; }
-    .settings-panel.single { grid-template-columns: minmax(0, 860px); }
+    .settings-panel.single { grid-template-columns: minmax(0, 1fr); }
+    .settings-panel.overview {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .settings-overview-head {
+      display: grid;
+      gap: 6px;
+      margin-bottom: 14px;
+    }
+    .settings-overview-head h2 {
+      font-size: 20px;
+      color: #111827;
+    }
+    .settings-overview-head p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .settings-card-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .settings-card {
+      display: grid;
+      gap: 10px;
+      min-height: 160px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+    }
+    .settings-card h3 {
+      margin: 0;
+      padding: 0;
+      border: 0;
+      font-size: 15px;
+      color: #172033;
+    }
+    .settings-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .settings-card-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-self: end;
+    }
+    .settings-card-actions button {
+      min-width: 94px;
+    }
+    .settings-card-actions .settings-toggle {
+      min-width: 48px;
+    }
+    .settings-toggle {
+      position: relative;
+      width: 48px;
+      height: 26px;
+      padding: 0;
+      border: 1px solid #cbd5e1;
+      border-radius: 999px;
+      background: #e5e7eb;
+      cursor: pointer;
+      transition: background 0.18s ease, border-color 0.18s ease, opacity 0.18s ease;
+    }
+    .settings-toggle::before {
+      content: "";
+      position: absolute;
+      top: 2px;
+      left: 3px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #ffffff;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.22);
+      transition: transform 0.18s ease;
+    }
+    .settings-toggle.on {
+      border-color: var(--blue);
+      background: var(--blue);
+    }
+    .settings-toggle.on::before {
+      transform: translateX(21px);
+    }
+    .settings-toggle:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+    }
+    .settings-status-card {
+      min-height: 178px;
+      align-content: start;
+    }
+    .settings-card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .settings-card-title-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    .settings-card-top h3 {
+      min-width: 0;
+    }
+    .settings-badge {
+      flex: 0 0 auto;
+      padding: 3px 8px;
+      border: 1px solid #cbd5e1;
+      border-radius: 999px;
+      background: #f8fafc;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.4;
+    }
+    .settings-badge.enabled {
+      border-color: #a7f3d0;
+      background: #ecfdf5;
+      color: #047857;
+    }
+    .settings-badge.disabled {
+      border-color: #fecaca;
+      background: #fef2f2;
+      color: #b91c1c;
+    }
+    .settings-badge.warning {
+      border-color: #fde68a;
+      background: #fffbeb;
+      color: #a16207;
+    }
+    .settings-card-meta {
+      display: grid;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
     .side-block {
       padding: 14px;
       border: 1px solid var(--line);
@@ -683,8 +834,147 @@
       margin-bottom: 12px;
       border-bottom: 1px solid var(--line);
     }
+    .settings-panel-note {
+      margin: -4px 0 10px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
     .side-block.wide {
       grid-column: 1 / -1;
+    }
+    .lightagent-notify-layout {
+      display: grid;
+      grid-template-columns: minmax(320px, 0.8fr) minmax(420px, 1.2fr);
+      gap: 12px;
+      align-items: start;
+    }
+    .lightagent-notify-card {
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcff;
+    }
+    .lightagent-notify-card h3 {
+      padding-bottom: 8px;
+      margin-bottom: 10px;
+      border-bottom: 1px solid var(--line);
+      font-size: 14px;
+    }
+    .lightagent-notify-card .side-block {
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+    }
+    .wechat-card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+      gap: 8px;
+      max-height: 376px;
+      overflow: auto;
+    }
+    .wechat-member-card,
+    .wechat-binding-card {
+      display: grid;
+      gap: 6px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+    }
+    .wechat-member-card {
+      min-height: 76px;
+      align-content: start;
+    }
+    .wechat-binding-card {
+      min-height: 112px;
+      grid-template-rows: auto auto 34px;
+      align-content: start;
+    }
+    .wechat-member-card strong,
+    .wechat-binding-card strong {
+      color: var(--ink);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+    .wechat-member-card small,
+    .wechat-binding-card small {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+      word-break: break-all;
+    }
+    .wechat-binding-card select {
+      width: 100%;
+      min-width: 0;
+      align-self: end;
+    }
+    .notification-card-actions {
+      margin-top: 4px;
+    }
+    .notification-title-row {
+      display: grid;
+      justify-items: start;
+      gap: 12px;
+      padding-bottom: 10px;
+      margin-bottom: 10px;
+      border-bottom: 1px solid var(--line);
+    }
+    .notification-title-row h3 {
+      padding: 0;
+      margin: 0;
+      border: 0;
+    }
+    .notification-channel-switch {
+      display: inline-flex;
+      gap: 4px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fafc;
+    }
+    .notification-channel-switch button {
+      min-width: 146px;
+      height: 30px;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+    }
+    .notification-channel-switch button.active {
+      background: var(--blue);
+      color: #ffffff;
+      box-shadow: 0 1px 2px rgba(37, 99, 235, 0.18);
+    }
+    .daily-duty-layout {
+      display: grid;
+      grid-template-columns: minmax(420px, 0.95fr) minmax(360px, 1.05fr);
+      gap: 12px;
+      align-items: start;
+    }
+    .daily-duty-template-input {
+      min-height: 180px;
+    }
+    .daily-duty-preview-panel {
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+    .daily-duty-preview-panel .item {
+      padding: 8px;
+    }
+    .daily-duty-preview-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .daily-duty-preview-head strong {
+      margin: 0;
+    }
+    .daily-duty-preview-head .download-link {
+      height: 30px;
     }
     .stack { display: grid; gap: 8px; }
     .stack label {
@@ -704,9 +994,43 @@
       min-height: 34px;
       color: var(--ink);
     }
+    .stack label.checkbox-label span {
+      color: var(--ink);
+    }
     .stack label.checkbox-label input {
-      width: auto;
+      position: relative;
+      width: 42px;
+      height: 24px;
       flex: 0 0 auto;
+      appearance: none;
+      border: 1px solid #cbd5e1;
+      border-radius: 999px;
+      background: #e5e7eb;
+      cursor: pointer;
+      transition: background 0.18s ease, border-color 0.18s ease;
+    }
+    .stack label.checkbox-label input::before {
+      content: "";
+      position: absolute;
+      top: 2px;
+      left: 3px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #ffffff;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.22);
+      transition: transform 0.18s ease;
+    }
+    .stack label.checkbox-label input:checked {
+      border-color: var(--blue);
+      background: var(--blue);
+    }
+    .stack label.checkbox-label input:checked::before {
+      transform: translateX(17px);
+    }
+    .stack label.checkbox-label input:focus-visible {
+      outline: 2px solid rgba(37, 99, 235, 0.26);
+      outline-offset: 2px;
     }
     .field-grid {
       display: grid;
@@ -1010,6 +1334,70 @@
       display: grid;
       gap: 12px;
     }
+    .tunnel-workspace {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      min-height: calc(100vh - 190px);
+      align-items: start;
+    }
+    #tunnelMechanicalPage > .body {
+      padding: 0;
+    }
+    .tunnel-subnav {
+      display: grid;
+      align-content: start;
+      gap: 0;
+      position: sticky;
+      top: 0;
+      min-height: calc(100vh - 190px);
+      padding: 14px;
+      border-right: 1px solid var(--line);
+      background: #f8fafc;
+    }
+    .tunnel-subnav h3 {
+      margin-bottom: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .tunnel-subnav .status {
+      margin: -4px 0 12px;
+      font-size: 12px;
+    }
+    .tunnel-subnav button {
+      width: 100%;
+      min-width: 0;
+      height: auto;
+      padding: 9px 10px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 650;
+      text-align: left;
+    }
+    .tunnel-subnav button:hover,
+    .tunnel-subnav button.active {
+      background: #eaf1ff;
+      color: var(--blue);
+    }
+    .tunnel-panel {
+      display: none;
+    }
+    .tunnel-panel.active {
+      display: block;
+    }
+    .tunnel-panel-stack {
+      min-width: 0;
+      padding: 14px;
+    }
+    .tunnel-panel-note {
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
     .tunnel-auth-grid,
     .tunnel-meta-grid {
       display: grid;
@@ -1046,7 +1434,9 @@
     }
     .tunnel-asset-list {
       display: grid;
-      gap: 10px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      align-items: start;
     }
     .tunnel-empty {
       border: 1px dashed var(--line);
@@ -1064,9 +1454,9 @@
     .tunnel-asset-head {
       display: grid;
       grid-template-columns: auto minmax(0, 1fr);
-      gap: 10px;
+      gap: 8px;
       align-items: start;
-      padding: 10px;
+      padding: 9px;
       border-bottom: 1px solid var(--line);
       background: #f8fafc;
     }
@@ -1093,9 +1483,9 @@
     }
     .tunnel-asset-grid {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 8px;
-      padding: 10px;
+      padding: 9px;
     }
     .tunnel-asset-grid label {
       display: grid;
@@ -1109,11 +1499,11 @@
       color: var(--ink);
     }
     .tunnel-asset-grid textarea {
-      min-height: 64px;
+      min-height: 58px;
       resize: vertical;
     }
     .tunnel-asset-grid .wide {
-      grid-column: span 3;
+      grid-column: 1 / -1;
     }
     .tunnel-result-box {
       min-height: 260px;
@@ -1275,6 +1665,16 @@
       }
       .settings-panel,
       .settings-panel.single { grid-template-columns: 1fr; }
+      .settings-card-grid { grid-template-columns: 1fr; }
+      .notification-channel-switch {
+        width: 100%;
+      }
+      .notification-channel-switch button {
+        flex: 1 1 0;
+        min-width: 0;
+      }
+      .lightagent-notify-layout { grid-template-columns: 1fr; }
+      .daily-duty-layout { grid-template-columns: 1fr; }
       .side-block.wide { grid-column: auto; }
       .field-grid { grid-template-columns: 1fr; }
       .today-reminders { grid-template-columns: 1fr; }
@@ -1289,6 +1689,19 @@
       .today-reminder-item.has-image,
       .today-reminder-meta { grid-template-columns: 1fr; }
       .patrol-delivery-row { grid-template-columns: 1fr; }
+      .tunnel-workspace { grid-template-columns: 1fr; }
+      .tunnel-subnav {
+        position: static;
+        min-height: 0;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .tunnel-subnav h3,
+      .tunnel-subnav .settings-nav-group { grid-column: 1 / -1; }
+      .tunnel-subnav button { text-align: center; }
+      .tunnel-panel-stack { padding-left: 0; }
+      .tunnel-asset-list { grid-template-columns: 1fr; }
       .tunnel-mechanical-layout,
       .tunnel-auth-grid,
       .tunnel-meta-grid,
@@ -1337,12 +1750,31 @@
     </div>
   </div>
 
+  <div id="dailyDutyPreviewDateModal" class="date-modal" hidden>
+    <div class="date-modal-card" role="dialog" aria-modal="true" aria-labelledby="dailyDutyPreviewDateTitle">
+      <div class="date-modal-head">
+        <h3 id="dailyDutyPreviewDateTitle">选择预览日期</h3>
+        <button id="dailyDutyPreviewDateCloseBtn" type="button">关闭</button>
+      </div>
+      <div class="date-modal-body">
+        <label>预览日期
+          <input id="dailyDutyPreviewDateInput" type="date" />
+        </label>
+        <p id="dailyDutyPreviewDateStatus" class="status"></p>
+      </div>
+      <div class="date-modal-actions">
+        <button id="dailyDutyPreviewDateCancelBtn" type="button">取消</button>
+        <button class="primary" id="dailyDutyPreviewDateConfirmBtn" type="button">预览</button>
+      </div>
+    </div>
+  </div>
+
   <nav class="tabs">
     <button class="tab-button active" data-tab="today">今日提醒</button>
     <button class="tab-button" data-tab="review">排班核对</button>
     <button class="tab-button" data-tab="saved">已导入排班</button>
-    <button class="tab-button" data-tab="tunnelMechanical">隧道机电每日录入</button>
-    <button class="tab-button" data-tab="settings">监测配置</button>
+    <button class="tab-button" data-tab="tunnelMechanical">隧道机电</button>
+    <button class="tab-button" data-tab="settings">配置中心</button>
     <button class="tab-button" data-tab="records">发送记录</button>
     <button class="tab-button" data-tab="status">系统状态</button>
   </nav>
@@ -1482,93 +1914,105 @@
     </section>
 
     <section id="tunnelMechanicalPage" class="tab-page hidden">
-      <div class="section-head">
-        <div>
-          <h2>隧道机电每日录入</h2>
-          <p id="tunnelMechanicalStatus" class="status"></p>
-        </div>
-        <div class="toolbar">
-          <input id="tunnelMechanicalTemplateFile" type="file" accept="application/json,.json" hidden />
-          <button id="importTunnelMechanicalTemplateBtn" type="button">导入模板</button>
-          <button id="loadTunnelMechanicalBtn" type="button">刷新模板</button>
-          <button id="previewTunnelMechanicalBtn" type="button">预览请求</button>
-          <button id="queryTunnelMechanicalResultBtn" type="button">查询结果图</button>
-          <button class="green" id="submitTunnelMechanicalBtn" type="button">提交选中记录</button>
-        </div>
-      </div>
       <div class="body">
-        <div class="tunnel-mechanical-layout">
-          <div class="tunnel-mechanical-form">
-            <section>
-              <div class="section-head">
-                <h3>登录会话</h3>
-              </div>
-              <div class="body stack">
-                <div class="tunnel-auth-grid">
-                  <label>平台地址 <input id="tunnelMechanicalBaseUrl" placeholder="导入模板或手动填写" /></label>
-                  <label>账号 <input id="tunnelMechanicalUsername" autocomplete="username" /></label>
-                  <label>密码 <input id="tunnelMechanicalPassword" type="password" autocomplete="current-password" placeholder="已配置时可留空" /></label>
-                  <label>验证码 <input id="tunnelMechanicalCaptchaCode" autocomplete="off" /></label>
-                  <label class="wide">验证码图片
-                    <img id="tunnelMechanicalCaptchaImg" alt="captcha" style="display:none; max-width: 180px; height: 56px; object-fit: contain;" />
-                  </label>
-                  <div class="settings-actions wide">
-                    <button id="saveTunnelMechanicalConfigBtn" type="button">保存账号配置</button>
-                    <button id="loadTunnelMechanicalCaptchaBtn" type="button">获取验证码</button>
-                    <button id="testTunnelMechanicalLoginBtn" type="button">测试登录并缓存</button>
-                  </div>
-                  <p id="tunnelMechanicalLoginState" class="status wide"></p>
-                  <label>Authorization <input id="tunnelMechanicalAuthorization" autocomplete="off" placeholder="Bearer 或系统返回的 token" /></label>
-                  <label class="wide">Cookie
-                    <textarea id="tunnelMechanicalCookie" autocomplete="off" placeholder="可选；如果 Authorization 足够，可留空"></textarea>
-                  </label>
-                </div>
-              </div>
-            </section>
-
-            <section>
-              <div class="section-head">
-                <h3>录入参数</h3>
-              </div>
-              <div class="body stack">
-                <div class="tunnel-meta-grid">
-                  <label>检查日期 <input id="tunnelMechanicalCheckTime" type="date" /></label>
-                  <label>天气 <input id="tunnelMechanicalWeather" /></label>
-                  <label>检查人
-                    <select id="tunnelMechanicalChecker"></select>
-                  </label>
-                  <label>记录人
-                    <select id="tunnelMechanicalRecorder"></select>
-                  </label>
-                  <label>车牌 <input id="tunnelMechanicalCarLicense" /></label>
-                  <label>数量 <input id="tunnelMechanicalNums" /></label>
-                </div>
-              </div>
-            </section>
-
-            <section>
-              <div class="section-head">
-                <h3>隧道模板</h3>
-                <div class="toolbar tunnel-template-actions">
-                  <button id="selectAllTunnelMechanicalBtn" type="button">全选</button>
-                  <button id="clearTunnelMechanicalBtn" type="button">全不选</button>
-                </div>
-              </div>
-              <div class="body">
-                <div id="tunnelMechanicalRows" class="tunnel-asset-list"></div>
-              </div>
-            </section>
+        <div class="tunnel-workspace">
+          <div class="tunnel-subnav">
+            <h3>隧道机电每日录入</h3>
+            <p id="tunnelMechanicalStatus" class="status"></p>
+            <div class="settings-nav-group">操作界面</div>
+            <button class="active" type="button" data-tunnel-panel-target="tunnelEntryPanel">登录与录入</button>
+            <button type="button" data-tunnel-panel-target="tunnelTemplatePanel">隧道模板</button>
           </div>
 
-          <aside>
-            <div class="section-head">
-              <h3>请求预览 / 结果</h3>
+          <div class="tunnel-panel-stack">
+            <div class="tunnel-panel active" id="tunnelEntryPanel">
+              <p class="tunnel-panel-note">这里处理平台登录、每日录入参数、提交记录和查询结果图。需要先在“隧道模板”里导入模板并选择要提交的记录。</p>
+              <div class="tunnel-mechanical-layout">
+                <div class="tunnel-mechanical-form">
+                  <section>
+                    <div class="section-head">
+                      <h3>登录会话</h3>
+                    </div>
+                    <div class="body stack">
+                      <div class="tunnel-auth-grid">
+                        <label>平台地址 <input id="tunnelMechanicalBaseUrl" placeholder="导入模板或手动填写" /></label>
+                        <label>账号 <input id="tunnelMechanicalUsername" autocomplete="username" /></label>
+                        <label>密码 <input id="tunnelMechanicalPassword" type="password" autocomplete="current-password" placeholder="已配置时可留空" /></label>
+                        <label>验证码 <input id="tunnelMechanicalCaptchaCode" autocomplete="off" /></label>
+                        <label class="wide">验证码图片
+                          <img id="tunnelMechanicalCaptchaImg" alt="captcha" style="display:none; max-width: 180px; height: 56px; object-fit: contain;" />
+                        </label>
+                        <div class="settings-actions wide">
+                          <button id="saveTunnelMechanicalConfigBtn" type="button">保存账号配置</button>
+                          <button id="loadTunnelMechanicalCaptchaBtn" type="button">获取验证码</button>
+                          <button id="testTunnelMechanicalLoginBtn" type="button">测试登录并缓存</button>
+                        </div>
+                        <p id="tunnelMechanicalLoginState" class="status wide"></p>
+                        <label>Authorization <input id="tunnelMechanicalAuthorization" autocomplete="off" placeholder="Bearer 或系统返回的 token" /></label>
+                        <label class="wide">Cookie
+                          <textarea id="tunnelMechanicalCookie" autocomplete="off" placeholder="可选；如果 Authorization 足够，可留空"></textarea>
+                        </label>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section>
+                    <div class="section-head">
+                      <h3>录入参数</h3>
+                    </div>
+                    <div class="body stack">
+                      <div class="tunnel-meta-grid">
+                        <label>检查日期 <input id="tunnelMechanicalCheckTime" type="date" /></label>
+                        <label>天气 <input id="tunnelMechanicalWeather" /></label>
+                        <label>检查人
+                          <select id="tunnelMechanicalChecker"></select>
+                        </label>
+                        <label>记录人
+                          <select id="tunnelMechanicalRecorder"></select>
+                        </label>
+                        <label>车牌 <input id="tunnelMechanicalCarLicense" /></label>
+                        <label>数量 <input id="tunnelMechanicalNums" /></label>
+                      </div>
+                      <div class="settings-actions">
+                        <button id="previewTunnelMechanicalBtn" type="button">预览请求</button>
+                        <button id="queryTunnelMechanicalResultBtn" type="button">查询结果图</button>
+                        <button class="green" id="submitTunnelMechanicalBtn" type="button">提交选中记录</button>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+
+                <aside>
+                  <div class="section-head">
+                    <h3>请求预览 / 结果</h3>
+                  </div>
+                  <div class="body">
+                    <pre id="tunnelMechanicalResult" class="tunnel-result-box"></pre>
+                    <div id="tunnelMechanicalResultImage" class="tunnel-result-image"></div>
+                  </div>
+                </aside>
+              </div>
             </div>
-            <div class="body">
-              <pre id="tunnelMechanicalResult" class="tunnel-result-box"></pre>
-              <div id="tunnelMechanicalResultImage" class="tunnel-result-image"></div>
+
+            <div class="tunnel-panel" id="tunnelTemplatePanel">
+              <p class="tunnel-panel-note">这里维护隧道模板和每条隧道记录。导入或刷新模板后，勾选需要提交的记录，再回到“登录与录入”提交。</p>
+              <section>
+                <div class="section-head">
+                  <h3>隧道模板</h3>
+                  <div class="toolbar tunnel-template-actions">
+                    <input id="tunnelMechanicalTemplateFile" type="file" accept="application/json,.json" hidden />
+                    <button id="importTunnelMechanicalTemplateBtn" type="button">导入模板</button>
+                    <button id="loadTunnelMechanicalBtn" type="button">刷新模板</button>
+                    <button id="selectAllTunnelMechanicalBtn" type="button">全选</button>
+                    <button id="clearTunnelMechanicalBtn" type="button">全不选</button>
+                  </div>
+                </div>
+                <div class="body">
+                  <div id="tunnelMechanicalRows" class="tunnel-asset-list"></div>
+                </div>
+              </section>
             </div>
-          </aside>
+          </div>
         </div>
       </div>
     </section>
@@ -1576,67 +2020,103 @@
     <aside id="settingsPage" class="tab-page hidden">
       <div class="settings-shell">
         <nav class="settings-nav">
-          <h3>配置目录</h3>
-          <button class="active" data-settings-target="wecomSettings">通知通道</button>
-          <button data-settings-target="featureChannelSettings">功能通道</button>
-          <button data-settings-target="monitorSettings">监控班提醒</button>
-          <button data-settings-target="patrolWarningSettings">公路巡查预警</button>
-          <button data-settings-target="customReminderSettings">自定义提醒</button>
-          <button data-settings-target="personnelSettings">人员名单</button>
+          <h3>配置中心</h3>
+          <div class="settings-nav-group">总览</div>
+          <button class="active" data-settings-target="settingsOverview">配置总览</button>
+          <div class="settings-nav-group">通道配置</div>
+          <button data-settings-target="wecomSettings">消息通知渠道</button>
+          <button data-settings-target="featureChannelSettings">微信群交互配置</button>
+          <div class="settings-nav-group">提醒配置</div>
           <button data-settings-target="driverSettings">今日在岗提醒</button>
+          <button data-settings-target="patrolWarningSettings">公路巡查预警</button>
+          <button data-settings-target="monitorSettings">监控班提醒</button>
+          <button data-settings-target="customReminderSettings">自定义提醒</button>
           <button data-settings-target="previewSettings">提醒预览</button>
+          <div class="settings-nav-group">人员配置</div>
+          <button data-settings-target="personnelSettings">人员与驾驶员</button>
         </nav>
 
         <div class="settings-grid">
-          <section class="settings-panel single active" id="wecomSettings">
+          <section class="settings-panel overview active" id="settingsOverview">
+            <div>
+              <div class="settings-overview-head">
+                <h2>配置总览</h2>
+                <p>按提醒类型查看当前是否启用、是否配置完整，以及对应的发送通道。</p>
+              </div>
+              <div class="settings-card-grid" id="settingsOverviewCards"></div>
+            </div>
+          </section>
+
+          <section class="settings-panel single" id="wecomSettings">
             <div class="side-block wide">
-              <h3>通知通道</h3>
+              <div class="notification-title-row">
+                <h3>消息通知渠道</h3>
+                <div class="notification-channel-switch" role="group" aria-label="发送通道">
+                  <button type="button" data-notification-sender="wecom_webhook">企业微信群机器人</button>
+                  <button type="button" data-notification-sender="lightagent">个人微信群</button>
+                </div>
+                <input id="notificationSenderType" type="hidden" value="wecom_webhook" />
+              </div>
               <div class="stack">
-                <label>发送通道
-                  <select id="notificationSenderType">
-                    <option value="wecom_webhook">企业微信群机器人</option>
-                    <option value="lightagent">LightAgent 个人微信群</option>
-                  </select>
-                </label>
                 <div id="wecomNotificationFields" class="stack">
                   <label>群机器人地址 <input id="webhookUrl" placeholder="未配置，保存时请输入机器人地址" /></label>
-                </div>
-                <div id="lightAgentNotificationFields" class="stack hidden">
-                  <label>LightAgent 推送地址 <input id="lightAgentUrl" placeholder="例如 http://127.0.0.1:9899/api/push/send" /></label>
-                  <div class="field-grid">
-                    <label>目标群 room_id <input id="lightAgentTarget" placeholder="LightAgent 群聊管理中的 room_id" /></label>
-                    <label>推送 token <input id="lightAgentToken" type="password" placeholder="已配置时可留空" /></label>
+                  <div id="wecomTestMobileFields" class="field-grid">
+                    <label>测试@手机号 <input id="testMobile" placeholder="10000000000" /></label>
                   </div>
-                  <div class="side-block">
-                    <h3>微信群通知</h3>
+                  <div class="settings-actions notification-card-actions">
+                    <button class="primary" id="saveNotificationWecomBtn" type="button" data-save-notification>保存通知配置</button>
+                    <button id="testNotificationWecomBtn" type="button" data-test-notification>测试发送</button>
+                  </div>
+                </div>
+                <div id="lightAgentNotificationFields" class="lightagent-notify-layout hidden">
+                  <div class="lightagent-notify-card stack">
+                    <h3>推送配置</h3>
+                    <label>LightAgent 推送地址 <input id="lightAgentUrl" placeholder="例如 http://127.0.0.1:9899/api/push/send" /></label>
+                    <div class="field-grid">
+                      <label>通知微信群
+                        <select id="notificationTargetRoomSelect"></select>
+                      </label>
+                      <label>通知群 ID <input id="notificationTargetRoomId" placeholder="选择群后自动填入，也可手动输入 wgr_..." /></label>
+                    </div>
+                    <input id="notificationTargetRoomName" type="hidden" />
+                    <input id="lightAgentTarget" type="hidden" />
                     <div class="settings-actions">
-                      <button type="button" id="refreshWechatLoginBtn">微信登录状态</button>
-                      <button type="button" id="refreshWechatRoomsBtn">同步群聊</button>
-                      <button type="button" id="refreshWechatMembersBtn">同步成员</button>
+                      <button type="button" id="addNotificationTargetRoomBtn">添加通知群</button>
                     </div>
-                    <p id="lightAgentWechatStatus" class="status"></p>
-                    <div id="lightAgentQrBox" class="hidden">
-                      <img id="lightAgentQrImage" alt="微信登录二维码" style="width: 180px; max-width: 100%; border-radius: 8px; border: 1px solid var(--border); background: #fff; padding: 8px;" />
-                    </div>
-                    <label>选择微信群
-                      <select id="lightAgentRoomSelect"></select>
-                    </label>
+                    <div id="notificationTargetRoomList" class="list"></div>
+                    <label>推送 token <input id="lightAgentToken" type="password" placeholder="已配置时可留空" /></label>
                     <label>测试@成员
                       <select id="testWechatMember"></select>
                     </label>
-                    <div id="lightAgentMemberList" class="people-list"></div>
-                    <div id="wechatBindingList" class="people-list"></div>
-                    <div class="settings-actions">
-                      <button class="primary" type="button" id="saveWechatBindingsBtn">保存成员绑定</button>
+                    <div class="settings-actions notification-card-actions">
+                      <button class="primary" id="saveNotificationBtn" type="button" data-save-notification>保存通知配置</button>
+                      <button id="testNotificationBtn" type="button" data-test-notification>测试发送</button>
                     </div>
                   </div>
-                </div>
-                <div class="field-grid">
-                  <label>测试@手机号 <input id="testMobile" placeholder="10000000000" /></label>
-                </div>
-                <div class="settings-actions">
-                  <button class="primary" id="saveNotificationBtn">保存通知配置</button>
-                  <button id="testNotificationBtn">测试发送</button>
+                  <div class="lightagent-notify-card">
+                    <div class="side-block">
+                      <h3>微信登录与成员绑定</h3>
+                      <div class="stack">
+                        <div class="settings-actions">
+                          <button type="button" id="refreshWechatLoginBtn">微信登录状态</button>
+                          <button type="button" id="refreshWechatRoomsBtn">同步群聊</button>
+                          <button type="button" id="refreshWechatMembersBtn">同步成员</button>
+                        </div>
+                        <p id="lightAgentWechatStatus" class="status"></p>
+                        <div id="lightAgentQrBox" class="hidden">
+                          <img id="lightAgentQrImage" alt="微信登录二维码" style="width: 180px; max-width: 100%; border-radius: 8px; border: 1px solid var(--border); background: #fff; padding: 8px;" />
+                        </div>
+                        <label>选择微信群
+                          <select id="lightAgentRoomSelect"></select>
+                        </label>
+                        <div id="lightAgentMemberList" class="wechat-card-grid"></div>
+                        <div id="wechatBindingList" class="wechat-card-grid"></div>
+                        <div class="settings-actions">
+                          <button class="primary" type="button" id="saveWechatBindingsBtn">保存成员绑定</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
                 <p id="notificationStatus" class="status"></p>
               </div>
@@ -1645,15 +2125,16 @@
 
           <section class="settings-panel single" id="featureChannelSettings">
             <div class="side-block wide">
-              <h3>功能通道</h3>
+              <h3>微信群交互配置</h3>
+              <p class="settings-panel-note">用于微信里主动触发的功能，例如“隧道机电”“查询今日机电”“查询 2026-07-22机电”和排班导入。这里可以配置多个微信群。</p>
               <div class="stack">
-                <label class="checkbox-label"><input id="featureChannelEnabled" type="checkbox" /> 启用微信群功能通道</label>
+                <label class="checkbox-label"><span>启用微信群功能通道</span><input id="featureChannelEnabled" type="checkbox" /></label>
                 <div class="field-grid">
                   <label>LightAgent Web 地址 <input id="featureLightAgentWebUrl" placeholder="例如 http://127.0.0.1:9899" /></label>
                   <label>Web 密码 <input id="featureLightAgentWebPassword" type="password" placeholder="已配置时可留空" /></label>
                 </div>
                 <div class="field-grid">
-                  <label>功能微信群
+                  <label>交互功能微信群
                     <select id="featureChannelRoomSelect"></select>
                   </label>
                   <label>功能群 ID <input id="featureChannelRoomId" placeholder="选择群后自动填入，也可手动输入 wgr_..." /></label>
@@ -1664,9 +2145,9 @@
                 </div>
                 <div id="featureChannelRoomList" class="list"></div>
                 <div class="field-grid">
-                  <label class="checkbox-label"><input id="featureAllowTunnelMechanical" type="checkbox" /> 隧道机电查询/录入</label>
-                  <label class="checkbox-label"><input id="featureAllowDutyQuery" type="checkbox" /> 监控班和值班查询</label>
-                  <label class="checkbox-label"><input id="featureAllowRosterImport" type="checkbox" /> 微信群排班导入</label>
+                  <label class="checkbox-label"><span>隧道机电查询/录入</span><input id="featureAllowTunnelMechanical" type="checkbox" /></label>
+                  <label class="checkbox-label"><span>监控班和值班查询</span><input id="featureAllowDutyQuery" type="checkbox" /></label>
+                  <label class="checkbox-label"><span>微信群排班导入</span><input id="featureAllowRosterImport" type="checkbox" /></label>
                 </div>
                 <div class="settings-actions">
                   <button type="button" id="refreshFeatureWechatRoomsBtn">同步微信群</button>
@@ -1681,6 +2162,7 @@
           <section class="settings-panel" id="monitorSettings">
             <div class="side-block">
               <h3>监控班提醒</h3>
+              <p class="settings-panel-note">配置每个人的班前提醒和休息提醒。通知通道为 LightAgent 时，姓名可自动关联微信成员 ID；企业微信群机器人则使用手机号。</p>
               <div class="stack">
                 <div class="field-grid">
                   <label>姓名 <input id="personName" list="personnelNameOptions" placeholder="选择或输入姓名" /></label>
@@ -1700,7 +2182,8 @@
                 </div>
                 <label>监控排班提醒文案 <textarea id="messageTemplate" placeholder="{name} {date}（{time_range})是你的{shift_label}"></textarea></label>
                 <div class="field-grid">
-                  <label class="checkbox-label"><input id="restReminderEnabled" type="checkbox" /> 启用休息提醒</label>
+                  <label class="checkbox-label"><span>启用这条监控班提醒</span><input id="monitorPersonEnabled" type="checkbox" checked /></label>
+                  <label class="checkbox-label"><span>启用休息提醒</span><input id="restReminderEnabled" type="checkbox" /></label>
                 </div>
                 <div id="restReminderFields" class="stack hidden">
                   <label>休息提醒时间 <input id="restReminderTime" type="time" value="08:30" /></label>
@@ -1723,8 +2206,9 @@
           <section class="settings-panel" id="patrolWarningSettings">
             <div class="side-block">
               <h3>公路巡查监测预警</h3>
+              <p class="settings-panel-note">配置预警平台账号、轮询频率、提醒频率和发送内容。实际发送仍使用“消息通知渠道”里选择的通知通道。</p>
               <div class="stack">
-                <label class="checkbox-label"><input id="patrolWarningEnabled" type="checkbox" /> 启用公路巡查预警监测</label>
+                <label class="checkbox-label"><span>启用公路巡查预警监测</span><input id="patrolWarningEnabled" type="checkbox" /></label>
                 <label>登录接口地址 <input id="patrolLoginUrl" placeholder="例如 http://.../Account/Login" /></label>
                 <label>预警列表接口地址 <input id="patrolWarningUrl" placeholder="例如 http://.../warninginfo/findPage" /></label>
                 <div class="field-grid">
@@ -1788,6 +2272,7 @@
           <section class="settings-panel" id="customReminderSettings">
             <div class="side-block">
               <h3>自定义提醒</h3>
+              <p class="settings-panel-note">适合补充固定事项提醒，例如特定班次的检查或交接事项。</p>
               <div class="stack">
                 <div class="field-grid">
                   <label>姓名 <input id="customReminderName" list="personnelNameOptions" placeholder="选择或输入姓名" /></label>
@@ -1804,7 +2289,7 @@
                   <label>提醒时间 <input id="customReminderTime" type="time" value="21:00" /></label>
                 </div>
                 <label>提醒文案 <textarea id="customReminderMessage" placeholder="需要关闭隧道灯"></textarea></label>
-                <label class="checkbox-label"><input id="customReminderEnabled" type="checkbox" checked /> 启用这条提醒</label>
+                <label class="checkbox-label"><span>启用这条提醒</span><input id="customReminderEnabled" type="checkbox" checked /></label>
                 <div class="settings-actions">
                   <button class="primary" id="saveCustomReminderBtn" type="button">保存自定义提醒</button>
                 </div>
@@ -1821,6 +2306,7 @@
           <section class="settings-panel single" id="personnelSettings">
             <div class="side-block">
               <h3>人员名单</h3>
+              <p class="settings-panel-note">统一维护人员和驾驶员名单，供排班、今日在岗提醒、监控班提醒和微信成员绑定使用。</p>
               <div class="stack">
                 <label>名单
                   <div id="personnelNamesEditor" class="tag-editor" data-hidden-input="personnelNames" data-placeholder="输入姓名后回车"></div>
@@ -1865,22 +2351,27 @@
           </section>
 
           <section class="settings-panel single" id="driverSettings">
-            <div class="side-block">
+            <div class="side-block wide">
               <h3>今日在岗提醒</h3>
-              <div class="stack">
-                <div class="field-grid">
-                  <label class="checkbox-label"><input id="dailyDutyEnabled" type="checkbox" checked /> 启用今日在岗提醒</label>
-                  <label>提醒时间 <input id="dailyDutyTime" type="time" value="07:50" /></label>
+              <div class="daily-duty-layout">
+                <div class="stack">
+                  <p class="settings-panel-note">配置发送时间和文案模板，图片发送目标取自“消息通知渠道”。</p>
+                  <div class="field-grid">
+                    <label class="checkbox-label"><span>启用今日在岗提醒</span><input id="dailyDutyEnabled" type="checkbox" checked /></label>
+                    <label>提醒时间 <input id="dailyDutyTime" type="time" value="07:50" /></label>
+                  </div>
+                  <label>今日在岗提醒文案 <textarea id="dailyDutyTemplate" class="daily-duty-template-input" placeholder="今日在岗人员&#10;监控班：今日早班：{early}，明日早班：{tomorrow_early}，中班：{middle}，晚班：{night}&#10;驾驶员：大车：{big_drivers} 小车：{small_drivers}&#10;备勤人员：{standby}&#10;今日下午休息：{afternoon_rest}&#10;正在休息：{resting}&#10;今日下午到岗：{afternoon_return}"></textarea></label>
+                  <div class="settings-actions">
+                    <button class="primary" id="saveDailyDutyBtn">保存今日在岗配置</button>
+                    <button id="previewDailyDutyBtn">预览今日在岗</button>
+                    <button id="testDailyDutyBtn">测试发送今日在岗</button>
+                  </div>
+                  <p id="dailyDutyStatus" class="status"></p>
+                  <input id="dailyDutyPreviewDate" type="hidden" />
                 </div>
-                <label>今日在岗提醒文案 <textarea id="dailyDutyTemplate" placeholder="今日在岗人员&#10;监控班：今日早班：{early}，明日早班：{tomorrow_early}，中班：{middle}，晚班：{night}&#10;驾驶员：大车：{big_drivers} 小车：{small_drivers}&#10;备勤人员：{standby}&#10;今日下午休息：{afternoon_rest}&#10;正在休息：{resting}&#10;今日下午到岗：{afternoon_return}"></textarea></label>
-                <div class="settings-actions">
-                  <input id="dailyDutyPreviewDate" type="date" />
-                  <button class="primary" id="saveDailyDutyBtn">保存今日在岗配置</button>
-                  <button id="previewDailyDutyBtn">预览今日在岗</button>
-                  <button id="testDailyDutyBtn">测试发送今日在岗</button>
+                <div class="daily-duty-preview-panel">
+                  <div id="dailyDutyPreview" class="item hidden"></div>
                 </div>
-                <p id="dailyDutyStatus" class="status"></p>
-                <div id="dailyDutyPreview" class="item"></div>
               </div>
             </div>
           </section>
@@ -1888,6 +2379,7 @@
           <section class="settings-panel single" id="previewSettings">
             <div class="side-block">
               <h3>提醒预览</h3>
+              <p class="settings-panel-note">按日期查看当天会生成哪些提醒，用于发送前核对排班、预警和自定义提醒。</p>
               <div class="stack">
                 <div class="settings-actions">
                   <input id="previewDate" type="date" />
@@ -1956,6 +2448,9 @@
       personnelPeople: [],
       customReminders: [],
       editingCustomReminderId: null,
+      dailyDutyConfig: null,
+      notificationConfig: null,
+      notificationTargetRooms: [],
       lightAgentRooms: [],
       lightAgentMembers: [],
       lightAgentWechatStatusTimer: null,
@@ -2309,6 +2804,264 @@
     document.querySelectorAll(".settings-nav button").forEach((button) => {
       button.addEventListener("click", () => switchSettingsPanel(button.dataset.settingsTarget));
     });
+
+    document.querySelectorAll("[data-jump-settings]").forEach((button) => {
+      button.addEventListener("click", () => switchSettingsPanel(button.dataset.jumpSettings));
+    });
+
+    document.querySelectorAll("[data-tab-jump]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const target = button.dataset.tabJump;
+        const tabButton = document.querySelector(`.tab-button[data-tab="${CSS.escape(target)}"]`);
+        if (tabButton) tabButton.click();
+      });
+    });
+
+    function switchTunnelMechanicalPanel(targetId) {
+      document.querySelectorAll("[data-tunnel-panel-target]").forEach((button) => {
+        button.classList.toggle("active", button.dataset.tunnelPanelTarget === targetId);
+      });
+      document.querySelectorAll(".tunnel-panel").forEach((panel) => {
+        panel.classList.toggle("active", panel.id === targetId);
+      });
+    }
+
+    document.querySelectorAll("[data-tunnel-panel-target]").forEach((button) => {
+      button.addEventListener("click", () => switchTunnelMechanicalPanel(button.dataset.tunnelPanelTarget));
+    });
+
+    function overviewNotificationText() {
+      const config = state.notificationConfig || {};
+      if (!config.notification_configured) return "通知通道未配置";
+      if (config.sender_type === "lightagent") {
+        const count = normalizeFeatureChannelRooms(config.lightagent_targets || []).length;
+        return count ? `个人微信群（${count} 个群）` : "个人微信群";
+      }
+      return "企业微信群机器人";
+    }
+
+    function overviewBadgeClass(status) {
+      if (status === "已启用") return "enabled";
+      if (status === "未启用") return "disabled";
+      return "warning";
+    }
+
+    function renderOverviewCard(card) {
+      const toggleAction = card.actions.find((action) => action.toggle);
+      const normalActions = card.actions.filter((action) => !action.toggle);
+      const toggleMarkup = toggleAction ? (() => {
+        const disabled = toggleAction.disabled ? "disabled" : "";
+        const title = toggleAction.label || (toggleAction.current ? "关闭提醒" : "启用提醒");
+        return `<button class="settings-toggle ${toggleAction.current ? "on" : ""}" type="button" ${disabled} aria-label="${escapeHtml(title)}" title="${escapeHtml(title)}" aria-pressed="${toggleAction.current ? "true" : "false"}" data-overview-toggle="${escapeHtml(toggleAction.toggle)}" data-overview-enabled="${toggleAction.enabled ? "true" : "false"}"></button>`;
+      })() : "";
+      return `
+        <div class="settings-card settings-status-card">
+          <div class="settings-card-top">
+            <div class="settings-card-title-row">
+              <h3>${escapeHtml(card.title)}</h3>
+              ${toggleMarkup}
+            </div>
+            <span class="settings-badge ${overviewBadgeClass(card.status)}">${escapeHtml(card.status)}</span>
+          </div>
+          <p>${escapeHtml(card.description)}</p>
+          <div class="settings-card-meta">
+            ${card.meta.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
+          </div>
+          <div class="settings-card-actions">
+            ${normalActions.map((action) => {
+              const disabled = action.disabled ? "disabled" : "";
+              return `<button ${action.primary ? 'class="primary"' : ""} type="button" ${disabled} ${action.tab ? `data-tab-jump="${escapeHtml(action.tab)}"` : `data-jump-settings="${escapeHtml(action.target)}"`}>${escapeHtml(action.label)}</button>`;
+            }).join("")}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderSettingsOverview() {
+      const target = $("settingsOverviewCards");
+      if (!target) return;
+      const notificationText = overviewNotificationText();
+      const daily = state.dailyDutyConfig || {};
+      const dailyLoaded = Boolean(state.dailyDutyConfig);
+      const monitored = state.monitoredPeople || [];
+      const enabledMonitored = monitored.filter((person) => person.enabled !== false);
+      const restEnabled = enabledMonitored.filter((person) => person.rest_reminder_enabled).length;
+      const custom = state.customReminders || [];
+      const enabledCustom = custom.filter((reminder) => reminder.enabled !== false);
+      const patrol = state.patrolWarningConfig || {};
+      const patrolConfigured = Boolean(patrol.login_url || patrol.warning_url || patrol.username || patrol.project_id || patrol.route_code);
+      const feature = state.featureChannelConfig || {};
+      const featureRooms = state.featureChannelRooms || [];
+      const featureEnabled = feature.enabled !== false && feature.configured;
+      const dailyEnabled = dailyLoaded && daily.enabled !== false;
+      const monitorConfigured = monitored.length > 0;
+      const monitorEnabled = enabledMonitored.length > 0;
+      const customConfigured = custom.length > 0;
+      const customEnabled = enabledCustom.length > 0;
+      const cards = [
+        {
+          title: "今日在岗提醒",
+          status: dailyLoaded ? (dailyEnabled ? "已启用" : "未启用") : "读取中",
+          description: "按排班生成今日在岗图片并主动发送。",
+          meta: [
+            `发送时间：${daily.reminder_time || "07:50"}`,
+            `通知通道：${notificationText}`,
+            `驾驶员名单：大车 ${(daily.big_driver_names || []).length} 人，小车 ${(daily.small_driver_names || []).length} 人`,
+          ],
+          actions: [
+            { label: "去配置", target: "driverSettings", primary: true },
+            { label: dailyEnabled ? "关闭提醒" : "启用提醒", toggle: "dailyDuty", current: dailyEnabled, enabled: !dailyEnabled, disabled: !dailyLoaded },
+            { label: "提醒预览", target: "previewSettings" },
+          ],
+        },
+        {
+          title: "监控班提醒",
+          status: monitorEnabled ? "已启用" : (monitorConfigured ? "未启用" : "未配置"),
+          description: "按人员班次发送上班前提醒，可附加休息提醒。",
+          meta: [
+            `启用人员：${enabledMonitored.length} 人`,
+            `休息提醒：${restEnabled ? `${restEnabled} 人已启用` : "未启用"}`,
+            `通知通道：${notificationText}`,
+          ],
+          actions: [
+            { label: "去配置", target: "monitorSettings", primary: true },
+            { label: monitorEnabled ? "关闭提醒" : "启用提醒", toggle: "monitor", current: monitorEnabled, enabled: !monitorEnabled, disabled: !monitorConfigured },
+            { label: "人员名单", target: "personnelSettings" },
+          ],
+        },
+        {
+          title: "自定义提醒",
+          status: customEnabled ? "已启用" : (customConfigured ? "未启用" : "未配置"),
+          description: "按固定班次和时间发送补充提醒。",
+          meta: [
+            `启用提醒：${enabledCustom.length} 条`,
+            `总提醒数：${custom.length} 条`,
+            `通知通道：${notificationText}`,
+          ],
+          actions: [
+            { label: "去配置", target: "customReminderSettings", primary: true },
+            { label: customEnabled ? "关闭提醒" : "启用提醒", toggle: "custom", current: customEnabled, enabled: !customEnabled, disabled: !customConfigured },
+          ],
+        },
+        {
+          title: "公路巡查预警",
+          status: patrol.enabled ? "已启用" : (patrolConfigured ? "未启用" : "未配置"),
+          description: "轮询预警平台并发送巡查预警通知。",
+          meta: [
+            `路线：${patrol.route_code || "未填写"}`,
+            `轮询：${patrol.poll_interval_minutes || 10} 分钟`,
+            `发送模式：${patrol.send_content_mode === "image" ? "仅图片" : (patrol.send_content_mode === "text" ? "仅文字" : "文字和图片")}`,
+          ],
+          actions: [
+            { label: "去配置", target: "patrolWarningSettings", primary: true },
+            { label: patrol.enabled ? "关闭提醒" : "启用提醒", toggle: "patrol", current: Boolean(patrol.enabled), enabled: !patrol.enabled, disabled: !patrolConfigured },
+            { label: "发送记录", tab: "records" },
+          ],
+        },
+        {
+          title: "微信群交互配置",
+          status: featureEnabled ? "已启用" : (feature.enabled === false ? "未启用" : "未配置"),
+          description: "处理微信主动查询、隧道机电和排班导入。",
+          meta: [
+            `功能群：${featureRooms.length} 个`,
+            `隧道机电：${feature.allow_tunnel_mechanical === false ? "未启用" : "已启用"}`,
+            `值班查询：${feature.allow_duty_query === false ? "未启用" : "已启用"}`,
+          ],
+          actions: [
+            { label: "去配置", target: "featureChannelSettings", primary: true },
+            { label: featureEnabled ? "关闭功能" : "启用功能", toggle: "feature", current: featureEnabled, enabled: !featureEnabled, disabled: !feature.configured },
+            { label: "隧道机电", tab: "tunnelMechanical" },
+          ],
+        },
+      ];
+      target.innerHTML = cards.map(renderOverviewCard).join("");
+      target.querySelectorAll("[data-jump-settings]").forEach((button) => {
+        button.addEventListener("click", () => switchSettingsPanel(button.dataset.jumpSettings));
+      });
+      target.querySelectorAll("[data-tab-jump]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const tabButton = document.querySelector(`.tab-button[data-tab="${CSS.escape(button.dataset.tabJump)}"]`);
+          if (tabButton) tabButton.click();
+        });
+      });
+      target.querySelectorAll("[data-overview-toggle]").forEach((button) => {
+        button.addEventListener("click", () => toggleOverviewReminder(button.dataset.overviewToggle, button.dataset.overviewEnabled === "true", button));
+      });
+    }
+
+    function monitoredPersonPayloadFromRecord(person, enabled) {
+      return {
+        original_name: person.name || "",
+        name: person.name || "",
+        mention_mobile: person.mention_mobile || "",
+        wechat_group_room_id: person.wechat_group_room_id || "",
+        wechat_group_room_name: person.wechat_group_room_name || "",
+        wechat_group_member_id: person.wechat_group_member_id || "",
+        wechat_group_runtime_sender_id: person.wechat_group_runtime_sender_id || "",
+        wechat_group_member_name: person.wechat_group_member_name || "",
+        daily_time: person.daily_time || "07:50",
+        before_shift_minutes: Number(person.before_shift_minutes || 10),
+        rest_reminder_enabled: Boolean(person.rest_reminder_enabled),
+        rest_reminder_time: person.rest_reminder_time || "08:30",
+        rest_message_template: person.rest_message_template || "{name} {rest_status}",
+        enabled,
+      };
+    }
+
+    function customReminderPayloadFromRecord(reminder, enabled) {
+      return {
+        id: reminder.id,
+        name: reminder.name || "",
+        mention_mobile: reminder.mention_mobile || "",
+        shift_code: reminder.shift_code || "early",
+        reminder_time: reminder.reminder_time || "21:00",
+        message: reminder.message || "",
+        enabled,
+      };
+    }
+
+    async function toggleOverviewReminder(kind, enabled, button) {
+      button.disabled = true;
+      try {
+        if (kind === "dailyDuty") {
+          $("dailyDutyEnabled").checked = enabled;
+          await saveDailyDutyConfig();
+        } else if (kind === "patrol") {
+          $("patrolWarningEnabled").checked = enabled;
+          await savePatrolWarningConfig(false);
+        } else if (kind === "monitor") {
+          const people = state.monitoredPeople || [];
+          for (const person of people) {
+            await fetch("/api/people", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(monitoredPersonPayloadFromRecord(person, enabled)),
+            });
+          }
+          await loadPeople();
+        } else if (kind === "custom") {
+          const reminders = state.customReminders || [];
+          for (const reminder of reminders) {
+            await fetch("/api/custom-reminders", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(customReminderPayloadFromRecord(reminder, enabled)),
+            });
+          }
+          await loadCustomReminders();
+        } else if (kind === "feature") {
+          $("featureChannelEnabled").checked = enabled;
+          await saveFeatureChannelConfig(false);
+        }
+        renderSettingsOverview();
+      } catch (error) {
+        alert(`切换失败：${error.message || error}`);
+        renderSettingsOverview();
+      } finally {
+        button.disabled = false;
+      }
+    }
+    renderSettingsOverview();
 
     $("sourceImage").addEventListener("load", updateImageScale);
 
@@ -2832,6 +3585,7 @@
       updateMonitorNotificationFields();
       $("dailyTime").value = "07:50";
       $("beforeMinutes").value = "10";
+      $("monitorPersonEnabled").checked = true;
       $("restReminderEnabled").checked = false;
       $("restReminderTime").value = "08:30";
       $("restMessageTemplate").value = "{name} {rest_status}";
@@ -2850,6 +3604,7 @@
       updateMonitorNotificationFields();
       $("dailyTime").value = person.daily_time || "07:50";
       $("beforeMinutes").value = String(person.before_shift_minutes || 10);
+      $("monitorPersonEnabled").checked = person.enabled !== false;
       $("restReminderEnabled").checked = Boolean(person.rest_reminder_enabled);
       $("restReminderTime").value = person.rest_reminder_time || "08:30";
       $("restMessageTemplate").value = person.rest_message_template || "{name} {rest_status}";
@@ -2871,7 +3626,7 @@
         rest_reminder_enabled: $("restReminderEnabled").checked,
         rest_reminder_time: $("restReminderTime").value || "08:30",
         rest_message_template: $("restMessageTemplate").value.trim(),
-        enabled: true
+        enabled: $("monitorPersonEnabled").checked
       };
       if (!payload.name) return;
       await saveNotificationConfig(false);
@@ -2891,6 +3646,7 @@
       renderMonitoredPeopleList();
       renderPersonnelNameOptions();
       renderMonitorWechatMemberOptions();
+      renderSettingsOverview();
     }
 
     function monitorNotificationText(person) {
@@ -2905,7 +3661,7 @@
       $("peopleList").innerHTML = state.monitoredPeople.map((person) => `
         <div class="item">
           <strong>${escapeHtml(person.name)}</strong>
-          <small>${monitorNotificationText(person)} · 每日提醒时间 ${escapeHtml(person.daily_time)} · 班次提前提醒 ${person.before_shift_minutes} 分钟 · 休息提醒 ${person.rest_reminder_enabled ? escapeHtml(person.rest_reminder_time) : "未启用"}</small>
+          <small>${person.enabled === false ? "已停用" : "已启用"} · ${monitorNotificationText(person)} · 每日提醒时间 ${escapeHtml(person.daily_time)} · 班次提前提醒 ${person.before_shift_minutes} 分钟 · 休息提醒 ${person.rest_reminder_enabled ? escapeHtml(person.rest_reminder_time) : "未启用"}</small>
           ${person.rest_reminder_enabled ? `<small>休息文案 ${escapeHtml(person.rest_message_template || "{name} {rest_status}")}</small>` : ""}
           <div class="settings-actions">
             <button type="button" data-edit-person="${escapeHtml(person.name)}">编辑</button>
@@ -2975,6 +3731,7 @@
           </div>
         </div>
       `).join("") || `<div class="item"><small>暂无自定义提醒</small></div>`;
+      renderSettingsOverview();
     }
 
     $("saveCustomReminderBtn").addEventListener("click", async () => {
@@ -3355,12 +4112,26 @@
     function renderLightAgentRooms() {
       const select = $("lightAgentRoomSelect");
       const featureSelect = $("featureChannelRoomSelect");
+      const notificationSelect = $("notificationTargetRoomSelect");
       if (!select) {
         if (featureSelect) renderFeatureChannelRooms();
+        if (notificationSelect) renderNotificationTargetRooms();
         return;
       }
       const current = $("lightAgentTarget").value.trim();
       select.innerHTML = `<option value="">请选择微信群</option>` + (state.lightAgentRooms || []).map((room) => {
+        const id = String(room.id || room.stable_room_id || room.runtime_room_id || "").trim();
+        const name = String(room.name || id).trim();
+        return `<option value="${escapeHtml(id)}" data-room-name="${escapeHtml(name)}" ${id && id === current ? "selected" : ""}>${escapeHtml(name)} · ${escapeHtml(id)}</option>`;
+      }).join("");
+      renderNotificationTargetRooms();
+    }
+
+    function renderNotificationTargetRooms() {
+      const select = $("notificationTargetRoomSelect");
+      if (!select) return;
+      const current = $("notificationTargetRoomId").value.trim();
+      select.innerHTML = `<option value="">请选择通知微信群</option>` + (state.lightAgentRooms || []).map((room) => {
         const id = String(room.id || room.stable_room_id || room.runtime_room_id || "").trim();
         const name = String(room.name || id).trim();
         return `<option value="${escapeHtml(id)}" data-room-name="${escapeHtml(name)}" ${id && id === current ? "selected" : ""}>${escapeHtml(name)} · ${escapeHtml(id)}</option>`;
@@ -3371,7 +4142,7 @@
       const select = $("featureChannelRoomSelect");
       if (!select) return;
       const current = $("featureChannelRoomId").value.trim();
-      select.innerHTML = `<option value="">请选择功能微信群</option>` + (state.lightAgentRooms || []).map((room) => {
+      select.innerHTML = `<option value="">请选择交互功能微信群</option>` + (state.lightAgentRooms || []).map((room) => {
         const id = String(room.id || room.stable_room_id || room.runtime_room_id || "").trim();
         const name = String(room.name || id).trim();
         return `<option value="${escapeHtml(id)}" data-room-name="${escapeHtml(name)}" ${id && id === current ? "selected" : ""}>${escapeHtml(name)} · ${escapeHtml(id)}</option>`;
@@ -3405,7 +4176,7 @@
           <small>${escapeHtml(room.id)}</small>
           <button type="button" data-remove-feature-room="${escapeHtml(room.id)}">移除</button>
         </div>`;
-      }).join("") || `<div class="item"><small>还没有添加功能微信群</small></div>`;
+      }).join("") || `<div class="item"><small>还没有添加交互功能微信群</small></div>`;
       box.querySelectorAll("[data-remove-feature-room]").forEach((button) => {
         button.addEventListener("click", () => {
           const id = String(button.dataset.removeFeatureRoom || "").trim();
@@ -3413,6 +4184,45 @@
           renderFeatureChannelRoomList();
         });
       });
+    }
+
+    function renderNotificationTargetRoomList() {
+      const box = $("notificationTargetRoomList");
+      if (!box) return;
+      const rooms = normalizeFeatureChannelRooms(state.notificationTargetRooms || []);
+      state.notificationTargetRooms = rooms;
+      const firstRoom = rooms[0] || {};
+      $("lightAgentTarget").value = firstRoom.id || "";
+      box.innerHTML = rooms.map((room) => {
+        const label = room.name || room.id;
+        return `<div class="item">
+          <strong>${escapeHtml(label)}</strong>
+          <small>${escapeHtml(room.id)}</small>
+          <button type="button" data-remove-notification-room="${escapeHtml(room.id)}">移除</button>
+        </div>`;
+      }).join("") || `<div class="item"><small>还没有添加通知微信群</small></div>`;
+      box.querySelectorAll("[data-remove-notification-room]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const id = String(button.dataset.removeNotificationRoom || "").trim();
+          state.notificationTargetRooms = normalizeFeatureChannelRooms(state.notificationTargetRooms || []).filter((room) => room.id !== id);
+          renderNotificationTargetRoomList();
+        });
+      });
+    }
+
+    function addNotificationTargetRoomFromInputs() {
+      const option = $("notificationTargetRoomSelect").selectedOptions[0];
+      const id = $("notificationTargetRoomId").value.trim() || (option ? String(option.value || "").trim() : "");
+      const name = $("notificationTargetRoomName").value.trim() || (option ? String(option.dataset.roomName || "").trim() : "");
+      if (!id) {
+        $("notificationStatus").textContent = "请先选择或输入通知群 ID";
+        $("notificationStatus").className = "status error";
+        return;
+      }
+      state.notificationTargetRooms = normalizeFeatureChannelRooms([...(state.notificationTargetRooms || []), { id, name }]);
+      renderNotificationTargetRoomList();
+      $("notificationStatus").textContent = `已添加通知群：${name || id}`;
+      $("notificationStatus").className = "status ok";
     }
 
     function addFeatureChannelRoomFromInputs() {
@@ -3444,8 +4254,8 @@
           const label = wechatMemberLabel(member);
           const title = label || "昵称未识别";
           const note = label ? `ID：${id}` : `LightAgent 当前只返回了成员 ID：${id}`;
-          return `<div class="item"><strong>${escapeHtml(title)}</strong><small>${escapeHtml(note)}</small></div>`;
-        }).join("") || `<div class="item"><small>登录微信并同步成员后显示群成员</small></div>`;
+          return `<div class="wechat-member-card"><strong>${escapeHtml(title)}</strong><small>${escapeHtml(note)}</small></div>`;
+        }).join("") || `<div class="wechat-member-card"><small>登录微信并同步成员后显示群成员</small></div>`;
       }
       renderWechatBindingList();
       renderMonitorWechatMemberOptions();
@@ -3467,12 +4277,12 @@
           return `<option value="${escapeHtml(id)}" data-stable-member-id="${escapeHtml(stableId)}" data-member-name="${escapeHtml(label)}" ${id && id === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
         }).join("");
         const savedText = saved.wechat_group_member_name ? `当前：${escapeHtml(saved.wechat_group_member_name)}` : "当前未绑定";
-        return `<div class="item">
+        return `<div class="wechat-binding-card">
           <strong>${escapeHtml(name)}</strong>
           <small>${savedText}</small>
           <select data-wechat-binding-name="${escapeHtml(name)}">${options}</select>
         </div>`;
-      }).join("") || `<div class="item"><small>先在人员名单或监控班提醒里添加姓名</small></div>`;
+      }).join("") || `<div class="wechat-binding-card"><small>先在人员名单或监控班提醒里添加姓名</small></div>`;
     }
 
     function lightAgentWechatConnected(body) {
@@ -3638,11 +4448,13 @@
       const response = await fetch("/api/daily-duty-config");
       const body = await response.json();
       const config = body.config || {};
+      state.dailyDutyConfig = config;
       $("dailyDutyEnabled").checked = config.enabled !== false;
       $("dailyDutyTime").value = config.reminder_time || "07:50";
       setNameListValue("bigDriverNames", config.big_driver_names || []);
       setNameListValue("smallDriverNames", config.small_driver_names || []);
       $("dailyDutyTemplate").value = config.message_template || "";
+      renderSettingsOverview();
     }
 
     async function saveDailyDutyConfig() {
@@ -3660,6 +4472,16 @@
       const body = await response.json();
       $("dailyDutyStatus").textContent = body.success ? "已保存驾驶员监测配置" : "保存失败";
       $("dailyDutyStatus").className = `status ${body.success ? "ok" : "error"}`;
+      if (body.success) {
+        state.dailyDutyConfig = body.config || {
+          enabled: $("dailyDutyEnabled").checked,
+          reminder_time: $("dailyDutyTime").value || "07:50",
+          big_driver_names: parseNameList($("bigDriverNames").value),
+          small_driver_names: parseNameList($("smallDriverNames").value),
+          message_template: $("dailyDutyTemplate").value.trim(),
+        };
+        renderSettingsOverview();
+      }
       return body.success;
     }
 
@@ -3674,13 +4496,15 @@
       const targetDate = String(preview.send_at || "").slice(0, 10);
       const imageUrl = dailyDutyImageUrl(targetDate);
       const filename = `今日在岗人员-${targetDate}.png`;
-      $("dailyDutyPreview").innerHTML = `
+      const previewBox = $("dailyDutyPreview");
+      previewBox.classList.remove("hidden");
+      previewBox.innerHTML = `
         <div class="daily-duty-visual">
-          <strong>${escapeHtml(formatIsoMinute(preview.send_at))}</strong>
-          <img alt="今日在岗人员表格" src="${imageUrl}" />
-          <div class="settings-actions">
+          <div class="daily-duty-preview-head">
+            <strong>${escapeHtml(formatIsoMinute(preview.send_at))}</strong>
             <a class="download-link" href="${imageUrl}" download="${escapeHtml(filename)}">下载表格图片</a>
           </div>
+          <img alt="今日在岗人员表格" src="${imageUrl}" />
           <small>发送文案</small>
           <div>${escapeHtml(preview.content || "").replace(/\n/g, "<br>")}</div>
         </div>
@@ -3780,19 +4604,71 @@
       }
     }
 
-    $("previewDailyDutyBtn").addEventListener("click", async () => {
+    function dailyDutySelectedDate() {
+      return $("dailyDutyPreviewDate").value || beijingDateInputValue();
+    }
+
+    function openDailyDutyPreviewDateModal() {
+      $("dailyDutyPreviewDateStatus").textContent = "";
+      $("dailyDutyPreviewDateStatus").className = "status";
+      $("dailyDutyPreviewDateInput").value = dailyDutySelectedDate();
+      $("dailyDutyPreviewDateModal").hidden = false;
+      setTimeout(() => $("dailyDutyPreviewDateInput").focus(), 0);
+    }
+
+    function closeDailyDutyPreviewDateModal() {
+      $("dailyDutyPreviewDateModal").hidden = true;
+      $("dailyDutyPreviewDateStatus").textContent = "";
+      $("dailyDutyPreviewDateStatus").className = "status";
+    }
+
+    async function previewDailyDutyForDate(targetDate) {
       await saveDailyDutyConfig();
       const response = await fetch("/api/daily-duty-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target_date: $("dailyDutyPreviewDate").value || null })
+        body: JSON.stringify({ target_date: targetDate || null })
       });
       const body = await response.json();
+      if (!response.ok) throw new Error(body.detail || "预览失败");
       renderDailyDutyPreview(body);
+      $("dailyDutyStatus").textContent = "今日在岗预览已生成";
+      $("dailyDutyStatus").className = "status ok";
+    }
+
+    async function confirmDailyDutyPreviewDate() {
+      const selectedDate = $("dailyDutyPreviewDateInput").value;
+      if (!selectedDate) {
+        $("dailyDutyPreviewDateStatus").textContent = "请选择预览日期";
+        $("dailyDutyPreviewDateStatus").className = "status error";
+        $("dailyDutyPreviewDateInput").focus();
+        return;
+      }
+      $("dailyDutyPreviewDate").value = selectedDate;
+      closeDailyDutyPreviewDateModal();
+      try {
+        await previewDailyDutyForDate(selectedDate);
+      } catch (error) {
+        $("dailyDutyStatus").textContent = `预览失败：${error.message || error}`;
+        $("dailyDutyStatus").className = "status error";
+      }
+    }
+
+    $("previewDailyDutyBtn").addEventListener("click", openDailyDutyPreviewDateModal);
+    $("dailyDutyPreviewDateConfirmBtn").addEventListener("click", confirmDailyDutyPreviewDate);
+    $("dailyDutyPreviewDateCancelBtn").addEventListener("click", closeDailyDutyPreviewDateModal);
+    $("dailyDutyPreviewDateCloseBtn").addEventListener("click", closeDailyDutyPreviewDateModal);
+    $("dailyDutyPreviewDateModal").addEventListener("click", (event) => {
+      if (event.target === $("dailyDutyPreviewDateModal")) closeDailyDutyPreviewDateModal();
+    });
+    $("dailyDutyPreviewDateInput").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") confirmDailyDutyPreviewDate();
+      if (event.key === "Escape") closeDailyDutyPreviewDateModal();
     });
 
     async function saveNotificationConfig(showStatus = true) {
       if (showStatus) $("notificationStatus").textContent = "正在保存...";
+      const notificationTargets = normalizeFeatureChannelRooms(state.notificationTargetRooms || []);
       const response = await fetch("/api/notification-config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -3801,11 +4677,13 @@
           webhook_url: $("webhookUrl").value.trim(),
           lightagent_url: $("lightAgentUrl").value.trim(),
           lightagent_token: $("lightAgentToken").value.trim(),
-          lightagent_target: $("lightAgentTarget").value.trim(),
+          lightagent_target: notificationTargets.length ? notificationTargets[0].id : "",
+          lightagent_targets: notificationTargets,
           message_template: $("messageTemplate").value.trim()
         })
       });
       const body = await response.json();
+      state.notificationConfig = body.config || {};
       if (showStatus) {
         const sync = body.lightagent_sync || {};
         const syncFailed = body.success && sync.success === false;
@@ -3814,21 +4692,36 @@
           : (body.success ? "已保存通知配置" : "保存失败");
         $("notificationStatus").className = `status ${body.success && !syncFailed ? "ok" : "error"}`;
       }
+      renderSettingsOverview();
       return body.success;
     }
 
     function updateNotificationBackendFields() {
       const isLightAgent = $("notificationSenderType").value === "lightagent";
+      document.querySelectorAll("[data-notification-sender]").forEach((button) => {
+        const active = button.dataset.notificationSender === $("notificationSenderType").value;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+      });
       $("wecomNotificationFields").classList.toggle("hidden", isLightAgent);
+      $("wecomTestMobileFields").classList.toggle("hidden", isLightAgent);
       $("lightAgentNotificationFields").classList.toggle("hidden", !isLightAgent);
       updateMonitorNotificationFields();
     }
 
-    $("notificationSenderType").addEventListener("change", updateNotificationBackendFields);
-    $("saveNotificationBtn").addEventListener("click", () => saveNotificationConfig(true));
+    function setNotificationSenderType(value) {
+      $("notificationSenderType").value = value === "lightagent" ? "lightagent" : "wecom_webhook";
+      updateNotificationBackendFields();
+    }
 
-    $("testNotificationBtn").addEventListener("click", async () => {
-      const button = $("testNotificationBtn");
+    document.querySelectorAll("[data-notification-sender]").forEach((button) => {
+      button.addEventListener("click", () => setNotificationSenderType(button.dataset.notificationSender));
+    });
+    document.querySelectorAll("[data-save-notification]").forEach((button) => {
+      button.addEventListener("click", () => saveNotificationConfig(true));
+    });
+
+    async function testNotification(button) {
       button.disabled = true;
       $("notificationStatus").textContent = "正在发送测试消息...";
       $("notificationStatus").className = "status";
@@ -3853,6 +4746,10 @@
       } finally {
         button.disabled = false;
       }
+    }
+
+    document.querySelectorAll("[data-test-notification]").forEach((button) => {
+      button.addEventListener("click", () => testNotification(button));
     });
 
     $("testDailyDutyBtn").addEventListener("click", async () => {
@@ -3867,7 +4764,7 @@
         const response = await fetch("/api/daily-duty-config/test", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ target_date: $("dailyDutyPreviewDate").value || null })
+          body: JSON.stringify({ target_date: dailyDutySelectedDate() || null })
         });
         const text = await response.text();
         const body = text ? JSON.parse(text) : {};
@@ -3887,6 +4784,7 @@
     async function loadNotificationConfig() {
       const response = await fetch("/api/notification-config");
       const body = await response.json();
+      state.notificationConfig = body.config || {};
       $("notificationSenderType").value = body.config && body.config.sender_type ? body.config.sender_type : "wecom_webhook";
       $("webhookUrl").value = "";
       $("webhookUrl").placeholder = body.config && body.config.webhook_configured ? "已配置，如需修改请输入新地址" : "未配置，保存时请输入机器人地址";
@@ -3895,6 +4793,12 @@
       $("lightAgentToken").value = "";
       $("lightAgentToken").placeholder = body.config && body.config.lightagent_token_configured ? "已配置，如需修改请输入新 token" : "可选";
       $("lightAgentTarget").value = body.config ? body.config.lightagent_target || "" : "";
+      state.notificationTargetRooms = normalizeFeatureChannelRooms(
+        body.config && body.config.lightagent_targets && body.config.lightagent_targets.length
+          ? body.config.lightagent_targets
+          : (body.config && body.config.lightagent_target ? [{ id: body.config.lightagent_target, name: "" }] : [])
+      );
+      renderNotificationTargetRoomList();
       $("messageTemplate").value = body.config ? body.config.message_template || "" : "";
       updateNotificationBackendFields();
       if ($("notificationSenderType").value === "lightagent") {
@@ -3902,6 +4806,7 @@
           if ($("lightAgentTarget").value.trim()) return loadLightAgentMembers();
         }).catch(() => null);
       }
+      renderSettingsOverview();
     }
 
     function featureChannelPayload() {
@@ -3965,6 +4870,7 @@
         $("featureChannelRoomName").value = String(selected.dataset.roomName || "").trim();
       }
       renderFeatureChannelRoomList();
+      renderSettingsOverview();
     }
 
     async function loadFeatureChannelConfig() {
@@ -3973,6 +4879,7 @@
       if (!response.ok) throw new Error(body.detail || "读取功能通道失败");
       state.featureChannelConfig = body.config || {};
       renderFeatureChannelConfig(state.featureChannelConfig);
+      renderSettingsOverview();
     }
 
     $("featureChannelRoomSelect").addEventListener("change", () => {
@@ -3981,6 +4888,12 @@
       $("featureChannelRoomName").value = option ? String(option.dataset.roomName || "").trim() : "";
     });
     $("addFeatureChannelRoomBtn").addEventListener("click", addFeatureChannelRoomFromInputs);
+    $("notificationTargetRoomSelect").addEventListener("change", () => {
+      const option = $("notificationTargetRoomSelect").selectedOptions[0];
+      $("notificationTargetRoomId").value = option ? String(option.value || "").trim() : "";
+      $("notificationTargetRoomName").value = option ? String(option.dataset.roomName || "").trim() : "";
+    });
+    $("addNotificationTargetRoomBtn").addEventListener("click", addNotificationTargetRoomFromInputs);
     $("refreshFeatureWechatRoomsBtn").addEventListener("click", async () => {
       try {
         await saveFeatureChannelConfig(false);
@@ -4219,6 +5132,7 @@
         const body = await response.json();
         state.patrolWarningConfig = body.config || state.patrolWarningConfig;
         renderPatrolWarningLatest(body.state && body.state.warning, null, body.state);
+        renderSettingsOverview();
       } catch (error) {
         // 后台状态刷新失败时保留当前面板，避免打断正在编辑的配置。
       } finally {
@@ -4249,6 +5163,7 @@
       $("patrolStartTemplate").value = config.start_message_template || "";
       $("patrolEndTemplate").value = config.end_message_template || "";
       renderPatrolWarningLatest(body.state && body.state.warning, null, body.state);
+      renderSettingsOverview();
     }
 
     async function savePatrolWarningConfig(showStatus = true) {
@@ -4271,6 +5186,7 @@
         $("patrolPassword").value = "";
         if (body.config && body.config.password_configured) $("patrolPassword").placeholder = "已配置，如需修改请输入新密码";
         renderPatrolWarningLatest(body.state && body.state.warning, null, body.state);
+        renderSettingsOverview();
       }
       return response.ok && body.success;
     }
@@ -4966,14 +5882,12 @@
     }
 
     async function queryTunnelMechanicalResultImage(queryDate) {
-      applyTunnelMechanicalBatchDefaults();
-      const payload = tunnelMechanicalPayload(false);
-      payload.checkTime = queryDate || beijingDateInputValue();
-      const selectedCount = payload.rows.filter((row) => row.enabled).length;
-      if (!selectedCount) {
-        setTunnelMechanicalStatus("请至少选择一条隧道记录", "error");
-        return;
-      }
+      const payload = {
+        base_url: $("tunnelMechanicalBaseUrl").value.trim(),
+        authorization: $("tunnelMechanicalAuthorization").value.trim(),
+        cookie: $("tunnelMechanicalCookie").value.trim(),
+        checkTime: queryDate || beijingDateInputValue(),
+      };
       setTunnelMechanicalStatus(`正在查询 ${payload.checkTime} 的录入结果并生成图片...`);
       try {
         const response = await fetch("/api/tunnel-mechanical/result-image", {

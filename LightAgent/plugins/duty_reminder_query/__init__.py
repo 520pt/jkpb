@@ -12,6 +12,18 @@ from common.log import logger
 from plugins import Event, EventAction, EventContext, Plugin
 
 
+def _duty_reminder_base_url() -> str:
+    return os.environ.get("DUTY_REMINDER_BASE_URL", "http://duty-reminder:8080").strip().rstrip("/")
+
+
+def _duty_reminder_url(env_name: str, path: str) -> str:
+    configured = os.environ.get(env_name, "").strip()
+    if configured:
+        return configured
+    base_url = _duty_reminder_base_url()
+    return f"{base_url}{path}" if base_url else ""
+
+
 @plugins.register(
     name="DutyReminderQuery",
     desire_priority=950,
@@ -46,15 +58,9 @@ class DutyReminderQuery(Plugin):
 
     def __init__(self):
         super().__init__()
-        self.endpoint = os.environ.get("DUTY_REMINDER_QUERY_URL", "http://duty-reminder:8080/api/wechat-query").strip()
-        self.roster_import_endpoint = os.environ.get(
-            "DUTY_REMINDER_ROSTER_IMPORT_URL",
-            "http://duty-reminder:8080/api/wechat-roster/import",
-        ).strip()
-        self.roster_confirm_endpoint = os.environ.get(
-            "DUTY_REMINDER_ROSTER_CONFIRM_URL",
-            "http://duty-reminder:8080/api/wechat-roster/confirm",
-        ).strip()
+        self.endpoint = _duty_reminder_url("DUTY_REMINDER_QUERY_URL", "/api/wechat-query")
+        self.roster_import_endpoint = _duty_reminder_url("DUTY_REMINDER_ROSTER_IMPORT_URL", "/api/wechat-roster/import")
+        self.roster_confirm_endpoint = _duty_reminder_url("DUTY_REMINDER_ROSTER_CONFIRM_URL", "/api/wechat-roster/confirm")
         self.token = os.environ.get("DUTY_REMINDER_QUERY_TOKEN", "520pt").strip()
         self.timeout = float(os.environ.get("DUTY_REMINDER_QUERY_TIMEOUT", "30") or 30)
         self.menu_ttl = int(os.environ.get("DUTY_REMINDER_QUERY_MENU_TTL", "180") or 180)
@@ -196,7 +202,7 @@ class DutyReminderQuery(Plugin):
 
     def _import_roster_image(self, session_key: str, image_path: str, context=None) -> str:
         if not self.roster_import_endpoint:
-            return "排班表导入未配置：缺少 DUTY_REMINDER_ROSTER_IMPORT_URL"
+            return "排班表导入未配置：缺少 DUTY_REMINDER_BASE_URL"
         if not image_path or not os.path.exists(image_path):
             return "没有拿到排班表图片文件，请重新发送图片。"
         headers = {}
@@ -263,7 +269,7 @@ class DutyReminderQuery(Plugin):
 
     def _query_duty_reminder(self, context, msg, text: str) -> str:
         if not self.endpoint:
-            return "监控查询未配置：缺少 DUTY_REMINDER_QUERY_URL"
+            return "监控查询未配置：缺少 DUTY_REMINDER_BASE_URL"
         payload = {
             "text": text,
             "room_id": str(context.get("wechat_group_runtime_room_id") or getattr(msg, "runtime_room_id", "") or getattr(msg, "other_user_id", "") or ""),

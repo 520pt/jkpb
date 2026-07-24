@@ -113,12 +113,18 @@ class MonitoredPersonRequest(BaseModel):
         return text
 
 
+class LightAgentTargetRequest(BaseModel):
+    id: str = ""
+    name: str = ""
+
+
 class NotificationConfigRequest(BaseModel):
     sender_type: str = ""
     webhook_url: str = ""
     lightagent_url: str = ""
     lightagent_token: str = ""
     lightagent_target: str = ""
+    lightagent_targets: list[LightAgentTargetRequest] = Field(default_factory=list)
     message_template: str = DEFAULT_MESSAGE_TEMPLATE
 
 
@@ -267,6 +273,13 @@ class TunnelMechanicalSubmitRequest(BaseModel):
     recorder: str
     rows: list[TunnelMechanicalAssetRequest]
     dry_run: bool = False
+
+
+class TunnelMechanicalResultImageRequest(BaseModel):
+    base_url: str = ""
+    authorization: str = ""
+    cookie: str = ""
+    checkTime: date
 
 
 class TunnelMechanicalConfigRequest(BaseModel):
@@ -769,7 +782,7 @@ def create_app(
         return await _submit_tunnel_mechanical(repo, request, result_upload_dir=uploads)
 
     @app.post("/api/tunnel-mechanical/result-image")
-    async def tunnel_mechanical_result_image(request: TunnelMechanicalSubmitRequest):
+    async def tunnel_mechanical_result_image(request: TunnelMechanicalResultImageRequest):
         return await _query_tunnel_mechanical_result_image(repo, request, uploads)
 
     @app.get("/api/notification-config")
@@ -783,16 +796,28 @@ def create_app(
         webhook_url = request.webhook_url.strip() or str(existing.get("webhook_url", "")).strip()
         lightagent_url = request.lightagent_url.strip() or str(existing.get("lightagent_url", "")).strip()
         lightagent_token = request.lightagent_token.strip() or str(existing.get("lightagent_token", "")).strip()
-        lightagent_target = request.lightagent_target.strip() or str(existing.get("lightagent_target", "")).strip()
+        request_targets = _normalize_feature_channel_rooms(
+            [
+                {"id": room.id, "name": room.name}
+                for room in request.lightagent_targets
+            ]
+        )
+        if request.lightagent_target.strip():
+            request_targets = _normalize_feature_channel_rooms(
+                request_targets + [{"id": request.lightagent_target.strip()}]
+            )
+        lightagent_targets = request_targets
+        lightagent_target = lightagent_targets[0]["id"] if lightagent_targets else ""
         repo.save_notification_config(
             sender_type=sender_type,
             webhook_url=webhook_url,
             lightagent_url=lightagent_url,
             lightagent_token=lightagent_token,
             lightagent_target=lightagent_target,
+            lightagent_targets=lightagent_targets,
             message_template=request.message_template.strip() or DEFAULT_MESSAGE_TEMPLATE,
         )
-        lightagent_sync = _sync_lightagent_notification_target(repo, sender_type, lightagent_target)
+        lightagent_sync = _sync_lightagent_notification_targets(repo, sender_type, lightagent_targets)
         return {
             "success": True,
             "config": _public_notification_config(repo.get_notification_config()),
@@ -1203,22 +1228,40 @@ def _normalize_notification_sender_type(value: str) -> str:
     return normalized if normalized in {"wecom_webhook", "lightagent"} else "wecom_webhook"
 
 
-def _env_notification_config_defaults() -> dict[str, str]:
+def _env_notification_config_defaults() -> dict[str, Any]:
+    lightagent_base_url = os.getenv("LIGHTAGENT_BASE_URL", "").strip().rstrip("/")
+    lightagent_push_url = f"{lightagent_base_url}/api/push/send" if lightagent_base_url else ""
+    env_target_ids = _split_env_list(
+        os.getenv("LIGHTAGENT_NOTIFY_TARGETS", "").strip()
+        or os.getenv("LIGHTAGENT_TARGETS", "").strip()
+    )
+    env_target_names = _split_env_list(os.getenv("LIGHTAGENT_NOTIFY_TARGET_NAMES", ""))
+    env_targets = _normalize_feature_channel_rooms(
+        [
+            {"id": target_id, "name": env_target_names[index] if index < len(env_target_names) else ""}
+            for index, target_id in enumerate(env_target_ids)
+        ]
+    )
+    single_target = (
+        os.getenv("LIGHTAGENT_NOTIFY_TARGET", "").strip()
+        or os.getenv("LIGHTAGENT_TARGET", "").strip()
+    )
+    if single_target:
+        env_targets = _normalize_feature_channel_rooms(env_targets + [{"id": single_target}])
     return {
         "sender_type": os.getenv("NOTIFICATION_SENDER_TYPE", "").strip(),
         "webhook_url": os.getenv("WECOM_WEBHOOK_URL", "").strip(),
         "lightagent_url": (
             os.getenv("LIGHTAGENT_NOTIFY_URL", "").strip()
             or os.getenv("LIGHTAGENT_PUSH_URL", "").strip()
+            or lightagent_push_url
         ),
         "lightagent_token": (
             os.getenv("LIGHTAGENT_NOTIFY_TOKEN", "").strip()
             or os.getenv("LIGHTAGENT_PUSH_TOKEN", "").strip()
         ),
-        "lightagent_target": (
-            os.getenv("LIGHTAGENT_NOTIFY_TARGET", "").strip()
-            or os.getenv("LIGHTAGENT_TARGET", "").strip()
-        ),
+        "lightagent_target": single_target,
+        "lightagent_targets": env_targets,
     }
 
 
@@ -1226,13 +1269,17 @@ def _notification_config_with_env_defaults(config: dict[str, Any]) -> dict[str, 
     merged = dict(config)
     env_config = _env_notification_config_defaults()
     sender_type = _normalize_notification_sender_type(str(merged.get("sender_type") or "wecom_webhook"))
+    lightagent_targets = _normalize_feature_channel_rooms(merged.get("lightagent_targets"))
+    legacy_target = str(merged.get("lightagent_target", "")).strip()
+    if legacy_target:
+        lightagent_targets = _normalize_feature_channel_rooms(lightagent_targets + [{"id": legacy_target}])
     has_active_config = (
         bool(str(merged.get("webhook_url", "")).strip())
         if sender_type == "wecom_webhook"
-        else bool(str(merged.get("lightagent_url", "")).strip() and str(merged.get("lightagent_target", "")).strip())
+        else bool(str(merged.get("lightagent_url", "")).strip() and lightagent_targets)
     )
     env_sender_type = _normalize_notification_sender_type(env_config["sender_type"]) if env_config["sender_type"] else ""
-    has_env_lightagent = bool(env_config["lightagent_url"] or env_config["lightagent_target"])
+    has_env_lightagent = bool(env_config["lightagent_url"] or env_config["lightagent_targets"])
     if env_sender_type:
         sender_type = env_sender_type
         merged["sender_type"] = sender_type
@@ -1243,6 +1290,13 @@ def _notification_config_with_env_defaults(config: dict[str, Any]) -> dict[str, 
     for key in ("webhook_url", "lightagent_url", "lightagent_token", "lightagent_target"):
         if env_config[key] and (env_sender_type or not str(merged.get(key, "")).strip()):
             merged[key] = env_config[key]
+    if env_config["lightagent_targets"] and (
+        env_sender_type or not _normalize_feature_channel_rooms(merged.get("lightagent_targets"))
+    ):
+        merged["lightagent_targets"] = env_config["lightagent_targets"]
+        merged["lightagent_target"] = env_config["lightagent_targets"][0]["id"]
+    else:
+        merged["lightagent_targets"] = lightagent_targets
     return merged
 
 
@@ -1432,13 +1486,13 @@ def _lightagent_web_request(
     return data if isinstance(data, dict) else {"status": "success", "data": data}
 
 
-def _sync_lightagent_notification_target(repo: DutyRepository, sender_type: str, target: str) -> dict[str, Any]:
+def _sync_lightagent_notification_targets(repo: DutyRepository, sender_type: str, targets: list[dict[str, str]]) -> dict[str, Any]:
     if _normalize_notification_sender_type(sender_type) != "lightagent":
         return {"success": True, "skipped": True, "reason": "not_lightagent"}
-    target = str(target or "").strip()
-    if not target:
-        return {"success": True, "skipped": True, "reason": "empty_target"}
-    return _sync_lightagent_wechat_group_targets(repo, [target], source="notification")
+    room_ids = [str(room.get("id") or "").strip() for room in targets or [] if str(room.get("id") or "").strip()]
+    if not room_ids:
+        return {"success": True, "skipped": True, "reason": "empty_targets"}
+    return _sync_lightagent_wechat_group_targets(repo, room_ids, source="notification")
 
 
 def _sync_lightagent_feature_channel_rooms(
@@ -2511,20 +2565,25 @@ def _public_notification_config(config: dict[str, Any]) -> dict[str, Any]:
     config = _notification_config_with_env_defaults(config)
     webhook_url = str(config.get("webhook_url", "")).strip()
     lightagent_url = str(config.get("lightagent_url", "")).strip()
+    lightagent_targets = _normalize_feature_channel_rooms(config.get("lightagent_targets"))
     lightagent_target = str(config.get("lightagent_target", "")).strip()
+    if lightagent_target:
+        lightagent_targets = _normalize_feature_channel_rooms(lightagent_targets + [{"id": lightagent_target}])
+    lightagent_target = lightagent_targets[0]["id"] if lightagent_targets else ""
     lightagent_token = str(config.get("lightagent_token", "")).strip()
     sender_type = _normalize_notification_sender_type(str(config.get("sender_type") or "wecom_webhook"))
-    active_configured = bool(webhook_url) if sender_type == "wecom_webhook" else bool(lightagent_url and lightagent_target)
+    active_configured = bool(webhook_url) if sender_type == "wecom_webhook" else bool(lightagent_url and lightagent_targets)
     return {
         "sender_type": sender_type,
         "webhook_url": "",
         "webhook_configured": bool(webhook_url),
         "webhook_display": "已配置" if webhook_url else "未配置",
         "lightagent_url": lightagent_url,
-        "lightagent_configured": bool(lightagent_url and lightagent_target),
-        "lightagent_display": "已配置" if lightagent_url and lightagent_target else "未配置",
+        "lightagent_configured": bool(lightagent_url and lightagent_targets),
+        "lightagent_display": "已配置" if lightagent_url and lightagent_targets else "未配置",
         "lightagent_token_configured": bool(lightagent_token),
         "lightagent_target": lightagent_target,
+        "lightagent_targets": lightagent_targets,
         "notification_configured": active_configured,
         "notification_display": "已配置" if active_configured else "未配置",
         "message_template": config.get("message_template") or DEFAULT_MESSAGE_TEMPLATE,
@@ -3481,11 +3540,9 @@ async def _submit_tunnel_mechanical(
 
 async def _query_tunnel_mechanical_result_image(
     repo: DutyRepository,
-    request: TunnelMechanicalSubmitRequest,
+    request: TunnelMechanicalResultImageRequest,
     upload_dir: Path,
 ) -> dict[str, Any]:
-    if not [row for row in request.rows if row.enabled]:
-        raise HTTPException(status_code=400, detail="请至少选择一条隧道记录")
     base_url, headers, _ = await _tunnel_mechanical_request_context(repo, request)
     try:
         result = await _save_tunnel_mechanical_result_image(
@@ -3511,7 +3568,7 @@ async def _query_tunnel_mechanical_result_image(
 
 async def _tunnel_mechanical_request_context(
     repo: DutyRepository,
-    request: TunnelMechanicalSubmitRequest,
+    request: TunnelMechanicalSubmitRequest | TunnelMechanicalResultImageRequest,
     *,
     force_login: bool = False,
 ) -> tuple[str, dict[str, str], dict[str, Any]]:
@@ -3537,7 +3594,7 @@ async def _tunnel_mechanical_request_context(
 
 async def _save_tunnel_mechanical_result_image(
     repo: DutyRepository,
-    request: TunnelMechanicalSubmitRequest,
+    request: TunnelMechanicalSubmitRequest | TunnelMechanicalResultImageRequest,
     *,
     base_url: str,
     headers: dict[str, str],
@@ -3557,8 +3614,8 @@ async def _save_tunnel_mechanical_result_image(
             render_tunnel_mechanical_result_image(
                 rows,
                 check_time=request.checkTime,
-                checker=request.checker,
-                recorder=request.recorder,
+                checker=getattr(request, "checker", ""),
+                recorder=getattr(request, "recorder", ""),
             )
         )
         return {"result_rows": rows, "result_image_url": f"/api/uploads/{filename}"}
@@ -3572,7 +3629,7 @@ async def _save_tunnel_mechanical_result_image(
 
 
 async def _query_tunnel_mechanical_records(
-    request: TunnelMechanicalSubmitRequest,
+    request: TunnelMechanicalSubmitRequest | TunnelMechanicalResultImageRequest,
     *,
     base_url: str,
     headers: dict[str, str],
@@ -3699,20 +3756,13 @@ def _tunnel_mechanical_result_text(value: Any) -> str:
 
 def _filter_tunnel_mechanical_result_rows(
     rows: list[dict[str, Any]],
-    request: TunnelMechanicalSubmitRequest,
+    request: TunnelMechanicalSubmitRequest | TunnelMechanicalResultImageRequest,
 ) -> list[dict[str, Any]]:
     date_text = request.checkTime.isoformat()
-    asset_names = {row.assetName for row in request.rows if row.enabled}
     filtered = []
     for row in rows:
         row_date = str(row.get("checkTime") or "")
         if row_date and row_date != date_text:
-            continue
-        if request.checker and row.get("checker") and str(row["checker"]) != request.checker:
-            continue
-        if request.recorder and row.get("recorder") and str(row["recorder"]) != request.recorder:
-            continue
-        if asset_names and row.get("assetName") and str(row["assetName"]) not in asset_names:
             continue
         filtered.append(row)
     return filtered
@@ -4452,25 +4502,35 @@ def _bound_wechat_sender_ids(repo: DutyRepository) -> list[str]:
 
 def _lightagent_room_member_sender_ids(repo: DutyRepository) -> list[str]:
     config = _notification_config_with_env_defaults(repo.get_notification_config())
-    room_id = str(config.get("lightagent_target") or "").strip()
-    if not room_id:
+    rooms = _normalize_feature_channel_rooms(config.get("lightagent_targets"))
+    legacy_room_id = str(config.get("lightagent_target") or "").strip()
+    if legacy_room_id:
+        rooms = _normalize_feature_channel_rooms(rooms + [{"id": legacy_room_id}])
+    room_ids = [room["id"] for room in rooms if room.get("id")]
+    if not room_ids:
         return []
-    try:
-        data = _lightagent_web_request(
-            repo,
-            "GET",
-            "/api/wechat-group/members",
-            params={"stable_room_id": room_id, "limit": "500"},
-        )
-    except HTTPException:
-        return _bound_wechat_sender_ids(repo)
     ids = []
-    for member in data.get("members") or []:
-        sender_id = str(member.get("runtime_sender_id") or member.get("sender_id") or "").strip()
-        if sender_id and sender_id not in ids:
-            ids.append(sender_id)
-    return ids or _bound_wechat_sender_ids(repo)
-
+    failed = False
+    for room_id in room_ids:
+        try:
+            data = _lightagent_web_request(
+                repo,
+                "GET",
+                "/api/wechat-group/members",
+                params={"stable_room_id": room_id, "limit": "500"},
+            )
+        except HTTPException:
+            failed = True
+            continue
+        for member in data.get("members") or []:
+            sender_id = str(member.get("runtime_sender_id") or member.get("sender_id") or "").strip()
+            if sender_id and sender_id not in ids:
+                ids.append(sender_id)
+    if ids:
+        return ids
+    if failed:
+        return _bound_wechat_sender_ids(repo)
+    return _bound_wechat_sender_ids(repo)
 
 def _patrol_warning_mentions_for_client(repo: DutyRepository, config: dict[str, Any], client: Any) -> list[str]:
     if isinstance(client, LightAgentNotifyClient):
@@ -4617,12 +4677,16 @@ def _notification_client_from_config(config: dict[str, Any]):
     sender_type = _normalize_notification_sender_type(str(config.get("sender_type") or "wecom_webhook"))
     if sender_type == "lightagent":
         endpoint_url = str(config.get("lightagent_url", "")).strip()
-        target = str(config.get("lightagent_target", "")).strip()
-        if not endpoint_url or not target:
+        targets = _normalize_feature_channel_rooms(config.get("lightagent_targets"))
+        legacy_target = str(config.get("lightagent_target", "")).strip()
+        if legacy_target:
+            targets = _normalize_feature_channel_rooms(targets + [{"id": legacy_target}])
+        target_ids = [room["id"] for room in targets if room.get("id")]
+        if not endpoint_url or not target_ids:
             return None
         return LightAgentNotifyClient(
             endpoint_url=endpoint_url,
-            target=target,
+            targets=target_ids,
             token=str(config.get("lightagent_token") or ""),
         )
 

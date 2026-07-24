@@ -155,6 +155,7 @@ class DutyRepository:
                     lightagent_url TEXT NOT NULL DEFAULT '',
                     lightagent_token TEXT NOT NULL DEFAULT '',
                     lightagent_target TEXT NOT NULL DEFAULT '',
+                    lightagent_targets_json TEXT NOT NULL DEFAULT '[]',
                     message_template TEXT NOT NULL DEFAULT '',
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
@@ -306,6 +307,8 @@ class DutyRepository:
                 conn.execute("ALTER TABLE notification_config ADD COLUMN lightagent_token TEXT NOT NULL DEFAULT ''")
             if "lightagent_target" not in config_columns:
                 conn.execute("ALTER TABLE notification_config ADD COLUMN lightagent_target TEXT NOT NULL DEFAULT ''")
+            if "lightagent_targets_json" not in config_columns:
+                conn.execute("ALTER TABLE notification_config ADD COLUMN lightagent_targets_json TEXT NOT NULL DEFAULT '[]'")
             feature_columns = {row["name"] for row in conn.execute("PRAGMA table_info(feature_channel_config)").fetchall()}
             for column, definition in {
                 "enabled": "INTEGER NOT NULL DEFAULT 1",
@@ -860,19 +863,25 @@ class DutyRepository:
         lightagent_url: str = "",
         lightagent_token: str = "",
         lightagent_target: str = "",
+        lightagent_targets: list[dict[str, str]] | None = None,
     ) -> None:
+        targets = _normalize_feature_channel_rooms(lightagent_targets or [])
+        if not targets and str(lightagent_target or "").strip():
+            targets = _normalize_feature_channel_rooms([{"id": lightagent_target}])
+        primary_target = targets[0]["id"] if targets else str(lightagent_target or "").strip()
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO notification_config
-                    (id, sender_type, webhook_url, lightagent_url, lightagent_token, lightagent_target, message_template)
-                VALUES (1, ?, ?, ?, ?, ?, ?)
+                    (id, sender_type, webhook_url, lightagent_url, lightagent_token, lightagent_target, lightagent_targets_json, message_template)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     sender_type = excluded.sender_type,
                     webhook_url = excluded.webhook_url,
                     lightagent_url = excluded.lightagent_url,
                     lightagent_token = excluded.lightagent_token,
                     lightagent_target = excluded.lightagent_target,
+                    lightagent_targets_json = excluded.lightagent_targets_json,
                     message_template = excluded.message_template,
                     updated_at = CURRENT_TIMESTAMP
                 """,
@@ -881,7 +890,8 @@ class DutyRepository:
                     webhook_url,
                     lightagent_url,
                     lightagent_token,
-                    lightagent_target,
+                    primary_target,
+                    json.dumps(targets, ensure_ascii=False),
                     message_template or DEFAULT_MESSAGE_TEMPLATE,
                 ),
             )
@@ -890,7 +900,7 @@ class DutyRepository:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT sender_type, webhook_url, lightagent_url, lightagent_token, lightagent_target, message_template
+                SELECT sender_type, webhook_url, lightagent_url, lightagent_token, lightagent_target, lightagent_targets_json, message_template
                 FROM notification_config
                 WHERE id = 1
                 """
@@ -902,14 +912,19 @@ class DutyRepository:
                 "lightagent_url": "",
                 "lightagent_token": "",
                 "lightagent_target": "",
+                "lightagent_targets": [],
                 "message_template": DEFAULT_MESSAGE_TEMPLATE,
             }
+        targets = _normalize_feature_channel_rooms(_loads_json(row["lightagent_targets_json"], []))
+        if not targets and str(row["lightagent_target"] or "").strip():
+            targets = _normalize_feature_channel_rooms([{"id": row["lightagent_target"]}])
         return {
             "sender_type": _normalize_notification_sender_type(row["sender_type"]),
             "webhook_url": row["webhook_url"],
             "lightagent_url": row["lightagent_url"],
             "lightagent_token": row["lightagent_token"],
             "lightagent_target": row["lightagent_target"],
+            "lightagent_targets": targets,
             "message_template": row["message_template"] or DEFAULT_MESSAGE_TEMPLATE,
         }
 

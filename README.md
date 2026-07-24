@@ -76,6 +76,8 @@ services:
       WEB_PORT: "9899"
       WEB_PASSWORD: CHANGE_THIS_LIGHTAGENT_PASSWORD
       LIGHTAGENT_PUSH_TOKEN: CHANGE_THIS_LIGHTAGENT_PUSH_TOKEN
+      DUTY_REMINDER_BASE_URL: http://duty-reminder:8080
+      DUTY_REMINDER_QUERY_TOKEN: CHANGE_THIS_QUERY_TOKEN
       MODEL: deepseek-v4-flash
       DEEPSEEK_API_KEY: CHANGE_THIS_DEEPSEEK_KEY
       WECHAT_GROUP_ENABLED: "true"
@@ -93,6 +95,11 @@ services:
       ENABLE_SCHEDULER: "true"
       ADMIN_USERNAME: admin
       ADMIN_PASSWORD: CHANGE_THIS_PASSWORD
+      NOTIFICATION_SENDER_TYPE: lightagent
+      LIGHTAGENT_BASE_URL: http://lightagent:9899
+      LIGHTAGENT_WEB_PASSWORD: CHANGE_THIS_LIGHTAGENT_PASSWORD
+      LIGHTAGENT_PUSH_TOKEN: CHANGE_THIS_LIGHTAGENT_PUSH_TOKEN
+      DUTY_REMINDER_QUERY_TOKEN: CHANGE_THIS_QUERY_TOKEN
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads
@@ -106,7 +113,7 @@ services:
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-部署前把 `docker-compose.prod.yml` 里的 `ADMIN_PASSWORD: CHANGE_THIS_PASSWORD`、`WEB_PASSWORD: CHANGE_THIS_LIGHTAGENT_PASSWORD`、`LIGHTAGENT_PUSH_TOKEN: CHANGE_THIS_LIGHTAGENT_PUSH_TOKEN` 和 `DEEPSEEK_API_KEY: CHANGE_THIS_DEEPSEEK_KEY` 改成你自己的值。更新镜像时再执行一次：
+部署前把 `docker-compose.prod.yml` 里的 `ADMIN_PASSWORD: CHANGE_THIS_PASSWORD`、`WEB_PASSWORD: CHANGE_THIS_LIGHTAGENT_PASSWORD`、`LIGHTAGENT_PUSH_TOKEN: CHANGE_THIS_LIGHTAGENT_PUSH_TOKEN`、`DUTY_REMINDER_QUERY_TOKEN: CHANGE_THIS_QUERY_TOKEN` 和 `DEEPSEEK_API_KEY: CHANGE_THIS_DEEPSEEK_KEY` 改成你自己的值。`LIGHTAGENT_BASE_URL` 会同时用于 LightAgent Web 管理接口和推送接口，`DUTY_REMINDER_BASE_URL` 会同时用于微信查询、排班导入和确认接口。更新镜像时再执行一次：
 
 ```bash
 docker compose -f docker-compose.prod.yml pull
@@ -152,7 +159,7 @@ docker run --rm -v duty-reminder_duty-uploads:/data -v "$PWD":/backup alpine tar
 
 ## 通知通道配置
 
-页面“设置 / 企业微信通知”里可以选择两种发送通道。
+页面“配置中心 / 消息通知渠道”里可以选择两种发送通道。
 
 ### 企业微信群机器人
 
@@ -166,15 +173,15 @@ https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_WEBHOOK_KEY
 
 ### LightAgent 个人微信群
 
-选择“LightAgent 个人微信群”后填写 LightAgent 推送地址、目标群 `room_id` 和可选 token。`duty-reminder` 会把文本和图片提醒 POST 到这个推送地址，由 LightAgent 侧负责个人微信扫码登录和微信群发送。
+选择“LightAgent 个人微信群”后填写 LightAgent 地址、添加一个或多个通知微信群和可选 token。`duty-reminder` 会把文本和图片提醒 POST 到 LightAgent，由 LightAgent 侧负责个人微信扫码登录和微信群发送。
 
-同一个 Docker Compose 网络内部，推送地址通常填写：
+同一个 Docker Compose 网络内部，地址通常填写：
 
 ```text
-http://lightagent:9899/api/push/send
+http://lightagent:9899
 ```
 
-页面里的“推送 token”填写 `LIGHTAGENT_PUSH_TOKEN` 的值。
+页面里的“推送 token”填写 `LIGHTAGENT_PUSH_TOKEN` 的值。通知群可以在页面同步微信群后添加多个；“微信群交互配置”用于配置哪些微信群可以主动触发查询、隧道机电和排班导入。
 
 接入细节见 [docs/LightAgent-WeChat.md](docs/LightAgent-WeChat.md)。
 

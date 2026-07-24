@@ -376,8 +376,33 @@ def test_saving_notification_config_replaces_existing_value(tmp_path: Path):
         "lightagent_url": "",
         "lightagent_token": "",
         "lightagent_target": "",
+        "lightagent_targets": [],
         "message_template": "new {name}",
     }
+
+
+def test_notification_config_roundtrips_multiple_lightagent_targets(tmp_path: Path):
+    repo = DutyRepository(tmp_path / "duty.db")
+
+    repo.save_notification_config(
+        sender_type="lightagent",
+        webhook_url="",
+        lightagent_url="http://lightagent:9899/api/push/send",
+        lightagent_token="push-token",
+        lightagent_target="wgr_notice",
+        lightagent_targets=[
+            {"id": "wgr_notice", "name": "通知群"},
+            {"id": "wgr_second", "name": "第二通知群"},
+        ],
+    )
+
+    config = repo.get_notification_config()
+
+    assert config["lightagent_target"] == "wgr_notice"
+    assert config["lightagent_targets"] == [
+        {"id": "wgr_notice", "name": "通知群"},
+        {"id": "wgr_second", "name": "第二通知群"},
+    ]
 
 
 def test_feature_channel_config_roundtrip(tmp_path: Path):
