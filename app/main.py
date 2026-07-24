@@ -2101,6 +2101,8 @@ async def _build_wechat_query_response(
 def _handle_wechat_bridge_message(repo: DutyRepository, uploads: Path, message: dict[str, Any]) -> None:
     if message.get("my_msg"):
         return
+    if not bool(message.get("is_at")):
+        return
     text = str(message.get("text") or "").strip()
     if not text:
         return

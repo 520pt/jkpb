@@ -76,3 +76,23 @@ def test_wechat_bridge_notify_client_sends_to_multiple_targets():
         ("wgr_b", "测试", ["@member"]),
     ]
     assert manager.image_calls == [("wgr_a", b"png"), ("wgr_b", b"png")]
+
+
+def test_wechat_bridge_marks_recent_outgoing_text_as_self_message(tmp_path):
+    manager = WechatBridgeManager(data_dir=tmp_path / "wechat")
+    manager.self_id = "@self"
+    room = manager._normalize_rooms([{"id": "room@@runtime", "name": "测试群"}])[0]
+
+    manager._remember_outgoing_text(room["runtime_room_id"], "还没有导入隧道机电模板")
+    message = manager._normalize_message(
+        {
+            "room_id": "room@@runtime",
+            "room_name": "测试群",
+            "sender_id": "@self-runtime-fallback",
+            "self_id": "@self",
+            "text": "还没有导入隧道机电模板",
+            "my_msg": False,
+        }
+    )
+
+    assert message["my_msg"] is True

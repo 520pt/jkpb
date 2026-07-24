@@ -42,6 +42,10 @@ def _stable_id(prefix: str, *parts: str) -> str:
     return f"{prefix}_{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:32]}"
 
 
+def _normalize_message_text(text: str) -> str:
+    return " ".join(str(text or "").split())
+
+
 def _qr_image_data_uri(text: str) -> str:
     qr_text = str(text or "").strip()
     if not qr_text:
@@ -54,6 +58,7 @@ def _qr_image_data_uri(text: str) -> str:
 
 class WechatBridgeManager:
     STOP_TIMEOUT_SECONDS = 5
+    OUTGOING_ECHO_TTL_SECONDS = 120
 
     def __init__(self, *, data_dir: Path | None = None, sidecar_dir: Path | None = None) -> None:
         self.data_dir = data_dir or _data_dir()
@@ -78,6 +83,7 @@ class WechatBridgeManager:
         self.rooms: list[dict[str, Any]] = []
         self.room_members: dict[str, list[dict[str, Any]]] = {}
         self.identity: dict[str, Any] = {"rooms": {}, "members": {}}
+        self._recent_outgoing_texts: list[tuple[float, str, str]] = []
         self._load_identity()
 
     def set_message_handler(self, handler: Callable[[dict[str, Any]], None] | None) -> None:
@@ -183,6 +189,7 @@ class WechatBridgeManager:
         if not runtime_room_id:
             raise RuntimeError(f"目标微信群当前不可发送或未同步：{room_id}")
         self.ensure_started()
+        self._remember_outgoing_text(runtime_room_id, text)
         self._send_command(
             {
                 "type": SidecarCommandType.SEND_TEXT,
@@ -405,6 +412,10 @@ class WechatBridgeManager:
         sender_name = str(payload.get("sender_name") or "").strip()
         stable_room_id = self._stable_room_id_for_runtime(runtime_room_id, room_name)
         stable_member_id = _stable_id("wgm", stable_room_id, runtime_sender_id, sender_name)
+        self_runtime_id = str(payload.get("runtime_self_id") or payload.get("self_id") or self.self_id or "").strip()
+        payload_my_msg = bool(payload.get("my_msg"))
+        is_self_sender = bool(self_runtime_id and runtime_sender_id and runtime_sender_id == self_runtime_id)
+        is_outgoing_echo = self._consume_outgoing_echo(runtime_room_id, str(payload.get("text") or ""))
         return {
             **payload,
             "room_id": runtime_room_id,
@@ -414,8 +425,35 @@ class WechatBridgeManager:
             "sender_name": sender_name,
             "text": str(payload.get("text") or ""),
             "is_at": bool(payload.get("is_at")),
-            "my_msg": bool(payload.get("my_msg")),
+            "my_msg": payload_my_msg or is_self_sender or is_outgoing_echo,
         }
+
+    def _remember_outgoing_text(self, runtime_room_id: str, text: str) -> None:
+        room_id = str(runtime_room_id or "").strip()
+        content = _normalize_message_text(text)
+        if not room_id or not content:
+            return
+        now = time.time()
+        self._prune_recent_outgoing_texts(now)
+        self._recent_outgoing_texts.append((now, room_id, content))
+
+    def _consume_outgoing_echo(self, runtime_room_id: str, text: str) -> bool:
+        room_id = str(runtime_room_id or "").strip()
+        content = _normalize_message_text(text)
+        if not room_id or not content:
+            return False
+        now = time.time()
+        self._prune_recent_outgoing_texts(now)
+        for index, (_, saved_room_id, saved_content) in enumerate(self._recent_outgoing_texts):
+            if saved_room_id == room_id and saved_content == content:
+                self._recent_outgoing_texts.pop(index)
+                return True
+        return False
+
+    def _prune_recent_outgoing_texts(self, now: float | None = None) -> None:
+        current = now if now is not None else time.time()
+        cutoff = current - self.OUTGOING_ECHO_TTL_SECONDS
+        self._recent_outgoing_texts = [item for item in self._recent_outgoing_texts if item[0] >= cutoff]
 
     def _stable_room_id_for_runtime(self, runtime_room_id: str, name: str) -> str:
         runtime_text = str(runtime_room_id or "").strip()

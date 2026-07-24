@@ -2060,6 +2060,54 @@ def test_wechat_query_tunnel_mechanical_result_sends_image(tmp_path, monkeypatch
     assert captured == ["2026-07-23", "2026-07-22"]
 
 
+def test_wechat_bridge_group_command_requires_at_mention(tmp_path, monkeypatch):
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    uploads = tmp_path / "uploads"
+    uploads.mkdir()
+    calls = []
+
+    async def fake_build_wechat_query_response(repo_arg, query, *, uploads):
+        calls.append(query.text)
+        return {"success": True, "reply": ""}
+
+    class DummyManager:
+        def send_text(self, room_id, text, *, mention_ids=None):
+            raise AssertionError("empty reply should not send")
+
+        def send_image(self, room_id, path):
+            raise AssertionError("no image should not send")
+
+    monkeypatch.setattr(main_module, "_build_wechat_query_response", fake_build_wechat_query_response)
+    monkeypatch.setattr(main_module, "get_wechat_bridge_manager", lambda: DummyManager())
+
+    main_module._handle_wechat_bridge_message(
+        repo,
+        uploads,
+        {
+            "room_id": "room@@runtime",
+            "stable_room_id": "wgr_feature",
+            "sender_id": "wgm_member",
+            "runtime_sender_id": "@member",
+            "text": "查询今日机电",
+            "is_at": False,
+        },
+    )
+    main_module._handle_wechat_bridge_message(
+        repo,
+        uploads,
+        {
+            "room_id": "room@@runtime",
+            "stable_room_id": "wgr_feature",
+            "sender_id": "wgm_member",
+            "runtime_sender_id": "@member",
+            "text": "@闷葫芦 查询今日机电",
+            "is_at": True,
+        },
+    )
+
+    assert calls == ["@闷葫芦 查询今日机电"]
+
+
 def test_wechat_query_triggers_tunnel_mechanical_submit(tmp_path, monkeypatch):
     monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
