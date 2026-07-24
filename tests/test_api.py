@@ -99,7 +99,7 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'id="patrolWarningSettings"' in html
     assert 'id="patrolLoginUrl"' in html
     assert 'id="patrolRouteCode" placeholder="S41"' in html
-    assert 'id="patrolWarningImageMeta"' in html
+    assert 'id="patrolWarningQueryMeta"' in html
     assert 'id="patrolSendContentMode"' in html
     assert '<option value="image">仅图片</option>' in html
     assert 'data-tab="tunnelMechanical">隧道机电' in html
