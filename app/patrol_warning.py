@@ -28,6 +28,26 @@ LEVEL_LABELS = {
     "3": "黄色预警",
     "4": "蓝色预警",
 }
+LEVEL_TEXT_FIELDS = (
+    "WarningLevelName",
+    "warningLevelName",
+    "WarningLevelLabel",
+    "warningLevelLabel",
+    "WarningLevelText",
+    "warningLevelText",
+    "WarnLevelName",
+    "warnLevelName",
+    "WarnLevelText",
+    "warnLevelText",
+    "LevelName",
+    "levelName",
+    "LevelText",
+    "levelText",
+    "WarnTypeName",
+    "warnTypeName",
+    "WarningTypeName",
+    "warningTypeName",
+)
 DEFAULT_START_MESSAGE_TEMPLATE = (
     "{mention_prefix}请注意监测到 {app_name} 发布 {warning_level_label}\n"
     "路线：{route_text}\n"
@@ -183,7 +203,8 @@ def normalize_warning(row: dict[str, Any], tz: ZoneInfo) -> PatrolWarning | None
         return None
     route_code = str(_first_value(row, "RouteCode", "routeCode", "RouteNumber", "routeNumber") or "").strip()
     route_name = str(_first_value(row, "RouteName", "routeName", "SectionName", "Name", "name") or "").strip()
-    warning_level = str(_first_value(row, "WarningLevel", "warningLevel", "Level", "level") or "").strip()
+    raw_warning_level = str(_first_value(row, "WarningLevel", "warningLevel", "Level", "level") or "").strip()
+    warning_level = _warning_level_from_text_fields(row) or raw_warning_level
     start_time = _parse_datetime(_first_value(row, "StartTime", "startTime", "BeginTime", "beginTime"), tz)
     end_time = _parse_datetime(_first_value(row, "EndTime", "endTime", "FinishTime", "finishTime"), tz)
     create_time = _parse_datetime(_first_value(row, "CreateTime", "createTime", "PublishTime", "publishTime"), tz)
@@ -194,7 +215,7 @@ def normalize_warning(row: dict[str, Any], tz: ZoneInfo) -> PatrolWarning | None
         key = "|".join(
             [
                 route_code,
-                warning_level,
+                raw_warning_level,
                 start_time.isoformat() if start_time else "",
                 end_time.isoformat() if end_time else "",
                 start_stake,
@@ -218,6 +239,29 @@ def normalize_warning(row: dict[str, Any], tz: ZoneInfo) -> PatrolWarning | None
         end_stake=end_stake,
         raw=row,
     )
+
+
+def _warning_level_from_text_fields(row: dict[str, Any]) -> str:
+    for field in LEVEL_TEXT_FIELDS:
+        value = _warning_level_from_text(_first_value(row, field))
+        if value:
+            return value
+    return ""
+
+
+def _warning_level_from_text(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    if "红" in text or "red" in text:
+        return "1"
+    if "橙" in text or "orange" in text:
+        return "2"
+    if "黄" in text or "yellow" in text:
+        return "3"
+    if "蓝" in text or "blue" in text:
+        return "4"
+    return ""
 
 
 def build_start_message(

@@ -48,6 +48,23 @@ def test_normalizes_patrol_warning_fields_from_api_row():
     assert warning.end_time.isoformat() == "2026-07-22T01:35:03+08:00"
 
 
+def test_warning_level_prefers_color_text_over_numeric_code():
+    warning = normalize_warning(
+        {
+            "Id": "warning-orange-name",
+            "RouteCode": "S41",
+            "WarningLevel": "3",
+            "WarnTypeName": "暴雨橙色预警",
+            "StartTime": "2026-07-21 22:35:01",
+        },
+        TZ,
+    )
+
+    assert warning is not None
+    assert warning.warning_level == "2"
+    assert warning.warning_level_label == "橙色预警"
+
+
 def test_builds_start_and_end_messages_from_warning_fields():
     warning = normalize_warning(
         {

@@ -1367,11 +1367,12 @@ def _notification_config_with_env_defaults(config: dict[str, Any]) -> dict[str, 
     has_active_config = (
         bool(str(merged.get("webhook_url", "")).strip())
         if sender_type == "wecom_webhook"
-        else bool(str(merged.get("lightagent_url", "")).strip() and lightagent_targets)
+        else bool(lightagent_targets and (wechat_bridge_enabled() or str(merged.get("lightagent_url", "")).strip()))
     )
     env_sender_type = _normalize_notification_sender_type(env_config["sender_type"]) if env_config["sender_type"] else ""
-    has_env_lightagent = bool(env_config["lightagent_url"] or env_config["lightagent_targets"])
-    if env_sender_type:
+    has_env_lightagent = bool(env_config["lightagent_targets"] and (wechat_bridge_enabled() or env_config["lightagent_url"]))
+    env_can_select_sender = bool(env_sender_type and not has_active_config)
+    if env_can_select_sender:
         sender_type = env_sender_type
         merged["sender_type"] = sender_type
     elif not has_active_config and has_env_lightagent:
@@ -1379,10 +1380,10 @@ def _notification_config_with_env_defaults(config: dict[str, Any]) -> dict[str, 
         merged["sender_type"] = sender_type
 
     for key in ("webhook_url", "lightagent_url", "lightagent_token", "lightagent_target"):
-        if env_config[key] and (env_sender_type or not str(merged.get(key, "")).strip()):
+        if env_config[key] and (env_can_select_sender or not str(merged.get(key, "")).strip()):
             merged[key] = env_config[key]
     if env_config["lightagent_targets"] and (
-        env_sender_type or not _normalize_feature_channel_rooms(merged.get("lightagent_targets"))
+        env_can_select_sender or not _normalize_feature_channel_rooms(merged.get("lightagent_targets"))
     ):
         merged["lightagent_targets"] = env_config["lightagent_targets"]
         merged["lightagent_target"] = env_config["lightagent_targets"][0]["id"]
