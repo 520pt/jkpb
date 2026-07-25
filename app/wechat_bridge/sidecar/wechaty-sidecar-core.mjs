@@ -601,13 +601,30 @@ function buildAtUserList(targets = []) {
   const seen = new Set()
   const ids = []
   for (const target of targets || []) {
-    const id = String(target?.id || target?.contact?.id || '').trim()
-    if (!id || id.startsWith('@@') || seen.has(id)) continue
-    seen.add(id)
-    ids.push(id)
+    const candidates = Array.isArray(target?.idCandidates) && target.idCandidates.length
+      ? target.idCandidates
+      : [target?.id || target?.contact?.id]
+    for (const candidate of candidates) {
+      const id = String(candidate || '').trim()
+      if (!id || id.startsWith('@@') || seen.has(id)) continue
+      seen.add(id)
+      ids.push(id)
+      break
+    }
     if (ids.length >= 20) break
   }
   return ids
+}
+
+function prioritizeMentionIdCandidates(candidates = []) {
+  const cleaned = [...new Set(candidates.map(value => String(value || '').trim()).filter(Boolean))]
+  const primary = cleaned.find(value => value && !value.startsWith('@@')) || ''
+  return [
+    ...cleaned.filter(value => value === primary),
+    ...cleaned.filter(value => value !== primary && value.startsWith('@') && !value.startsWith('@@')),
+    ...cleaned.filter(value => value !== primary && /^wxid_/iu.test(value)),
+    ...cleaned.filter(value => value !== primary && !/^wxid_/iu.test(value) && !value.startsWith('@')),
+  ]
 }
 
 function buildMsgSourceXml(targetIds = []) {
@@ -642,12 +659,13 @@ export async function resolveMentionTargets(room, mentionIds, findContact, optio
   const mentions = await resolveMentionContacts(room, mentionIds, findContact)
   const targets = []
   if ((mentionIds || []).some(isMentionAllId)) {
-    targets.push({ id: 'notify@all', contact: null, name: '所有人', mentionAll: true })
+    targets.push({ id: 'notify@all', contact: null, name: '所有人', mentionAll: true, idCandidates: ['notify@all'] })
   }
   let aliasRefreshAttempted = false
   const cooldownMinutes = options.aliasSyncCooldownMinutes
   const cooldownStore = options.aliasSyncCooldownStore
   const nowMs = options.nowMs
+  const roomMemberRawPayload = options.roomMemberRawPayload
   for (const contact of mentions) {
     let name = ''
     try { name = await room.alias(contact) || '' } catch {}
@@ -666,7 +684,25 @@ export async function resolveMentionTargets(room, mentionIds, findContact, optio
     if (!name) {
       try { name = contact.name() || '' } catch {}
     }
-    targets.push({ id: contact.id, contact, name: cleanMentionName(name) })
+    let rawPayload = null
+    if (typeof roomMemberRawPayload === 'function') {
+      rawPayload = await roomMemberRawPayload(room, contact).catch(() => null)
+    }
+    const idCandidates = prioritizeMentionIdCandidates([
+      contact?.id,
+      rawPayload?.UserName,
+      rawPayload?.EncryptUserName,
+      rawPayload?.Alias,
+      rawPayload?.alias,
+      rawPayload?.weixin,
+    ])
+    targets.push({
+      id: contact.id,
+      contact,
+      name: cleanMentionName(name),
+      rawPayload,
+      idCandidates: [...new Set(idCandidates)],
+    })
   }
   return targets
 }
@@ -718,58 +754,90 @@ export async function sendWechat4uRawTextWithMsgSource(wechat4u, room, text, men
     const errMsg = data?.BaseResponse?.ErrMsg || JSON.stringify(data?.BaseResponse || data)
     throw new Error(`webwxsendmsg ret=${data?.BaseResponse?.Ret} ${errMsg}`)
   }
-  return { ok: true, roomId, targetIds, msgSource, content, response: data }
+  return {
+    ok: true,
+    roomId,
+    targetIds,
+    msgSource,
+    content,
+    msgId: String(data?.MsgID || data?.MsgId || ''),
+    localId: String(data?.LocalID || data?.LocalId || clientMsgId),
+    response: data,
+  }
 }
 
 export async function sendText(command, deps) {
   const room = await deps.findRoom(command.room_id)
   if (!room) throw new Error(`room not found: ${command.room_id}`)
+  const requestedMentionIds = (command.mention_ids || []).map(item => String(item || '').trim()).filter(Boolean)
   const mentionTargets = await resolveMentionTargets(
     room,
-    command.mention_ids || [],
+    requestedMentionIds,
     deps.findContact,
     {
       aliasSyncCooldownMinutes: command.alias_sync_cooldown_minutes,
       aliasSyncCooldownStore: deps.aliasSyncCooldownStore,
       nowMs: deps.nowMs?.(),
+      roomMemberRawPayload: deps.roomMemberRawPayload,
     },
   )
+  if (requestedMentionIds.length && !mentionTargets.length) {
+    throw new Error(
+      `个人微信群真 @ 成员解析失败，已阻止发送普通文本：` +
+      `mention_count=${requestedMentionIds.length}`,
+    )
+  }
   const wechat4u = deps.getWechat4u?.()
   const useVisibleMentionText = mentionTargets.length && (deps.isWechat4u?.() || wechat4u)
+  let rawSendResult = null
   if (mentionTargets.length && wechat4u) {
     try {
-      await sendWechat4uRawTextWithMsgSource(wechat4u, room, command.text, mentionTargets)
+      rawSendResult = await sendWechat4uRawTextWithMsgSource(wechat4u, room, command.text, mentionTargets)
     } catch (error) {
       const errorMessage = String(error?.message || error || 'unknown error')
         .replace(/[\r\n]+/g, ' ')
         .slice(0, 500)
-      deps.logWarning?.(
-        `[wechat_group] true mention failed; falling back to visible text ` +
-        `(reason=wechat4u_raw_send_failed, mention_count=${mentionTargets.length}, error=${errorMessage})`,
+      throw new Error(
+        `个人微信群真 @ 发送失败，已阻止降级为普通 @ 文本：` +
+        `reason=wechat4u_raw_send_failed, mention_count=${mentionTargets.length}, error=${errorMessage}`,
       )
-      await room.say(buildManualMentionText(command.text, mentionTargets))
     }
   } else if (useVisibleMentionText) {
-    deps.logWarning?.(
-      `[wechat_group] true mention unavailable; falling back to visible text ` +
-      `(reason=wechat4u_runtime_unavailable, mention_count=${mentionTargets.length})`,
+    throw new Error(
+      `个人微信群真 @ 发送不可用，已阻止降级为普通 @ 文本：` +
+      `reason=wechat4u_runtime_unavailable, mention_count=${mentionTargets.length}`,
     )
-    await room.say(buildManualMentionText(command.text, mentionTargets))
   } else if (mentionTargets.length) {
     const contacts = mentionTargets.map(item => item.contact).filter(Boolean)
-    const manualText = buildManualMentionText(command.text, mentionTargets)
     if (contacts.length !== mentionTargets.length) {
-      await room.say(manualText || command.text)
-      deps.emit('send_result', { ok: true, command: 'send_text', room_id: command.room_id })
-      return
+      throw new Error(
+        `个人微信群真 @ 成员解析不完整，已阻止降级为普通 @ 文本：` +
+        `resolved=${contacts.length}, expected=${mentionTargets.length}`,
+      )
     }
     try {
       await room.say(command.text, ...contacts)
-    } catch {
-      await room.say(manualText || command.text)
+    } catch (error) {
+      throw new Error(
+        `个人微信群真 @ 发送失败，已阻止降级为普通 @ 文本：` +
+        `${error?.message || String(error)}`,
+      )
     }
   } else {
     await room.say(command.text)
   }
-  deps.emit('send_result', { ok: true, command: 'send_text', room_id: command.room_id })
+  deps.emit('send_result', {
+    ok: true,
+    command: 'send_text',
+    request_id: command.request_id || '',
+    room_id: command.room_id,
+    sent_text: mentionTargets.length ? buildManualMentionText(command.text, mentionTargets) : command.text,
+    mention_count: mentionTargets.length,
+    true_mention: Boolean(mentionTargets.length),
+    at_user_list: rawSendResult?.targetIds || buildAtUserList(mentionTargets),
+    msg_source: rawSendResult?.msgSource || '',
+    msg_id: rawSendResult?.msgId || '',
+    local_id: rawSendResult?.localId || '',
+    mention_id_candidates: mentionTargets.map(target => target.idCandidates || [target.id]).filter(Boolean),
+  })
 }

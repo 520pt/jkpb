@@ -92,6 +92,7 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert "同步${wechatGatewayLabel()}群失败" in html
     assert "功能通道已保存，但同步${wechatGatewayLabel()}群失败" in html
     assert 'tunnel_mechanical_wechat: "隧道机电录入"' in html
+    assert 'tunnel_mechanical_wechat_modify: "隧道机电修改"' in html
     assert 'tunnel_mechanical_query_wechat: "隧道机电查询"' in html
     assert 'patrol_warning_start_test: "公路巡查预警测试"' in html
     assert 'patrol_warning_end_test: "预警结束巡查测试"' in html
@@ -2236,7 +2237,13 @@ def test_wechat_query_help_returns_numbered_menu(tmp_path, monkeypatch):
     assert "7. 查询我的绑定" in body["reply"]
     assert "9. 查询2026-07-24机电" in body["reply"]
     assert "回复序号即可执行" in body["reply"]
-    assert "录入格式：隧道机电录入 日期2026-07-24 负责人罗富耀 记录人商邱宏 天气晴" in body["reply"]
+    assert "录入格式：" not in body["reply"]
+    assert "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人商邱宏 天气晴" not in body["reply"]
+    assert body["replies"] == [
+        body["reply"],
+        "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人商邱宏 天气晴",
+    ]
+    assert body["template"] == "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人商邱宏 天气晴"
 
 
 def test_wechat_query_numbered_menu_selection_runs_command(tmp_path, monkeypatch):
@@ -2295,6 +2302,73 @@ def test_wechat_query_tunnel_mechanical_returns_fill_template(tmp_path, monkeypa
     assert body["template"] == "隧道机电录入 日期2026-07-23 负责人罗富耀 记录人商邱宏 天气晴"
     assert body["replies"][-1] == "隧道机电录入 日期2026-07-23 负责人罗富耀 记录人商邱宏 天气晴"
     assert "当前模板资产：1 条" in body["reply"]
+
+
+def test_wechat_query_template_shortcut_returns_tunnel_mechanical_template(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2026, 7, 25))
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    _import_tunnel_template(client)
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "模板"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["query_type"] == "tunnel_mechanical_template"
+    assert body["reply"] == "隧道机电录入 日期2026-07-25 负责人罗富耀 记录人商邱宏 天气晴"
+    assert body["replies"] == ["隧道机电录入 日期2026-07-25 负责人罗富耀 记录人商邱宏 天气晴"]
+    assert body["template"] == "隧道机电录入 日期2026-07-25 负责人罗富耀 记录人商邱宏 天气晴"
+
+
+def test_wechat_query_modify_shortcut_returns_tunnel_mechanical_modify_template(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2026, 7, 25))
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    _import_tunnel_template(client)
+
+    for text in ("修改", "修改模板", "改模板"):
+        response = client.post(
+            "/api/wechat-query",
+            headers={"X-Duty-Query-Token": "unit-token"},
+            json={"text": text},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["success"] is True
+        assert body["query_type"] == "tunnel_mechanical_modify_template"
+        assert body["reply"] == "隧道机电修改 日期2026-07-25 负责人罗富耀 记录人商邱宏 天气晴 修改日期为2026-07-25"
+        assert body["replies"] == ["隧道机电修改 日期2026-07-25 负责人罗富耀 记录人商邱宏 天气晴 修改日期为2026-07-25"]
+        assert body["template"] == "隧道机电修改 日期2026-07-25 负责人罗富耀 记录人商邱宏 天气晴 修改日期为2026-07-25"
+
+
+def test_wechat_query_tunnel_mechanical_shortcut_returns_menu(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2026, 7, 25))
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    _import_tunnel_template(client)
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "机电"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["query_type"] == "tunnel_mechanical_template"
+    assert "发送“模板”获取可复制录入模板" in body["reply"]
+    assert "修改记录" in body["reply"]
+    assert body["replies"][1] == "隧道机电录入 日期2026-07-25 负责人罗富耀 记录人商邱宏 天气晴"
 
 
 def test_wechat_query_tunnel_mechanical_format_command_sends_copyable_template_separately(tmp_path, monkeypatch):
@@ -2631,6 +2705,182 @@ def test_wechat_query_triggers_tunnel_mechanical_submit(tmp_path, monkeypatch):
     records = client.get("/api/send-records").json()["records"]
     assert records[0]["kind"] == "tunnel_mechanical_wechat"
     assert records[0]["status"] == "success"
+
+
+def test_wechat_query_triggers_tunnel_mechanical_modify(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    _import_tunnel_template(client)
+    captured = {}
+
+    async def fake_modify(repo, request, **kwargs):
+        captured["checkTime"] = request.checkTime.isoformat()
+        captured["checkerId"] = request.checkerId
+        captured["checker"] = request.checker
+        captured["recorderId"] = request.recorderId
+        captured["recorder"] = request.recorder
+        captured["weather"] = request.weather
+        captured["newCheckTime"] = request.newCheckTime.isoformat() if request.newCheckTime else ""
+        captured["newWeather"] = request.newWeather
+        captured["newCheckerId"] = request.newCheckerId
+        captured["newChecker"] = request.newChecker
+        captured["newRecorderId"] = request.newRecorderId
+        captured["newRecorder"] = request.newRecorder
+        captured["dry_run"] = request.dry_run
+        return {"success": True, "dry_run": request.dry_run, "count": 1, "results": []}
+
+    monkeypatch.setattr(main_module, "_modify_tunnel_mechanical", fake_modify)
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "隧道机电修改 日期2026-07-26 负责人张三 记录人李四 天气晴 修改日期为2026-07-25 修改天气为多云 负责人改为李四 记录人改为张三"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["query_type"] == "tunnel_mechanical_modify"
+    assert body["checkTime"] == "2026-07-26"
+    assert body["finalCheckTime"] == "2026-07-25"
+    assert body["count"] == 1
+    assert captured == {
+        "checkTime": "2026-07-26",
+        "checkerId": "1001",
+        "checker": "张三",
+        "recorderId": "1002",
+        "recorder": "李四",
+        "weather": "晴",
+        "newCheckTime": "2026-07-25",
+        "newWeather": "多云",
+        "newCheckerId": "1002",
+        "newChecker": "李四",
+        "newRecorderId": "1001",
+        "newRecorder": "张三",
+        "dry_run": False,
+    }
+    records = client.get("/api/send-records").json()["records"]
+    assert records[0]["kind"] == "tunnel_mechanical_wechat_modify"
+    assert records[0]["status"] == "success"
+
+
+def test_tunnel_mechanical_modify_queries_then_posts_edit_payload(tmp_path, monkeypatch):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    repo: DutyRepository = app.state.repo
+    repo.save_tunnel_mechanical_config(
+        base_url="https://example.test",
+        username="station-user",
+        password="secret",
+    )
+    repo.save_tunnel_mechanical_state(
+        access_token="cached-token",
+        cookie_header="sid=abc",
+        token_expires_at=(datetime.now(main_module.TZ) + timedelta(hours=1)).isoformat(),
+    )
+    _import_tunnel_template(
+        client,
+        {
+            **TEST_TUNNEL_TEMPLATE,
+            "base_url": "https://example.test",
+            "list_path": "/prod-api/patrol/deviceCheck/list",
+            "update_path": "/prod-api/patrol/deviceCheck/edit",
+        },
+    )
+    captured = {"gets": [], "posts": []}
+
+    class FakeResponse:
+        def __init__(self, body, status_code=200):
+            self._body = body
+            self.status_code = status_code
+            self.text = str(body)
+
+        def json(self):
+            return self._body
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url, headers=None, params=None):
+            captured["gets"].append({"url": url, "headers": headers or {}, "params": params or {}})
+            return FakeResponse(
+                {
+                    "code": 200,
+                    "rows": [
+                        {
+                            "id": "check-1",
+                            "assetName": "示例隧道上行",
+                            "assetCode": "ASSET001",
+                            "checkTime": "2026-07-26",
+                            "weather": "晴",
+                            "checkerId": "1001",
+                            "checker": "张三",
+                            "recorderId": "1002",
+                            "recorder": "李四",
+                            "domains": [
+                                {
+                                    "checkId": "check-1",
+                                    "devName": "示例设备",
+                                    "location": "K1+000-K2+000示例隧道",
+                                    "content": "示例检查",
+                                    "result": 1,
+                                }
+                            ],
+                        }
+                    ],
+                }
+            )
+
+        async def post(self, url, headers=None, json=None):
+            captured["posts"].append({"url": url, "headers": headers or {}, "payload": json})
+            return FakeResponse({"code": 200, "msg": "ok"})
+
+        async def put(self, url, headers=None, json=None):
+            raise AssertionError("POST edit should succeed before PUT fallback")
+
+    monkeypatch.setattr(main_module.httpx, "AsyncClient", FakeAsyncClient)
+
+    request = main_module.TunnelMechanicalModifyRequest(
+        base_url="https://example.test",
+        checkTime=date(2026, 7, 26),
+        weather="晴",
+        checkerId="1001",
+        checker="张三",
+        recorderId="1002",
+        recorder="李四",
+        newCheckTime=date(2026, 7, 25),
+        newWeather="多云",
+        newCheckerId="1002",
+        newChecker="李四",
+        newRecorderId="1001",
+        newRecorder="张三",
+    )
+    result = asyncio.run(main_module._modify_tunnel_mechanical(repo, request))
+
+    assert result["success"] is True
+    assert result["count"] == 1
+    assert captured["gets"][0]["url"] == "https://example.test/prod-api/patrol/deviceCheck/list"
+    assert captured["gets"][0]["headers"]["Authorization"] == "Bearer cached-token"
+    assert captured["gets"][0]["headers"]["Cookie"] == "sid=abc"
+    assert captured["gets"][0]["params"]["checkTime"] == "2026-07-26"
+    assert captured["posts"][0]["url"] == "https://example.test/prod-api/patrol/deviceCheck/edit"
+    payload = captured["posts"][0]["payload"]
+    assert payload["id"] == "check-1"
+    assert payload["checkTime"] == "2026-07-25"
+    assert payload["weather"] == "多云"
+    assert payload["checkerId"] == "1002"
+    assert payload["checker"] == "李四"
+    assert payload["recorderId"] == "1001"
+    assert payload["recorder"] == "张三"
+    assert payload["domains"][0]["checkId"] == "check-1"
 
 
 def test_wechat_query_tunnel_mechanical_missing_person_returns_help(tmp_path, monkeypatch):
@@ -3999,6 +4249,95 @@ def test_personal_wechat_notification_test_records_member_name(tmp_path, monkeyp
     assert records[0]["target"] == "王路飞"
 
 
+def test_monitor_person_test_sends_current_form_with_wechat_member(tmp_path, monkeypatch):
+    sent: dict[str, object] = {}
+
+    class FakeWechatClient(main_module.WechatBridgeNotifyClient):
+        def __init__(self):
+            pass
+
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            sent["content"] = content
+            sent["mentions"] = mentioned_mobile_list
+
+    monkeypatch.setattr("app.main._notification_client_from_config", lambda config: FakeWechatClient())
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/notification-config",
+        json={
+            "sender_type": "lightagent",
+            "lightagent_targets": [{"id": "wgr_notice", "name": "notice"}],
+        },
+    )
+
+    response = client.post(
+        "/api/people/test",
+        json={
+            "name": "Alice",
+            "mention_mobile": "",
+            "wechat_group_member_id": "wgm_stable_member",
+            "wechat_group_runtime_sender_id": "@runtime-member",
+            "daily_time": "07:50",
+            "before_shift_minutes": 10,
+            "enabled": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert sent["mentions"] == ["wgm_stable_member", "@runtime-member"]
+    assert "Alice" in sent["content"]
+    records = client.get("/api/send-records").json()["records"]
+    assert records[0]["kind"] == "monitor_test"
+    assert records[0]["target"] == "Alice"
+    assert records[0]["status"] == "success"
+
+
+def test_custom_reminder_test_sends_current_form_to_webhook(tmp_path, monkeypatch):
+    sent: dict[str, object] = {}
+
+    class FakeWebhookClient:
+        def __init__(self, *, webhook_url: str):
+            sent["webhook_url"] = webhook_url
+
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            sent["content"] = content
+            sent["mobiles"] = mentioned_mobile_list
+
+    monkeypatch.setattr("app.main.WeComWebhookClient", FakeWebhookClient)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/notification-config",
+        json={"webhook_url": "https://example.test/cgi-bin/webhook/send?key=unit-test"},
+    )
+
+    response = client.post(
+        "/api/custom-reminders/test",
+        json={
+            "name": "Bob",
+            "mention_mobile": "10000000000",
+            "shift_code": "night",
+            "reminder_time": "21:00",
+            "message": "请处理 {name} {shift_label} {reminder_time}",
+            "enabled": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert sent == {
+        "webhook_url": "https://example.test/cgi-bin/webhook/send?key=unit-test",
+        "content": "请处理 Bob 夜班 21:00",
+        "mobiles": ["10000000000"],
+    }
+    records = client.get("/api/send-records").json()["records"]
+    assert records[0]["kind"] == "custom_test"
+    assert records[0]["target"] == "Bob"
+    assert records[0]["status"] == "success"
+
+
 def test_personal_wechat_patrol_warning_uses_true_all_mention(tmp_path):
     class FakeWechatClient:
         is_wechat_bridge = True
@@ -4407,6 +4746,61 @@ def test_due_reminder_sends_recently_overdue_daily_duty_event(tmp_path, monkeypa
     assert sent["image_bytes"].startswith(b"\x89PNG")
     records = repo.list_send_records()
     assert records[0]["kind"] == "daily_duty"
+    assert records[0]["status"] == "success"
+
+
+def test_due_monitored_reminder_uses_saved_wechat_member_for_personal_wechat(tmp_path, monkeypatch):
+    sent: dict[str, object] = {}
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2025, 9, 16, 7, 50, 25, tzinfo=tz)
+
+    class FakePersonalWechatClient(main_module.WechatBridgeNotifyClient):
+        def __init__(self):
+            pass
+
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            sent["content"] = content
+            sent["mentions"] = mentioned_mobile_list
+
+        async def send_image(self, image_bytes: bytes):
+            raise AssertionError("monitored reminders should send text")
+
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(
+        sender_type="lightagent",
+        webhook_url="",
+        lightagent_targets=[{"id": "wgr_notice", "name": "notice"}],
+    )
+    repo.save_daily_duty_config(enabled=False)
+    repo.save_roster_month(
+        2025,
+        9,
+        [{"name": "Alice", "days": {"16": "\u4e2d"}}],
+        "uploads/month.png",
+    )
+    repo.save_monitored_person(
+        name="Alice",
+        mention_mobile="",
+        wechat_group_room_id="wgr_notice",
+        wechat_group_member_id="wgm_stable_member",
+        wechat_group_runtime_sender_id="@old-runtime-member",
+        wechat_group_member_name="Alice",
+        daily_time="07:50",
+        before_shift_minutes=5,
+        enabled=True,
+    )
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(main_module, "_wecom_webhook_client_from_repo", lambda repo: FakePersonalWechatClient())
+
+    asyncio.run(main_module._send_due_reminders(repo))
+
+    assert sent["mentions"] == ["wgm_stable_member", "@old-runtime-member"]
+    records = repo.list_send_records()
+    assert records[0]["kind"] == "daily"
+    assert records[0]["target"] == "Alice"
     assert records[0]["status"] == "success"
 
 

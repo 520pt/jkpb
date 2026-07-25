@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import calendar
+import copy
 import hashlib
 import hmac
 import html as html_lib
@@ -212,6 +213,10 @@ class CustomReminderRequest(BaseModel):
         return _validate_hhmm(value)
 
 
+class CustomReminderTestRequest(CustomReminderRequest):
+    id: int | None = None
+
+
 class DailyDutyConfigRequest(BaseModel):
     enabled: bool = True
     reminder_time: str = "07:50"
@@ -292,6 +297,25 @@ class TunnelMechanicalResultImageRequest(BaseModel):
     authorization: str = ""
     cookie: str = ""
     checkTime: date
+
+
+class TunnelMechanicalModifyRequest(BaseModel):
+    base_url: str = ""
+    authorization: str = ""
+    cookie: str = ""
+    checkTime: date
+    weather: str = ""
+    checkerId: str = ""
+    checker: str = ""
+    recorderId: str = ""
+    recorder: str = ""
+    newCheckTime: date | None = None
+    newWeather: str = ""
+    newCheckerId: str = ""
+    newChecker: str = ""
+    newRecorderId: str = ""
+    newRecorder: str = ""
+    dry_run: bool = False
 
 
 class TunnelMechanicalConfigRequest(BaseModel):
@@ -521,6 +545,32 @@ def create_app(
         repo.save_monitored_person(**request.model_dump())
         return {"success": True, "people": repo.list_monitored_people()}
 
+    @app.post("/api/people/test")
+    async def test_person_reminder(request: MonitoredPersonRequest):
+        config = _notification_config_with_env_defaults(repo.get_notification_config())
+        notification_client = _notification_client_from_config(config)
+        if notification_client is None:
+            raise HTTPException(status_code=400, detail="请先配置通知发送通道")
+        content = _render_message_template(
+            str(config.get("message_template") or DEFAULT_MESSAGE_TEMPLATE),
+            {
+                "name": request.name.strip(),
+                "date": "2025-09-16",
+                "time_range": "08:00至16:00",
+                "shift_label": "中班",
+            },
+        )
+        event = ReminderEvent(
+            kind="monitor_test",
+            person_name=request.name.strip(),
+            send_at=datetime.now(TZ),
+            content=content,
+            mention_mobile=request.mention_mobile.strip(),
+            mention_wechat_id=request.wechat_group_runtime_sender_id.strip(),
+            mention_wechat_member_id=request.wechat_group_member_id.strip(),
+        )
+        return await _send_test_reminder_event(repo, notification_client, event, "monitor_test")
+
     @app.delete("/api/people/{name}")
     def delete_person(name: str):
         if not repo.delete_monitored_person(name):
@@ -546,6 +596,33 @@ def create_app(
     def save_custom_reminder(request: CustomReminderRequest):
         reminder_id = repo.save_custom_reminder(**request.model_dump())
         return {"success": True, "id": reminder_id, "reminders": repo.list_custom_reminders()}
+
+    @app.post("/api/custom-reminders/test")
+    async def test_custom_reminder(request: CustomReminderTestRequest):
+        notification_client = _notification_client_from_repo(repo)
+        if notification_client is None:
+            raise HTTPException(status_code=400, detail="请先配置通知发送通道")
+        shift = Shift(request.shift_code)
+        content = _render_simple_template(
+            request.message.strip(),
+            {
+                "name": request.name.strip(),
+                "date": "2025-09-16",
+                "time_range": f"{shift.start_time:%H:%M}至{shift.end_time:%H:%M}",
+                "shift_label": shift.label,
+                "reminder_time": request.reminder_time,
+            },
+        )
+        event = ReminderEvent(
+            kind="custom_test",
+            person_name=request.name.strip(),
+            send_at=datetime.now(TZ),
+            content=content,
+            mention_mobile=request.mention_mobile.strip(),
+            mention_wechat_id=request.wechat_group_runtime_sender_id.strip(),
+            mention_wechat_member_id=request.wechat_group_member_id.strip(),
+        )
+        return await _send_test_reminder_event(repo, notification_client, event, "custom_test")
 
     @app.delete("/api/custom-reminders/{reminder_id}")
     def delete_custom_reminder(reminder_id: int):
@@ -2070,7 +2147,11 @@ async def _build_wechat_query_response(
     uploads: Path | None = None,
 ) -> dict[str, Any]:
     text = _wechat_query_menu_selection_command(_normalize_wechat_query_text(query.text))
-    if _is_tunnel_mechanical_wechat_request(text):
+    if (
+        _is_tunnel_mechanical_wechat_request(text)
+        or _is_tunnel_mechanical_wechat_template_shortcut(text)
+        or _is_tunnel_mechanical_wechat_modify_template_shortcut(text)
+    ):
         _require_feature_channel_for_wechat_query(repo, query, "allow_tunnel_mechanical")
     else:
         _require_feature_channel_for_wechat_query(repo, query, "allow_duty_query")
@@ -2078,7 +2159,7 @@ async def _build_wechat_query_response(
     if tunnel_response is not None:
         return tunnel_response
     if _is_wechat_query_help(text):
-        return {"success": True, "reply": _wechat_query_help_text(), "query_type": "help"}
+        return _wechat_query_help_response()
     person = _person_for_wechat_query(repo, query)
     requested_person_name = _wechat_query_requested_person_name(repo, text)
     if _is_wechat_binding_query(text):
@@ -2102,7 +2183,9 @@ async def _build_wechat_query_response(
             return _wechat_query_unbound_response(query)
         return _build_all_next_reminder_query_response(repo)
     if not _is_wechat_monitor_query(text):
-        return {"success": False, "reply": _wechat_query_help_text(), "query_type": "unknown"}
+        response = _wechat_query_help_response()
+        response.update({"success": False, "query_type": "unknown"})
+        return response
     reminder_query = _is_wechat_reminder_query(text)
     person_name = requested_person_name or (str(person["name"]) if person and _is_wechat_self_scoped_query(text) else "")
     if not person_name:
@@ -2181,6 +2264,8 @@ def _looks_like_duty_wechat_command(text: str) -> bool:
         checker(value)
         for checker in (
             _is_tunnel_mechanical_wechat_request,
+            _is_tunnel_mechanical_wechat_template_shortcut,
+            _is_tunnel_mechanical_wechat_modify_template_shortcut,
             _is_wechat_query_help,
             _is_wechat_self_bind_command,
             _is_wechat_binding_query,
@@ -2206,9 +2291,33 @@ async def _build_tunnel_mechanical_wechat_response(
     *,
     uploads: Path | None = None,
 ) -> dict[str, Any] | None:
-    if not _is_tunnel_mechanical_wechat_request(text):
+    if (
+        not _is_tunnel_mechanical_wechat_request(text)
+        and not _is_tunnel_mechanical_wechat_template_shortcut(text)
+        and not _is_tunnel_mechanical_wechat_modify_template_shortcut(text)
+    ):
         return None
     template = _public_tunnel_mechanical_template(repo.get_tunnel_mechanical_template())
+    if _is_tunnel_mechanical_wechat_modify_template_shortcut(text):
+        template_line = _tunnel_mechanical_wechat_modify_template_line(template, query.target_date)
+        return {
+            "success": True,
+            "query_type": "tunnel_mechanical_modify_template",
+            "reply": template_line,
+            "replies": [template_line],
+            "template": template_line,
+        }
+    if _is_tunnel_mechanical_wechat_template_shortcut(text):
+        template_line = _tunnel_mechanical_wechat_template_line(template, query.target_date)
+        return {
+            "success": True,
+            "query_type": "tunnel_mechanical_template",
+            "reply": template_line,
+            "replies": [template_line],
+            "template": template_line,
+        }
+    if _is_tunnel_mechanical_wechat_modify_command(text):
+        return await _build_tunnel_mechanical_wechat_modify_response(repo, query, text, template, uploads=uploads)
     if _is_tunnel_mechanical_wechat_template_command(text):
         return _tunnel_mechanical_wechat_template_response(template, query.target_date)
     if _is_tunnel_mechanical_wechat_result_query_command(text):
@@ -2386,8 +2495,134 @@ async def _build_tunnel_mechanical_wechat_result_query_response(
     }
 
 
+async def _build_tunnel_mechanical_wechat_modify_response(
+    repo: DutyRepository,
+    query: WechatQueryRequest,
+    text: str,
+    template: dict[str, Any],
+    *,
+    uploads: Path | None = None,
+) -> dict[str, Any]:
+    if not template["assets"] or not template["people"]:
+        return {
+            "success": False,
+            "query_type": "tunnel_mechanical_modify",
+            "reply": "还没有导入隧道机电模板，请先在页面点击“导入模板”。",
+        }
+    source_text, changes_text = _split_tunnel_mechanical_wechat_modify_text(text)
+    params = _parse_tunnel_mechanical_wechat_params(source_text, template["people"], None)
+    changes, invalid_fields = _parse_tunnel_mechanical_wechat_changes(changes_text, template["people"])
+    if invalid_fields:
+        return {
+            "success": False,
+            "query_type": "tunnel_mechanical_modify",
+            "reply": "隧道机电修改参数无法识别：" + "、".join(invalid_fields) + "。请使用“修改日期为2026-07-25”“负责人改为姓名”“记录人改为姓名”“修改天气为晴”。",
+        }
+    if not changes:
+        example_date = params["checkTime"].isoformat()
+        return {
+            "success": False,
+            "query_type": "tunnel_mechanical_modify",
+            "reply": (
+                "请说明要修改的字段。\n"
+                f"示例：隧道机电修改 日期{example_date} 负责人罗越 记录人罗富耀 天气晴 修改日期为2026-07-25\n"
+                "也可以写：修改天气为多云、负责人改为罗越、记录人改为罗富耀。"
+            ),
+        }
+    dry_run = "预览" in text
+    config = repo.get_tunnel_mechanical_config()
+    request = TunnelMechanicalModifyRequest(
+        base_url=str(config.get("base_url") or "") or str(template.get("base_url") or ""),
+        checkTime=params["checkTime"],
+        weather=str(params.get("weather") or ""),
+        checkerId=str((params.get("checker") or {}).get("id") or ""),
+        checker=str((params.get("checker") or {}).get("name") or ""),
+        recorderId=str((params.get("recorder") or {}).get("id") or ""),
+        recorder=str((params.get("recorder") or {}).get("name") or ""),
+        newCheckTime=changes.get("checkTime"),
+        newWeather=str(changes.get("weather") or ""),
+        newCheckerId=str((changes.get("checker") or {}).get("id") or ""),
+        newChecker=str((changes.get("checker") or {}).get("name") or ""),
+        newRecorderId=str((changes.get("recorder") or {}).get("id") or ""),
+        newRecorder=str((changes.get("recorder") or {}).get("name") or ""),
+        dry_run=dry_run,
+    )
+    try:
+        result = await _modify_tunnel_mechanical(repo, request, result_upload_dir=uploads)
+    except HTTPException as exc:
+        detail = str(exc.detail)
+        repo.save_send_record(
+            kind="tunnel_mechanical_wechat_modify",
+            target=f"{request.checkTime.isoformat()} {request.checker}/{request.recorder}",
+            status="failed",
+            content=str(query.text or ""),
+            error=detail,
+        )
+        return {"success": False, "query_type": "tunnel_mechanical_modify", "reply": f"隧道机电修改失败：{detail}"}
+    except Exception as exc:
+        repo.save_send_record(
+            kind="tunnel_mechanical_wechat_modify",
+            target=f"{request.checkTime.isoformat()} {request.checker}/{request.recorder}",
+            status="failed",
+            content=str(query.text or ""),
+            error=str(exc),
+        )
+        return {"success": False, "query_type": "tunnel_mechanical_modify", "reply": f"隧道机电修改失败：{exc}"}
+    success = bool(result.get("success"))
+    final_date = (request.newCheckTime or request.checkTime).isoformat()
+    change_text = "，".join(_tunnel_mechanical_modify_change_labels(request))
+    repo.save_send_record(
+        kind="tunnel_mechanical_wechat_modify",
+        target=f"{request.checkTime.isoformat()} -> {final_date}",
+        status="success" if success else "failed",
+        content=str(query.text or ""),
+        error="" if success else "平台返回部分记录修改失败",
+    )
+    result_image_url = str(result.get("result_image_url") or "")
+    return {
+        "success": success,
+        "query_type": "tunnel_mechanical_modify",
+        "dry_run": dry_run,
+        "status": "preview" if dry_run else ("success" if success else "failed"),
+        "checkTime": request.checkTime.isoformat(),
+        "finalCheckTime": final_date,
+        "count": int(result.get("count") or 0),
+        "changes": {
+            "checkTime": request.newCheckTime.isoformat() if request.newCheckTime else "",
+            "weather": request.newWeather,
+            "checkerId": request.newCheckerId,
+            "checker": request.newChecker,
+            "recorderId": request.newRecorderId,
+            "recorder": request.newRecorder,
+        },
+        "reply": (
+            f"隧道机电{'预览' if dry_run else '修改'}完成：匹配 {result.get('count') or 0} 条，已{'' if dry_run else '提交'}修改{change_text}。"
+            + (f"\n查询结果生成失败：{result.get('result_query_error')}" if result.get("result_query_error") else "")
+            if success
+            else "隧道机电修改未全部成功，请到页面查看提交结果。"
+        ),
+        "image_url": result_image_url,
+        "image_full_url": _public_app_url(result_image_url),
+        "result": result,
+    }
+
+
 def _is_tunnel_mechanical_wechat_request(text: str) -> bool:
-    return "隧道机电" in text or "机电日常检查" in text or ("机电" in text and any(keyword in text for keyword in ("查询", "查", "今日", "今天", "昨日", "昨天", "明日", "明天")))
+    value = str(text or "").strip()
+    return (
+        value == "机电"
+        or "隧道机电" in value
+        or "机电日常检查" in value
+        or ("机电" in value and any(keyword in value for keyword in ("查询", "查", "今日", "今天", "昨日", "昨天", "明日", "明天")))
+    )
+
+
+def _is_tunnel_mechanical_wechat_template_shortcut(text: str) -> bool:
+    return str(text or "").strip() == "模板"
+
+
+def _is_tunnel_mechanical_wechat_modify_template_shortcut(text: str) -> bool:
+    return str(text or "").strip() in {"修改", "修改模板", "改模板"}
 
 
 def _public_app_url(path: str) -> str:
@@ -2404,8 +2639,16 @@ def _is_tunnel_mechanical_wechat_submit_command(text: str) -> bool:
     )
 
 
+def _is_tunnel_mechanical_wechat_modify_command(text: str) -> bool:
+    return _is_tunnel_mechanical_wechat_request(text) and any(
+        keyword in text for keyword in ("修改", "更改", "改为", "改成")
+    )
+
+
 def _is_tunnel_mechanical_wechat_template_command(text: str) -> bool:
-    return _is_tunnel_mechanical_wechat_request(text) and any(keyword in text for keyword in ("格式", "模板", "示例"))
+    return _is_tunnel_mechanical_wechat_template_shortcut(text) or (
+        _is_tunnel_mechanical_wechat_request(text) and any(keyword in text for keyword in ("格式", "模板", "示例"))
+    )
 
 
 def _is_tunnel_mechanical_wechat_result_query_command(text: str) -> bool:
@@ -2429,6 +2672,11 @@ def _tunnel_mechanical_wechat_template_line(template: dict[str, Any], target_dat
     return f"隧道机电录入 日期{check_time} 负责人罗富耀 记录人商邱宏 天气晴"
 
 
+def _tunnel_mechanical_wechat_modify_template_line(template: dict[str, Any], target_date: date | None = None) -> str:
+    check_time = (target_date or _today_in_tz()).isoformat()
+    return f"隧道机电修改 日期{check_time} 负责人罗富耀 记录人商邱宏 天气晴 修改日期为{check_time}"
+
+
 def _tunnel_mechanical_wechat_template_reply(template: dict[str, Any], target_date: date | None = None) -> str:
     check_time = (target_date or _today_in_tz()).isoformat()
     asset_count = len(template.get("assets") or [])
@@ -2438,10 +2686,16 @@ def _tunnel_mechanical_wechat_template_reply(template: dict[str, Any], target_da
     return (
         "隧道机电功能\n"
         "查询结果图：\n"
-        f"查询今日机电\n"
-        f"查询{check_time}机电\n\n"
-        "录入记录：下一条消息是可直接复制的录入模板，把日期、负责人、记录人、天气改好后发送。\n"
-        f"只想预览请求，把“录入”改成“预览”。\n"
+        "- 查询今日机电\n"
+        f"- 查询{check_time}机电\n\n"
+        "录入记录：\n"
+        "- 发送“模板”获取可复制录入模板\n"
+        "- 把模板里的日期、负责人、记录人、天气改好后发送\n"
+        "- 只想预览请求，把“录入”改成“预览”\n\n"
+        "修改记录：\n"
+        "- 发送“修改模板”获取可复制修改模板\n"
+        f"- {_tunnel_mechanical_wechat_modify_template_line(template, target_date)}\n"
+        "- 也可以修改天气、负责人、记录人，例如：修改天气为多云、负责人改为罗富耀、记录人改为商邱宏\n"
         f"登录失效时会自动重新登录；验证码识别失败会自动重试。"
         f"{asset_line}"
         f"{people_line}"
@@ -2459,6 +2713,141 @@ def _parse_tunnel_mechanical_wechat_params(
         "checker": _tunnel_mechanical_wechat_person(text, people, ("负责人", "检查人", "checker")),
         "recorder": _tunnel_mechanical_wechat_person(text, people, ("记录人", "recorder")),
     }
+
+
+def _split_tunnel_mechanical_wechat_modify_text(text: str) -> tuple[str, str]:
+    marker_pattern = "|".join(
+        re.escape(marker)
+        for marker in (
+            "修改日期为",
+            "日期改为",
+            "日期改成",
+            "改日期为",
+            "修改天气为",
+            "天气改为",
+            "天气改成",
+            "改天气为",
+            "修改负责人为",
+            "负责人改为",
+            "负责人改成",
+            "检查人改为",
+            "检查人改成",
+            "修改记录人为",
+            "记录人改为",
+            "记录人改成",
+        )
+    )
+    match = re.search(marker_pattern, text)
+    if not match:
+        return text, ""
+    return text[: match.start()], text[match.start() :]
+
+
+def _parse_tunnel_mechanical_wechat_changes(
+    text: str,
+    people: list[dict[str, Any]],
+) -> tuple[dict[str, Any], list[str]]:
+    changes: dict[str, Any] = {}
+    invalid_fields: list[str] = []
+    specs = {
+        "checkTime": ("日期", ("修改日期为", "日期改为", "日期改成", "改日期为")),
+        "weather": ("天气", ("修改天气为", "天气改为", "天气改成", "改天气为")),
+        "checker": ("负责人", ("修改负责人为", "负责人改为", "负责人改成", "检查人改为", "检查人改成")),
+        "recorder": ("记录人", ("修改记录人为", "记录人改为", "记录人改成")),
+    }
+    all_markers = tuple(marker for _, markers in specs.values() for marker in markers)
+    for field, (label, markers) in specs.items():
+        segment = _tunnel_mechanical_wechat_change_segment(text, markers, all_markers)
+        if segment is None:
+            continue
+        if field == "checkTime":
+            parsed_date = _tunnel_mechanical_wechat_optional_date(segment)
+            if parsed_date is None:
+                invalid_fields.append(label)
+            else:
+                changes[field] = parsed_date
+        elif field == "weather":
+            weather = _tunnel_mechanical_wechat_weather(segment)
+            if not weather:
+                invalid_fields.append(label)
+            else:
+                changes[field] = weather
+        else:
+            person = _tunnel_mechanical_wechat_person(segment, people, ("负责人", "检查人", "记录人", "checker", "recorder"))
+            if person is None:
+                person = _tunnel_mechanical_wechat_named_person(segment, people)
+            if person is None:
+                invalid_fields.append(label)
+            else:
+                changes[field] = person
+    return changes, invalid_fields
+
+
+def _tunnel_mechanical_wechat_change_segment(
+    text: str,
+    markers: tuple[str, ...],
+    all_markers: tuple[str, ...],
+) -> str | None:
+    lowered = text.lower()
+    starts = [(index, marker) for marker in markers if (index := lowered.find(marker.lower())) >= 0]
+    if not starts:
+        return None
+    start, marker = min(starts, key=lambda item: item[0])
+    after_start = start + len(marker)
+    next_boundaries = [
+        index
+        for other_marker in all_markers
+        if (index := lowered.find(other_marker.lower(), after_start)) > after_start
+    ]
+    end = min(next_boundaries, default=len(text))
+    return text[start:end]
+
+
+def _tunnel_mechanical_wechat_optional_date(text: str) -> date | None:
+    today = _today_in_tz()
+    if "后天" in text:
+        return today + timedelta(days=2)
+    if "明天" in text or "明日" in text:
+        return today + timedelta(days=1)
+    if "昨天" in text or "昨日" in text:
+        return today - timedelta(days=1)
+    if "今天" in text or "今日" in text:
+        return today
+    match = re.search(r"(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})(?:日|号)?", text)
+    if match:
+        try:
+            return date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        except ValueError:
+            return None
+    match = re.search(r"(?<!\d)(\d{1,2})[-/.月](\d{1,2})(?:日|号)?", text)
+    if match:
+        return _wechat_query_month_day(today, int(match.group(1)), int(match.group(2)))
+    return None
+
+
+def _tunnel_mechanical_wechat_named_person(
+    text: str,
+    people: list[dict[str, Any]],
+) -> dict[str, str] | None:
+    sorted_people = sorted(people, key=lambda person: len(str(person["name"])), reverse=True)
+    for person in sorted_people:
+        name = str(person["name"])
+        if name and name in text:
+            return {"id": str(person["id"]), "name": name}
+    return None
+
+
+def _tunnel_mechanical_modify_change_labels(request: TunnelMechanicalModifyRequest) -> list[str]:
+    labels: list[str] = []
+    if request.newCheckTime:
+        labels.append(f"日期为{request.newCheckTime.isoformat()}")
+    if request.newChecker:
+        labels.append(f"负责人为{request.newChecker}")
+    if request.newRecorder:
+        labels.append(f"记录人为{request.newRecorder}")
+    if request.newWeather:
+        labels.append(f"天气为{request.newWeather}")
+    return labels
 
 
 def _tunnel_mechanical_wechat_date(text: str, requested_date: date | None = None) -> date:
@@ -2758,6 +3147,18 @@ def _wechat_query_chinese_int(value: str) -> int:
     return mapping.get(text, 1)
 
 
+def _wechat_query_help_response() -> dict[str, Any]:
+    menu = _wechat_query_help_text()
+    template_line = _tunnel_mechanical_wechat_template_line({}, _today_in_tz())
+    return {
+        "success": True,
+        "reply": menu,
+        "replies": [menu, template_line],
+        "query_type": "help",
+        "template": template_line,
+    }
+
+
 def _wechat_query_help_text() -> str:
     today = _today_in_tz().isoformat()
     return (
@@ -2773,7 +3174,9 @@ def _wechat_query_help_text() -> str:
         f"9. 查询{today}机电\n"
         "10. 查看隧道机电录入格式\n"
         "直接回复序号即可执行。\n"
-        f"录入格式：{_tunnel_mechanical_wechat_template_line({}, _today_in_tz())}\n"
+        "发送“模板”可单独获取隧道机电录入模板。\n"
+        "发送“修改模板”可单独获取隧道机电修改模板。\n"
+        "发送“机电”可查看隧道机电菜单。\n"
         "也可以问：我今天什么班、明天我上班吗、查询7月24日监控、查询罗熙云监控。\n"
         "说明：群成员可以查询全员或指定姓名；只有“我的监控/我的绑定”这类个人查询需要先绑定微信成员。"
     )
@@ -3190,7 +3593,7 @@ def _person_roster_status_text(repo: DutyRepository, person_name: str, target: d
         return "出差"
     if code:
         return code
-    return "在岗/备勤（未标早中晚班）"
+    return "在岗/备勤"
 
 
 def _wechat_query_event_label(kind: str) -> str:
@@ -3321,6 +3724,7 @@ def _empty_tunnel_mechanical_template() -> dict[str, Any]:
         "base_url": "",
         "submit_path": "",
         "list_path": "",
+        "update_path": "",
         "people": [],
         "assets": [],
         "defaults": {
@@ -3351,6 +3755,7 @@ def _normalize_tunnel_mechanical_template(data: Any, *, require_assets: bool = T
         _tunnel_mechanical_base_url(template["base_url"])
     template["submit_path"] = str(data.get("submit_path") or "").strip()
     template["list_path"] = str(data.get("list_path") or "").strip()
+    template["update_path"] = str(data.get("update_path") or data.get("edit_path") or "").strip()
     people = []
     for person in data.get("people") or []:
         if not isinstance(person, dict):
@@ -4073,7 +4478,7 @@ async def _keepalive_tunnel_mechanical_login(repo: DutyRepository) -> None:
 
 async def _tunnel_mechanical_auth_headers(
     repo: DutyRepository,
-    request: TunnelMechanicalSubmitRequest | TunnelMechanicalResultImageRequest,
+    request: TunnelMechanicalSubmitRequest | TunnelMechanicalResultImageRequest | TunnelMechanicalModifyRequest,
     base_url: str,
     *,
     force_login: bool = False,
@@ -4238,6 +4643,201 @@ async def _submit_tunnel_mechanical(
     return response_body
 
 
+async def _modify_tunnel_mechanical(
+    repo: DutyRepository,
+    request: TunnelMechanicalModifyRequest,
+    *,
+    result_upload_dir: Path | None = None,
+) -> dict[str, Any]:
+    base_url, headers, template = await _tunnel_mechanical_request_context(repo, request)
+    list_path = _tunnel_mechanical_api_path(str(template.get("list_path") or ""))
+    if not list_path:
+        raise HTTPException(status_code=400, detail="模板未配置 list_path，无法查询要修改的隧道机电记录")
+    update_paths = _tunnel_mechanical_update_paths(template)
+    try:
+        raw_rows = await _query_tunnel_mechanical_raw_records(request, base_url=base_url, headers=headers, list_path=list_path)
+        result = await _apply_tunnel_mechanical_updates(
+            request,
+            raw_rows,
+            base_url=base_url,
+            headers=headers,
+            update_paths=update_paths,
+        )
+    except HTTPException as exc:
+        if exc.status_code != 401 or request.authorization.strip() or request.cookie.strip():
+            raise
+        base_url, headers, template = await _tunnel_mechanical_request_context(repo, request, force_login=True)
+        list_path = _tunnel_mechanical_api_path(str(template.get("list_path") or ""))
+        if not list_path:
+            raise HTTPException(status_code=400, detail="模板未配置 list_path，无法查询要修改的隧道机电记录") from exc
+        update_paths = _tunnel_mechanical_update_paths(template)
+        raw_rows = await _query_tunnel_mechanical_raw_records(request, base_url=base_url, headers=headers, list_path=list_path)
+        result = await _apply_tunnel_mechanical_updates(
+            request,
+            raw_rows,
+            base_url=base_url,
+            headers=headers,
+            update_paths=update_paths,
+        )
+    if result["success"] and result_upload_dir is not None and not request.dry_run:
+        final_request = TunnelMechanicalResultImageRequest(
+            base_url=request.base_url,
+            authorization=request.authorization,
+            cookie=request.cookie,
+            checkTime=request.newCheckTime or request.checkTime,
+        )
+        query_result = await _save_tunnel_mechanical_result_image(
+            repo,
+            final_request,
+            base_url=base_url,
+            headers=headers,
+            upload_dir=result_upload_dir,
+        )
+        result.update(query_result)
+    return result
+
+
+def _tunnel_mechanical_update_paths(template: dict[str, Any]) -> list[str]:
+    configured = _tunnel_mechanical_api_path(str(template.get("update_path") or ""))
+    if configured:
+        return [configured]
+    return ["/prod-api/patrol/deviceCheck/edit", "/prod-api/patrol/deviceCheck/update"]
+
+
+async def _apply_tunnel_mechanical_updates(
+    request: TunnelMechanicalModifyRequest,
+    rows: list[dict[str, Any]],
+    *,
+    base_url: str,
+    headers: dict[str, str],
+    update_paths: list[str],
+) -> dict[str, Any]:
+    if not rows:
+        raise HTTPException(status_code=404, detail="没有找到匹配的隧道机电记录，请检查原日期、负责人、记录人和天气")
+    updates = [
+        {
+            "recordId": _tunnel_mechanical_record_id(row),
+            "assetName": _first_present(row, _first_tunnel_mechanical_domain(row), "assetName", "tunnelName", "name"),
+            "payload": _build_tunnel_mechanical_update_payload(request, row),
+        }
+        for row in rows
+    ]
+    if request.dry_run:
+        return {"success": True, "dry_run": True, "count": len(updates), "updates": updates}
+    results = await _post_tunnel_mechanical_updates(
+        updates,
+        base_url=base_url,
+        headers=headers,
+        update_paths=update_paths,
+    )
+    return {"success": all(item["ok"] for item in results), "dry_run": False, "count": len(results), "results": results}
+
+
+async def _post_tunnel_mechanical_updates(
+    updates: list[dict[str, Any]],
+    *,
+    base_url: str,
+    headers: dict[str, str],
+    update_paths: list[str],
+) -> list[dict[str, Any]]:
+    results = []
+    try:
+        async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
+            for update in updates:
+                last_result: dict[str, Any] | None = None
+                for method in ("post", "put"):
+                    for path in update_paths:
+                        url = f"{base_url}{path}"
+                        response = await getattr(client, method)(url, headers=headers, json=update["payload"])
+                        try:
+                            body: Any = response.json()
+                        except ValueError:
+                            body = response.text[:2000]
+                        if _tunnel_mechanical_response_auth_expired(response.status_code, body):
+                            raise HTTPException(status_code=401, detail="智慧养护登录已失效，正在自动重新登录")
+                        ok = response.status_code == 200 and (
+                            not isinstance(body, dict) or str(body.get("code") or "") == "200"
+                        )
+                        last_result = {
+                            "recordId": update["recordId"],
+                            "assetName": update["assetName"],
+                            "url": url,
+                            "method": method.upper(),
+                            "status": response.status_code,
+                            "ok": ok,
+                            "body": body,
+                        }
+                        if ok or response.status_code not in {404, 405}:
+                            break
+                    if last_result and (last_result["ok"] or int(last_result["status"] or 0) not in {404, 405}):
+                        break
+                if last_result is None:
+                    last_result = {
+                        "recordId": update["recordId"],
+                        "assetName": update["assetName"],
+                        "url": "",
+                        "method": "",
+                        "status": 0,
+                        "ok": False,
+                        "body": "没有可用的隧道机电修改接口",
+                    }
+                results.append(last_result)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"修改智慧养护平台记录失败：{exc}") from exc
+    return results
+
+
+def _build_tunnel_mechanical_update_payload(
+    request: TunnelMechanicalModifyRequest,
+    row: dict[str, Any],
+) -> dict[str, Any]:
+    payload = copy.deepcopy(row)
+    record_id = _tunnel_mechanical_record_id(payload)
+    if record_id and not _first_present(payload, "id"):
+        payload["id"] = record_id
+    if request.newCheckTime:
+        _set_tunnel_mechanical_payload_value(payload, ("checkTime",), request.newCheckTime.isoformat())
+    if request.newWeather:
+        _set_tunnel_mechanical_payload_value(payload, ("weather",), request.newWeather)
+    if request.newChecker:
+        _set_tunnel_mechanical_payload_value(payload, ("checker", "checkerName"), request.newChecker)
+        _set_tunnel_mechanical_payload_value(payload, ("checkerId",), request.newCheckerId)
+    if request.newRecorder:
+        _set_tunnel_mechanical_payload_value(payload, ("recorder", "recorderName"), request.newRecorder)
+        _set_tunnel_mechanical_payload_value(payload, ("recorderId",), request.newRecorderId)
+    domains = payload.get("domains") or payload.get("domainList") or payload.get("deviceCheckDomainList")
+    if isinstance(domains, list):
+        for domain in domains:
+            if not isinstance(domain, dict):
+                continue
+            if request.newCheckTime and any(key in domain for key in ("checkTime", "checkDate")):
+                _set_tunnel_mechanical_payload_value(domain, ("checkTime", "checkDate"), request.newCheckTime.isoformat())
+            if request.newWeather and "weather" in domain:
+                _set_tunnel_mechanical_payload_value(domain, ("weather",), request.newWeather)
+            if request.newChecker and any(key in domain for key in ("checker", "checkerName", "checkerId")):
+                _set_tunnel_mechanical_payload_value(domain, ("checker", "checkerName"), request.newChecker)
+                _set_tunnel_mechanical_payload_value(domain, ("checkerId",), request.newCheckerId)
+            if request.newRecorder and any(key in domain for key in ("recorder", "recorderName", "recorderId")):
+                _set_tunnel_mechanical_payload_value(domain, ("recorder", "recorderName"), request.newRecorder)
+                _set_tunnel_mechanical_payload_value(domain, ("recorderId",), request.newRecorderId)
+    return payload
+
+
+def _set_tunnel_mechanical_payload_value(payload: dict[str, Any], keys: tuple[str, ...], value: Any) -> None:
+    existing_key = next((key for key in keys if key in payload), keys[0])
+    payload[existing_key] = value
+
+
+def _tunnel_mechanical_record_id(row: dict[str, Any]) -> str:
+    domain = _first_tunnel_mechanical_domain(row)
+    return _first_present(row, "id", "checkId", "deviceCheckId") or _first_present(
+        domain,
+        "checkId",
+        "id",
+        "deviceCheckId",
+    )
+
+
 async def _query_tunnel_mechanical_result_image(
     repo: DutyRepository,
     request: TunnelMechanicalResultImageRequest,
@@ -4268,7 +4868,7 @@ async def _query_tunnel_mechanical_result_image(
 
 async def _tunnel_mechanical_request_context(
     repo: DutyRepository,
-    request: TunnelMechanicalSubmitRequest | TunnelMechanicalResultImageRequest,
+    request: TunnelMechanicalSubmitRequest | TunnelMechanicalResultImageRequest | TunnelMechanicalModifyRequest,
     *,
     force_login: bool = False,
 ) -> tuple[str, dict[str, str], dict[str, Any]]:
@@ -4294,7 +4894,7 @@ async def _tunnel_mechanical_request_context(
 
 async def _save_tunnel_mechanical_result_image(
     repo: DutyRepository,
-    request: TunnelMechanicalSubmitRequest | TunnelMechanicalResultImageRequest,
+    request: TunnelMechanicalSubmitRequest | TunnelMechanicalResultImageRequest | TunnelMechanicalModifyRequest,
     *,
     base_url: str,
     headers: dict[str, str],
@@ -4329,7 +4929,23 @@ async def _save_tunnel_mechanical_result_image(
 
 
 async def _query_tunnel_mechanical_records(
-    request: TunnelMechanicalSubmitRequest | TunnelMechanicalResultImageRequest,
+    request: TunnelMechanicalSubmitRequest | TunnelMechanicalResultImageRequest | TunnelMechanicalModifyRequest,
+    *,
+    base_url: str,
+    headers: dict[str, str],
+    list_path: str,
+) -> list[dict[str, Any]]:
+    raw_rows = await _query_tunnel_mechanical_raw_records(
+        request,
+        base_url=base_url,
+        headers=headers,
+        list_path=list_path,
+    )
+    return _normalize_tunnel_mechanical_result_rows(raw_rows)
+
+
+async def _query_tunnel_mechanical_raw_records(
+    request: TunnelMechanicalSubmitRequest | TunnelMechanicalResultImageRequest | TunnelMechanicalModifyRequest,
     *,
     base_url: str,
     headers: dict[str, str],
@@ -4360,12 +4976,12 @@ async def _query_tunnel_mechanical_records(
             if response.status_code != 200 or not isinstance(body, dict):
                 last_error = f"HTTP {response.status_code}"
                 continue
-            rows = _normalize_tunnel_mechanical_result_rows(_extract_tunnel_mechanical_rows(body))
-            filtered = _filter_tunnel_mechanical_result_rows(rows, request)
+            raw_rows = [row for row in _extract_tunnel_mechanical_rows(body) if isinstance(row, dict)]
+            filtered = _filter_tunnel_mechanical_raw_rows(raw_rows, request)
             if filtered:
                 return filtered
-            if rows:
-                unmatched_rows = rows
+            if raw_rows:
+                unmatched_rows = raw_rows
             else:
                 last_error = "平台查询接口没有返回记录"
     if unmatched_rows:
@@ -4393,6 +5009,22 @@ def _extract_tunnel_mechanical_rows(body: Any) -> list[Any]:
             if isinstance(value, list):
                 return value
     return []
+
+
+def _filter_tunnel_mechanical_raw_rows(
+    rows: list[dict[str, Any]],
+    request: TunnelMechanicalSubmitRequest | TunnelMechanicalResultImageRequest | TunnelMechanicalModifyRequest,
+) -> list[dict[str, Any]]:
+    filtered = []
+    for row in rows:
+        normalized_rows = _normalize_tunnel_mechanical_result_rows([row])
+        if not normalized_rows:
+            continue
+        normalized = normalized_rows[0]
+        if not _tunnel_mechanical_result_row_matches_request(normalized, row, request):
+            continue
+        filtered.append(row)
+    return filtered
 
 
 def _normalize_tunnel_mechanical_result_rows(rows: list[Any]) -> list[dict[str, Any]]:
@@ -4456,16 +5088,39 @@ def _tunnel_mechanical_result_text(value: Any) -> str:
 
 def _filter_tunnel_mechanical_result_rows(
     rows: list[dict[str, Any]],
-    request: TunnelMechanicalSubmitRequest | TunnelMechanicalResultImageRequest,
+    request: TunnelMechanicalSubmitRequest | TunnelMechanicalResultImageRequest | TunnelMechanicalModifyRequest,
 ) -> list[dict[str, Any]]:
-    date_text = request.checkTime.isoformat()
     filtered = []
     for row in rows:
-        row_date = str(row.get("checkTime") or "")
-        if row_date and row_date != date_text:
+        if not _tunnel_mechanical_result_row_matches_request(row, {}, request):
             continue
         filtered.append(row)
     return filtered
+
+
+def _tunnel_mechanical_result_row_matches_request(
+    normalized: dict[str, Any],
+    raw_row: dict[str, Any],
+    request: TunnelMechanicalSubmitRequest | TunnelMechanicalResultImageRequest | TunnelMechanicalModifyRequest,
+) -> bool:
+    date_text = request.checkTime.isoformat()
+    row_date = str(normalized.get("checkTime") or "")
+    if row_date and row_date != date_text:
+        return False
+    if not isinstance(request, TunnelMechanicalModifyRequest):
+        return True
+    domain = _first_tunnel_mechanical_domain(raw_row) if raw_row else {}
+    checks = (
+        ("checker", request.checker, str(normalized.get("checker") or "")),
+        ("recorder", request.recorder, str(normalized.get("recorder") or "")),
+        ("weather", request.weather, str(normalized.get("weather") or "")),
+        ("checkerId", request.checkerId, _first_present(raw_row, domain, "checkerId", "checker_id")),
+        ("recorderId", request.recorderId, _first_present(raw_row, domain, "recorderId", "recorder_id")),
+    )
+    for _, expected, actual in checks:
+        if expected and actual and str(actual).strip() != str(expected).strip():
+            return False
+    return True
 
 
 def _reminder_events_response(repo: DutyRepository, target: date, *, now: datetime) -> dict[str, Any]:
@@ -4836,6 +5491,7 @@ def _plan_custom_reminder_events(repo: DutyRepository, assignments: list[ShiftAs
                     content=content,
                     mention_mobile=str(reminder.get("mention_mobile") or "").strip(),
                     mention_wechat_id=str(reminder.get("wechat_group_runtime_sender_id") or "").strip(),
+                    mention_wechat_member_id=str(reminder.get("wechat_group_member_id") or "").strip(),
                     key_suffix=str(reminder.get("id") or ""),
                 )
             )
@@ -5191,34 +5847,107 @@ def _person_mobile_lookup(repo: DutyRepository) -> dict[str, str]:
     return {name: mobile for name, mobile in lookup.items() if name}
 
 
-def _person_wechat_sender_lookup(repo: DutyRepository) -> dict[str, str]:
-    lookup: dict[str, str] = {}
+def _person_wechat_sender_lookup(repo: DutyRepository, *, prefer_stable: bool = False) -> dict[str, str]:
+    lookup = _person_wechat_sender_ids_lookup(repo, prefer_stable=prefer_stable)
+    return {name: ids[0] for name, ids in lookup.items() if ids}
+
+
+def _person_wechat_sender_ids_lookup(repo: DutyRepository, *, prefer_stable: bool = False) -> dict[str, list[str]]:
+    lookup: dict[str, list[str]] = {}
     for person in repo.list_personnel():
-        sender_id = str(person.get("wechat_group_runtime_sender_id") or "").strip()
-        if sender_id:
-            lookup[str(person.get("name") or "").strip()] = sender_id
-    return {name: sender_id for name, sender_id in lookup.items() if name}
+        runtime_id = str(person.get("wechat_group_runtime_sender_id") or "").strip()
+        stable_id = str(person.get("wechat_group_member_id") or "").strip()
+        candidates = [stable_id, runtime_id] if prefer_stable else [runtime_id, stable_id]
+        ids = []
+        for sender_id in candidates:
+            if sender_id and sender_id not in ids:
+                ids.append(sender_id)
+        if ids:
+            lookup[str(person.get("name") or "").strip()] = ids
+    return {name: ids for name, ids in lookup.items() if name}
+
+
+def _wechat_lookup_mentions(value: Any) -> list[str]:
+    if isinstance(value, list):
+        candidates = value
+    else:
+        candidates = [value]
+    mentions = []
+    for item in candidates:
+        text = str(item or "").strip()
+        if text and text not in mentions:
+            mentions.append(text)
+    return mentions
 
 
 def _mobile_for_event(event: ReminderEvent, mobile_lookup: dict[str, str]) -> str:
     return event.mention_mobile.strip() or mobile_lookup.get(event.person_name, "")
 
 
-def _mentions_for_event(client: Any, event: ReminderEvent, mobile_lookup: dict[str, str], wechat_lookup: dict[str, str]) -> list[str]:
+def _mentions_for_event(client: Any, event: ReminderEvent, mobile_lookup: dict[str, str], wechat_lookup: dict[str, Any]) -> list[str]:
     if _is_personal_wechat_notify_client(client):
-        sender_id = event.mention_wechat_id.strip() or wechat_lookup.get(event.person_name, "")
-        return [sender_id] if sender_id else []
+        mentions: list[str] = []
+        if isinstance(client, WechatBridgeNotifyClient):
+            mentions.extend(_wechat_lookup_mentions(event.mention_wechat_member_id.strip()))
+        mentions.extend(_wechat_lookup_mentions(event.mention_wechat_id.strip()))
+        mentions.extend(_wechat_lookup_mentions(wechat_lookup.get(event.person_name, "")))
+        return list(dict.fromkeys(mentions))
     mobile = _mobile_for_event(event, mobile_lookup)
     return [mobile] if mobile else []
 
 
 def _send_content_for_event(client: Any, event: ReminderEvent, mentions: list[str]) -> str:
     content = event.content
-    if _is_personal_wechat_notify_client(client) and event.kind == "custom" and not mentions:
+    if _is_personal_wechat_notify_client(client) and event.kind in {"custom", "custom_test"} and not mentions:
         name = str(event.person_name or "").strip()
         if name and not content.lstrip().startswith("@"):
             return f"@{name}\n{content}"
     return content
+
+
+async def _send_test_reminder_event(
+    repo: DutyRepository,
+    notification_client: Any,
+    event: ReminderEvent,
+    record_kind: str,
+) -> dict[str, Any]:
+    mobile_lookup = _person_mobile_lookup(repo)
+    wechat_lookup = (
+        _person_wechat_sender_ids_lookup(repo, prefer_stable=True)
+        if isinstance(notification_client, WechatBridgeNotifyClient)
+        else _person_wechat_sender_lookup(repo)
+    )
+    mentions = _mentions_for_event(notification_client, event, mobile_lookup, wechat_lookup)
+    content = _send_content_for_event(notification_client, event, mentions)
+    target = event.person_name or "测试消息"
+    try:
+        await notification_client.send_text(content, mentions)
+        repo.save_send_record(
+            kind=record_kind,
+            target=target,
+            status="success",
+            content=content,
+        )
+    except WeComError as exc:
+        repo.save_send_record(
+            kind=record_kind,
+            target=target,
+            status="failed",
+            content=content,
+            error=str(exc),
+        )
+        raise HTTPException(status_code=502, detail=_sanitize_wechat_ids_for_display(repo, str(exc))) from exc
+    except Exception as exc:
+        error = f"测试发送失败：{exc}"
+        repo.save_send_record(
+            kind=record_kind,
+            target=target,
+            status="failed",
+            content=content,
+            error=error,
+        )
+        raise HTTPException(status_code=502, detail=_sanitize_wechat_ids_for_display(repo, error)) from exc
+    return {"success": True, "content": content, "mentions": mentions}
 
 
 def _bound_wechat_sender_ids(repo: DutyRepository) -> list[str]:
@@ -5432,12 +6161,17 @@ def _patrol_warning_mentions_for_client(repo: DutyRepository, config: dict[str, 
         if bool(config.get("mention_all", True)):
             return ["@all"]
         names_or_ids = [part for part in re.split(r"[\s,，;；]+", str(config.get("mention_mobiles") or "")) if part]
-        lookup = _person_wechat_sender_lookup(repo)
+        lookup = (
+            _person_wechat_sender_ids_lookup(repo, prefer_stable=True)
+            if isinstance(client, WechatBridgeNotifyClient)
+            else _person_wechat_sender_lookup(repo)
+        )
         mentions = []
         for item in names_or_ids:
-            sender_id = item if item.startswith("@") else lookup.get(item, "")
-            if sender_id and sender_id not in mentions:
-                mentions.append(sender_id)
+            sender_ids = [item] if item.startswith("@") else _wechat_lookup_mentions(lookup.get(item, ""))
+            for sender_id in sender_ids:
+                if sender_id and sender_id not in mentions:
+                    mentions.append(sender_id)
         return mentions
     return _patrol_warning_mentions(config)
 
@@ -5475,7 +6209,16 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
             )
             await client.send_text(
                 content,
-                _mentions_for_event(client, fake_event, mobile_lookup, _person_wechat_sender_lookup(repo)),
+                _mentions_for_event(
+                    client,
+                    fake_event,
+                    mobile_lookup,
+                    (
+                        _person_wechat_sender_ids_lookup(repo, prefer_stable=True)
+                        if isinstance(client, WechatBridgeNotifyClient)
+                        else _person_wechat_sender_lookup(repo)
+                    ),
+                ),
             )
         repo.save_send_record(
             kind=resend_kind,
@@ -5528,7 +6271,11 @@ async def _send_due_reminders(repo: DutyRepository) -> None:
 
     people = {person["name"]: person for person in repo.list_monitored_people(enabled_only=True)}
     mobile_lookup = _person_mobile_lookup(repo)
-    wechat_lookup = _person_wechat_sender_lookup(repo)
+    wechat_lookup = (
+        _person_wechat_sender_ids_lookup(repo, prefer_stable=True)
+        if isinstance(webhook_client, WechatBridgeNotifyClient)
+        else _person_wechat_sender_lookup(repo)
+    )
     for event in events:
         if not (now - REMINDER_SEND_GRACE <= event.send_at <= now):
             continue

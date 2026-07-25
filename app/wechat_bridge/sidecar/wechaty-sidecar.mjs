@@ -61,12 +61,23 @@ async function contactRawPayload(contact) {
 }
 
 async function roomMemberRawPayload(room, contact) {
+  let rawPayload = null
   try {
     if (room?.id && contact?.id && typeof state.bot?.puppet?.roomMemberRawPayload === 'function') {
-      return await state.bot.puppet.roomMemberRawPayload(room.id, contact.id)
+      rawPayload = await state.bot.puppet.roomMemberRawPayload(room.id, contact.id)
     }
   } catch {}
-  return null
+  try {
+    const wechat4u = getWechat4uRuntime(state.bot)
+    if (room?.id && contact?.id && typeof wechat4u?.batchGetContact === 'function') {
+      const result = await wechat4u.batchGetContact([{ UserName: contact.id, EncryChatRoomId: room.id }])
+      const enriched = Array.isArray(result) ? result[0] : null
+      if (enriched && typeof enriched === 'object') {
+        return { ...(rawPayload || {}), ...enriched }
+      }
+    }
+  } catch {}
+  return rawPayload
 }
 
 async function contactPayload(contact, room = null, rawPayload = null) {
@@ -194,6 +205,9 @@ async function handleMessage(message) {
     self_id: selfInfo.id,
     self_name: selfInfo.name,
     text: message.text(),
+    raw_msg_source: String(rawPayload?.MsgSource || ''),
+    raw_content: String(rawPayload?.Content || ''),
+    raw_ori_content: String(rawPayload?.OriContent || rawPayload?.OriginalContent || ''),
     message_type: mediaType,
     file_path: filePath,
     is_at: self ? mentions.some(contact => contact.id === self.id) : false,
@@ -257,6 +271,7 @@ async function sendText(command) {
     emit,
     findRoom,
     findContact: contactId => findContactById(state.bot, contactId),
+    roomMemberRawPayload,
     getWechat4u: () => getWechat4uRuntime(state.bot),
     isWechat4u: () => isWechat4uBot(state.bot),
     logWarning: message => console.error(message),
@@ -267,7 +282,12 @@ async function sendFile(command) {
   const room = await findRoom(command.room_id)
   if (!room) throw new Error(`room not found: ${command.room_id}`)
   await room.say(FileBox.fromFile(command.path || command.file_path))
-  emit('send_result', { ok: true, command: 'send_file', room_id: command.room_id })
+  emit('send_result', {
+    ok: true,
+    command: 'send_file',
+    request_id: command.request_id || '',
+    room_id: command.room_id,
+  })
 }
 
 async function handleCommand(command) {
@@ -309,9 +329,17 @@ const shutdown = createSessionPreservingShutdown({
 registerSessionPreservingSignalHandlers({ processRef: process, shutdown })
 
 rl.on('line', line => {
+  let command = null
   Promise.resolve()
-    .then(() => handleCommand(JSON.parse(line)))
-    .catch(error => emit('error', { message: error.message || String(error) }))
+    .then(() => {
+      command = JSON.parse(line)
+      return handleCommand(command)
+    })
+    .catch(error => emit('error', {
+      request_id: command?.request_id || '',
+      command: command?.type || '',
+      message: error.message || String(error),
+    }))
 })
 
 start().catch(error => emit('error', { message: error.message || String(error) }))

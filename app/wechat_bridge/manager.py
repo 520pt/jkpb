@@ -58,6 +58,7 @@ def _qr_image_data_uri(text: str) -> str:
 
 class WechatBridgeManager:
     STOP_TIMEOUT_SECONDS = 5
+    SEND_RESULT_TIMEOUT_SECONDS = 15
     OUTGOING_ECHO_TTL_SECONDS = 120
 
     def __init__(self, *, data_dir: Path | None = None, sidecar_dir: Path | None = None) -> None:
@@ -69,6 +70,8 @@ class WechatBridgeManager:
         self._lock = threading.RLock()
         self._room_members_lock = threading.RLock()
         self._room_member_waiters: dict[str, threading.Event] = {}
+        self._send_result_lock = threading.RLock()
+        self._send_result_waiters: dict[str, dict[str, Any]] = {}
         self._reader_thread: threading.Thread | None = None
         self._stderr_thread: threading.Thread | None = None
         self.message_handler: Callable[[dict[str, Any]], None] | None = None
@@ -80,6 +83,7 @@ class WechatBridgeManager:
         self.qr_image = ""
         self.self_id = ""
         self.self_name = ""
+        self.last_send_result: dict[str, Any] = {}
         self.rooms: list[dict[str, Any]] = []
         self.room_members: dict[str, list[dict[str, Any]]] = {}
         self.identity: dict[str, Any] = {"rooms": {}, "members": {}}
@@ -189,16 +193,33 @@ class WechatBridgeManager:
         if not runtime_room_id:
             raise RuntimeError(f"目标微信群当前不可发送或未同步：{room_id}")
         self.ensure_started()
-        self._remember_outgoing_text(runtime_room_id, text)
-        self._send_command(
-            {
-                "type": SidecarCommandType.SEND_TEXT,
-                "room_id": runtime_room_id,
-                "text": text,
-                "mention_ids": mention_ids or [],
-                "alias_sync_cooldown_minutes": 1,
-            }
-        )
+        request_id = f"send_{int(time.time() * 1000)}_{threading.get_ident()}"
+        waiter = threading.Event()
+        with self._send_result_lock:
+            self._send_result_waiters[request_id] = {"event": waiter, "result": None}
+        try:
+            self._send_command(
+                {
+                    "type": SidecarCommandType.SEND_TEXT,
+                    "request_id": request_id,
+                    "room_id": runtime_room_id,
+                    "text": text,
+                    "mention_ids": self.resolve_runtime_member_ids(mention_ids or []),
+                    "alias_sync_cooldown_minutes": 1,
+                }
+            )
+            if not waiter.wait(self.SEND_RESULT_TIMEOUT_SECONDS):
+                raise RuntimeError("内置微信桥发送结果超时，请检查微信是否在线或查看容器日志")
+            with self._send_result_lock:
+                result = self._send_result_waiters.get(request_id, {}).get("result")
+            if not isinstance(result, dict):
+                raise RuntimeError("内置微信桥发送结果异常")
+            if result.get("ok") is False or result.get("type") == SidecarEventType.ERROR:
+                raise RuntimeError(str(result.get("message") or result.get("error") or "内置微信桥发送失败"))
+            self._remember_outgoing_text(runtime_room_id, str(result.get("sent_text") or text))
+        finally:
+            with self._send_result_lock:
+                self._send_result_waiters.pop(request_id, None)
 
     def send_image_bytes(self, room_id: str, image_bytes: bytes) -> None:
         self.media_dir.mkdir(parents=True, exist_ok=True)
@@ -236,6 +257,7 @@ class WechatBridgeManager:
             "sendable_room_count": len([room for room in rooms if room.get("sendable")]),
             "selected_room_ids": [room["id"] for room in rooms if room.get("id")],
             "selected_room_names": [room.get("name", "") for room in rooms],
+            "last_send_result": dict(self.last_send_result),
         }
 
     def rooms_snapshot(self) -> list[dict[str, Any]]:
@@ -253,6 +275,20 @@ class WechatBridgeManager:
                 return str(room.get("runtime_room_id") or "").strip()
         saved = self.identity.get("rooms", {}).get(text, {})
         return str(saved.get("runtime_room_id") or "").strip()
+
+    def resolve_runtime_member_ids(self, member_ids: list[str]) -> list[str]:
+        resolved: list[str] = []
+        for member_id in member_ids:
+            text = str(member_id or "").strip()
+            if not text:
+                continue
+            runtime_id = text
+            if text.startswith("wgm_"):
+                saved = self.identity.get("members", {}).get(text, {})
+                runtime_id = str(saved.get("runtime_sender_id") or "").strip() or text
+            if runtime_id and runtime_id not in resolved:
+                resolved.append(runtime_id)
+        return resolved
 
     def ensure_started(self) -> None:
         self.start()
@@ -311,14 +347,69 @@ class WechatBridgeManager:
             return
         if event.type == SidecarEventType.MESSAGE:
             message = self._normalize_message(event.payload)
+            if message.get("is_at") or str(message.get("raw_msg_source") or "").strip():
+                LOGGER.warning(
+                    "微信@诊断：room=%s sender=%s is_at=%s at_list=%s text=%s raw_msg_source=%s raw_content=%s raw_ori_content=%s",
+                    message.get("stable_room_id") or message.get("room_id"),
+                    message.get("sender_name") or message.get("runtime_sender_id"),
+                    message.get("is_at"),
+                    message.get("at_list"),
+                    str(message.get("text") or "")[:200],
+                    str(message.get("raw_msg_source") or "")[:500],
+                    str(message.get("raw_content") or "")[:500],
+                    str(message.get("raw_ori_content") or "")[:500],
+                )
             handler = self.message_handler
             if handler and message:
                 threading.Thread(target=handler, args=(message,), daemon=True).start()
             return
+        if event.type == SidecarEventType.SEND_RESULT:
+            self._consume_send_result(event)
+            return
         if event.type == SidecarEventType.ERROR:
             self.last_error = str(event.get("message") or event.get("error") or event.payload)
+            if str(event.get("request_id") or "").strip():
+                self._consume_send_result(event, ok=False)
+                return
             if self.status not in CONNECTED_STATUSES and not self.rooms:
                 self.status = "error"
+
+    def _consume_send_result(self, event: SidecarEvent, *, ok: bool | None = None) -> None:
+        request_id = str(event.get("request_id") or "").strip()
+        if not request_id:
+            return
+        payload = dict(event.payload)
+        payload["type"] = event.type
+        if ok is not None:
+            payload["ok"] = ok
+        if (
+            payload.get("mention_count")
+            or payload.get("msg_source")
+            or payload.get("at_user_list")
+            or payload.get("mention_id_candidates")
+        ):
+            LOGGER.warning(
+                "Wechat mention send diagnostic: room=%s ok=%s mention_count=%s true_mention=%s at_user_list=%s msg_source=%s candidates=%s sent_text=%s msg_id=%s local_id=%s",
+                payload.get("room_id"),
+                payload.get("ok"),
+                payload.get("mention_count"),
+                payload.get("true_mention"),
+                payload.get("at_user_list"),
+                str(payload.get("msg_source") or "")[:500],
+                payload.get("mention_id_candidates"),
+                str(payload.get("sent_text") or "")[:300],
+                payload.get("msg_id"),
+                payload.get("local_id"),
+            )
+        with self._send_result_lock:
+            waiter = self._send_result_waiters.get(request_id)
+            if not waiter:
+                return
+            self.last_send_result = payload
+            waiter["result"] = payload
+            event_obj = waiter.get("event")
+            if isinstance(event_obj, threading.Event):
+                event_obj.set()
 
     def _normalize_rooms(self, rooms: Any) -> list[dict[str, Any]]:
         normalized = []
@@ -411,7 +502,7 @@ class WechatBridgeManager:
         runtime_sender_id = str(payload.get("runtime_sender_id") or payload.get("sender_id") or "").strip()
         sender_name = str(payload.get("sender_name") or "").strip()
         stable_room_id = self._stable_room_id_for_runtime(runtime_room_id, room_name)
-        stable_member_id = _stable_id("wgm", stable_room_id, runtime_sender_id, sender_name)
+        stable_member_id = self._remember_message_member_identity(stable_room_id, runtime_sender_id, sender_name, payload)
         self_runtime_id = str(payload.get("runtime_self_id") or payload.get("self_id") or self.self_id or "").strip()
         payload_my_msg = bool(payload.get("my_msg"))
         is_self_sender = bool(self_runtime_id and runtime_sender_id and runtime_sender_id == self_runtime_id)
@@ -428,6 +519,65 @@ class WechatBridgeManager:
             "is_at": bool(payload.get("is_at")),
             "my_msg": payload_my_msg or is_self_sender or is_outgoing_echo,
         }
+
+    def _remember_message_member_identity(
+        self,
+        stable_room_id: str,
+        runtime_sender_id: str,
+        sender_name: str,
+        payload: dict[str, Any],
+    ) -> str:
+        room_id = str(stable_room_id or "").strip()
+        runtime_id = str(runtime_sender_id or "").strip()
+        name = str(sender_name or runtime_id).strip()
+        fallback_id = _stable_id("wgm", room_id, runtime_id, name)
+        if not room_id or not runtime_id:
+            return fallback_id
+
+        members = self.identity.setdefault("members", {})
+        direct_matches = [
+            (member_id, item)
+            for member_id, item in members.items()
+            if str(item.get("stable_room_id") or "").strip() == room_id
+            and str(item.get("runtime_sender_id") or "").strip() == runtime_id
+        ]
+        if direct_matches:
+            stable_member_id, saved = direct_matches[0]
+            if name and saved.get("name") != name:
+                saved["name"] = name
+                saved["updated_at"] = int(time.time())
+                self._save_identity()
+            return stable_member_id
+
+        if runtime_id.startswith("@"):
+            return fallback_id
+
+        normalized_name = name.casefold()
+        name_matches = [
+            (member_id, item)
+            for member_id, item in members.items()
+            if str(item.get("stable_room_id") or "").strip() == room_id
+            and str(item.get("name") or "").strip().casefold() == normalized_name
+        ]
+        if len(name_matches) != 1:
+            return fallback_id
+
+        stable_member_id, saved = name_matches[0]
+        sender_wechat_id = str(
+            payload.get("sender_wechat_id")
+            or (payload.get("member_fingerprint") if isinstance(payload.get("member_fingerprint"), dict) else {}).get("wechat_id")
+            or ""
+        ).strip()
+        saved.update(
+            {
+                "runtime_sender_id": runtime_id,
+                "name": name,
+                "wechat_id": sender_wechat_id or str(saved.get("wechat_id") or "").strip(),
+                "updated_at": int(time.time()),
+            }
+        )
+        self._save_identity()
+        return stable_member_id
 
     def _remember_outgoing_text(self, runtime_room_id: str, text: str) -> None:
         room_id = str(runtime_room_id or "").strip()

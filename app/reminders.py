@@ -24,6 +24,7 @@ class ReminderEvent:
     content: str
     mention_mobile: str = ""
     mention_wechat_id: str = ""
+    mention_wechat_member_id: str = ""
     key_suffix: str = ""
 
 

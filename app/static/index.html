@@ -2324,6 +2324,7 @@
                 </div>
                 <div class="settings-actions">
                   <button class="primary" id="savePersonBtn">保存监控班提醒</button>
+                  <button id="testPersonBtn" type="button">测试发送</button>
                   <button class="hidden" id="cancelPersonEditBtn" type="button">取消编辑</button>
                 </div>
                 <p id="monitorStatus" class="status"></p>
@@ -2436,6 +2437,7 @@
                 <label class="checkbox-label"><span>启用这条提醒</span><input id="customReminderEnabled" type="checkbox" checked /></label>
                 <div class="settings-actions">
                   <button class="primary" id="saveCustomReminderBtn" type="button">保存自定义提醒</button>
+                  <button id="testCustomReminderBtn" type="button">测试发送</button>
                 </div>
                 <p id="customReminderStatus" class="status"></p>
               </div>
@@ -3770,8 +3772,8 @@
 
     $("cancelPersonEditBtn").addEventListener("click", resetMonitorPersonForm);
 
-    $("savePersonBtn").addEventListener("click", async () => {
-      const payload = {
+    function monitorPersonFormPayload() {
+      return {
         original_name: state.editingPersonName || "",
         name: $("personName").value.trim(),
         mention_mobile: $("mentionMobile").value.trim(),
@@ -3783,6 +3785,10 @@
         rest_message_template: $("restMessageTemplate").value.trim(),
         enabled: $("monitorPersonEnabled").checked
       };
+    }
+
+    $("savePersonBtn").addEventListener("click", async () => {
+      const payload = monitorPersonFormPayload();
       if (!payload.name) return;
       await saveNotificationConfig(false);
       const response = await fetch("/api/people", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -3792,6 +3798,31 @@
       $("monitorStatus").className = `status ${response.ok && body.success ? "ok" : "error"}`;
       await loadPeople();
       await loadPersonnel();
+    });
+
+    $("testPersonBtn").addEventListener("click", async () => {
+      const payload = monitorPersonFormPayload();
+      if (!payload.name) {
+        $("monitorStatus").textContent = "请填写姓名";
+        $("monitorStatus").className = "status error";
+        return;
+      }
+      $("monitorStatus").textContent = "正在发送监控班测试提醒...";
+      $("monitorStatus").className = "status";
+      try {
+        await saveNotificationConfig(false);
+        const response = await fetch("/api/people/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const body = await response.json();
+        $("monitorStatus").textContent = response.ok && body.success ? `监控班测试提醒已发送：${body.content}` : body.detail || "测试发送失败";
+        $("monitorStatus").className = `status ${response.ok && body.success ? "ok" : "error"}`;
+      } catch (error) {
+        $("monitorStatus").textContent = `测试发送失败：${error.message || error}`;
+        $("monitorStatus").className = "status error";
+      }
     });
 
     async function loadPeople() {
@@ -3905,8 +3936,8 @@
       `).join("") || `<div class="item empty"><small>暂无自定义提醒</small></div>`;
     }
 
-    $("saveCustomReminderBtn").addEventListener("click", async () => {
-      const payload = {
+    function customReminderFormPayload() {
+      return {
         id: state.editingCustomReminderId,
         name: $("customReminderName").value.trim(),
         mention_mobile: $("customReminderMobile").value.trim(),
@@ -3916,6 +3947,10 @@
         message: $("customReminderMessage").value.trim(),
         enabled: $("customReminderEnabled").checked
       };
+    }
+
+    $("saveCustomReminderBtn").addEventListener("click", async () => {
+      const payload = customReminderFormPayload();
       if (!payload.name || !payload.message) {
         $("customReminderStatus").textContent = "请填写姓名和提醒文案";
         $("customReminderStatus").className = "status error";
@@ -3934,6 +3969,31 @@
         resetCustomReminderForm();
         await loadCustomReminders();
         await loadPersonnel();
+      }
+    });
+
+    $("testCustomReminderBtn").addEventListener("click", async () => {
+      const payload = customReminderFormPayload();
+      if (!payload.name || !payload.message) {
+        $("customReminderStatus").textContent = "请填写姓名和提醒文案";
+        $("customReminderStatus").className = "status error";
+        return;
+      }
+      $("customReminderStatus").textContent = "正在发送自定义测试提醒...";
+      $("customReminderStatus").className = "status";
+      try {
+        await saveNotificationConfig(false);
+        const response = await fetch("/api/custom-reminders/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const body = await response.json();
+        $("customReminderStatus").textContent = response.ok && body.success ? `自定义测试提醒已发送：${body.content}` : body.detail || "测试发送失败";
+        $("customReminderStatus").className = `status ${response.ok && body.success ? "ok" : "error"}`;
+      } catch (error) {
+        $("customReminderStatus").textContent = `测试发送失败：${error.message || error}`;
+        $("customReminderStatus").className = "status error";
       }
     });
 
@@ -5641,6 +5701,8 @@
         daily_duty_test_resend: "今日在岗测试补发",
         notification_test: "通知测试",
         notification_test_resend: "通知测试补发",
+        monitor_test: "监控班测试",
+        monitor_test_resend: "监控班测试补发",
         daily: "每日提醒",
         daily_resend: "每日提醒补发",
         before_shift: "班前提醒",
@@ -5648,6 +5710,8 @@
         rest: "休息提醒",
         rest_resend: "休息提醒补发",
         custom: "自定义提醒",
+        custom_test: "自定义提醒测试",
+        custom_test_resend: "自定义提醒测试补发",
         custom_resend: "自定义提醒补发",
         patrol_warning_start: "公路巡查预警",
         patrol_warning_start_resend: "公路巡查预警补发",
@@ -5661,6 +5725,8 @@
         patrol_warning_check_resend: "公路巡查预警检查补发",
         tunnel_mechanical_wechat: "隧道机电录入",
         tunnel_mechanical_wechat_resend: "隧道机电录入补发",
+        tunnel_mechanical_wechat_modify: "隧道机电修改",
+        tunnel_mechanical_wechat_modify_resend: "隧道机电修改补发",
         tunnel_mechanical_query_wechat: "隧道机电查询",
         tunnel_mechanical_query_wechat_resend: "隧道机电查询补发",
       })[kind] || kind;
@@ -5675,8 +5741,10 @@
         daily_duty: "daily_duty",
         daily: "monitor",
         before_shift: "monitor",
+        monitor_test: "monitor",
         rest: "monitor",
         custom: "custom",
+        custom_test: "custom",
         patrol_warning_start: "patrol_warning",
         patrol_warning_end: "patrol_warning",
       })[kind] || kind || "other";
