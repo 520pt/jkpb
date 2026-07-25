@@ -41,21 +41,15 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-部署前请先修改 `.env` 里的 `ADMIN_PASSWORD`、`LIGHTAGENT_WEB_PASSWORD`、`LIGHTAGENT_PUSH_TOKEN` 和模型 API key。设置 `ADMIN_PASSWORD` 后页面和接口会启用应用内登录保护，`/health` 保持不鉴权用于健康检查。
+部署前请先修改 `.env` 里的 `ADMIN_PASSWORD`。设置 `ADMIN_PASSWORD` 后页面和接口会启用应用内登录保护，`/health` 保持不鉴权用于健康检查。
 
 GitHub Actions 会自动构建镜像并推送到 GitHub Container Registry：
 
 ```text
 ghcr.io/520pt/jkpb:latest
-ghcr.io/520pt/jkpb-lightagent:latest
 ```
 
-`docker-compose.yml` 会同时启动两个服务：
-
-- `duty-reminder`：排班提醒服务，默认端口 `8080`。
-- `lightagent`：本项目内维护的 `LightAgent/` 源码，提供 LightAgent Web 控制台和个人微信群通道，默认端口 `9899`。
-
-`LightAgent/` 不是 Git submodule。同步上游 `yideng966/LightAgent` 时，只把上游改动合并到本仓库内的 `LightAgent/` 目录，并最终推送本仓库 `520pt/jkpb`。
+`docker-compose.yml` 只会启动 `duty-reminder` 一个服务。个人微信群通知已经内置在本项目镜像内，不需要再单独部署 LightAgent。
 
 ### Docker 镜像部署
 
@@ -63,7 +57,6 @@ ghcr.io/520pt/jkpb-lightagent:latest
 
 ```text
 ghcr.io/520pt/jkpb:latest
-ghcr.io/520pt/jkpb-lightagent:latest
 ```
 
 不要用根目录的 `docker-compose.yml` 做服务器部署，那个文件用于本地源码构建和开发调试。
@@ -76,20 +69,6 @@ ghcr.io/520pt/jkpb-lightagent:latest
 
 ```yaml
 services:
-  lightagent:
-    image: ghcr.io/520pt/jkpb-lightagent:latest
-    container_name: lightagent
-    restart: unless-stopped
-    ports:
-      - "9899:9899"
-    environment:
-      LIGHTAGENT_WEB_PASSWORD: 520pt
-      LIGHTAGENT_PUSH_TOKEN: 520pt
-      DUTY_REMINDER_QUERY_TOKEN: 520pt
-      DEEPSEEK_API_KEY: ""
-    volumes:
-      - ./lightagent:/home/agent/lightagent
-
   duty-reminder:
     image: ghcr.io/520pt/jkpb:latest
     container_name: duty-reminder
@@ -99,14 +78,13 @@ services:
     environment:
       ADMIN_USERNAME: 520pt
       ADMIN_PASSWORD: 520pt
-      LIGHTAGENT_WEB_PASSWORD: 520pt
-      LIGHTAGENT_PUSH_TOKEN: 520pt
+      WECHAT_BRIDGE_ENABLED: "true"
+      WECHAT_BRIDGE_DATA_DIR: /app/wechat
       DUTY_REMINDER_QUERY_TOKEN: 520pt
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads
-    depends_on:
-      - lightagent
+      - ./wechat:/app/wechat
 ```
 
 部署步骤：
@@ -115,7 +93,7 @@ services:
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-部署前一般只需要确认 `ADMIN_USERNAME`、`ADMIN_PASSWORD`、`LIGHTAGENT_WEB_PASSWORD`、`LIGHTAGENT_PUSH_TOKEN`、`DUTY_REMINDER_QUERY_TOKEN` 和 `DEEPSEEK_API_KEY`。其中 `LIGHTAGENT_PUSH_TOKEN` 和 `DUTY_REMINDER_QUERY_TOKEN` 两个服务里要保持一致。更新镜像时再执行一次：
+部署前一般只需要确认 `ADMIN_USERNAME`、`ADMIN_PASSWORD` 和 `DUTY_REMINDER_QUERY_TOKEN`。更新镜像时再执行一次：
 
 ```bash
 docker compose -f docker-compose.prod.yml pull
@@ -143,8 +121,9 @@ INSTALL_OCR=true docker compose up -d --build
 
 - `duty-data:/app/data`：SQLite 数据库、排班、配置、发送记录。
 - `duty-uploads:/app/uploads`：上传的排班图片。
+- `duty-wechat:/app/wechat`：内置个人微信群桥的登录态、群 ID 映射、成员 ID 映射。
 
-不要执行 `docker compose down -v` 或手动删除 `duty-data` / `duty-uploads` volume，否则会删除本地构建环境的数据。
+不要执行 `docker compose down -v` 或手动删除 `duty-data` / `duty-uploads` / `duty-wechat` volume，否则会删除本地构建环境的数据。
 
 备份可以先查看实际 volume 名：
 
@@ -157,6 +136,7 @@ docker volume ls | grep duty
 ```bash
 docker run --rm -v duty-reminder_duty-data:/data -v "$PWD":/backup alpine tar czf /backup/duty-data-backup.tgz -C /data .
 docker run --rm -v duty-reminder_duty-uploads:/data -v "$PWD":/backup alpine tar czf /backup/duty-uploads-backup.tgz -C /data .
+docker run --rm -v duty-reminder_duty-wechat:/data -v "$PWD":/backup alpine tar czf /backup/duty-wechat-backup.tgz -C /data .
 ```
 
 ## 通知通道配置
@@ -173,19 +153,17 @@ https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_WEBHOOK_KEY
 
 保存后前端不会回显完整机器人地址，只显示“已配置”。监控班提醒里的“@ 手机号”填写企业微信成员手机号，机器人会通过 `mentioned_mobile_list` 在群里 @ 对应人员。页面提供“测试发送”按钮，驾驶员监测板块也提供“测试发送今日在岗”按钮。
 
-### LightAgent 个人微信群
+### 内置个人微信群
 
-选择“LightAgent 个人微信群”后填写 LightAgent 地址、添加一个或多个通知微信群和可选 token。`duty-reminder` 会把文本和图片提醒 POST 到 LightAgent，由 LightAgent 侧负责个人微信扫码登录和微信群发送。
+选择“LightAgent 个人微信群”后，启用内置个人微信群桥并添加一个或多个通知微信群。`duty-reminder` 会直接通过内置桥发送文本和图片提醒，不需要独立的个人微信群服务镜像。
 
-同一个 Docker Compose 网络内部，地址通常填写：
+Docker 部署时保持：
 
 ```text
-http://lightagent:9899
+WECHAT_BRIDGE_ENABLED=true
 ```
 
-页面里的“推送 token”填写 `LIGHTAGENT_PUSH_TOKEN` 的值。通知群可以在页面同步微信群后添加多个；“微信群交互配置”用于配置哪些微信群可以主动触发查询、隧道机电和排班导入。
-
-接入细节见 [docs/LightAgent-WeChat.md](docs/LightAgent-WeChat.md)。
+通知群可以在页面同步微信群后添加多个；“微信群交互配置”用于配置哪些微信群可以主动触发查询、隧道机电和排班导入。
 
 ## 运行安全
 
