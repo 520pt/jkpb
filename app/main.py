@@ -4714,14 +4714,18 @@ async def _apply_tunnel_mechanical_updates(
 ) -> dict[str, Any]:
     if not rows:
         raise HTTPException(status_code=404, detail="没有找到匹配的隧道机电记录，请检查原日期、负责人、记录人和天气")
-    updates = [
-        {
-            "recordId": _tunnel_mechanical_record_id(row),
-            "assetName": _first_present(row, _first_tunnel_mechanical_domain(row), "assetName", "tunnelName", "name"),
-            "payload": _build_tunnel_mechanical_update_payload(request, row),
-        }
-        for row in rows
-    ]
+    updates = []
+    for row in rows:
+        record_id = _tunnel_mechanical_record_id(row)
+        detail = await _query_tunnel_mechanical_update_detail(record_id, base_url=base_url, headers=headers)
+        source = detail or row
+        updates.append(
+            {
+                "recordId": _tunnel_mechanical_record_id(source) or record_id,
+                "assetName": _first_present(source, row, _first_tunnel_mechanical_domain(source), "assetName", "tunnelName", "name"),
+                "payload": _build_tunnel_mechanical_update_payload(request, source),
+            }
+        )
     if request.dry_run:
         return {"success": True, "dry_run": True, "count": len(updates), "updates": updates}
     results = await _post_tunnel_mechanical_updates(
@@ -4731,6 +4735,34 @@ async def _apply_tunnel_mechanical_updates(
         update_paths=update_paths,
     )
     return {"success": all(item["ok"] for item in results), "dry_run": False, "count": len(results), "results": results}
+
+
+async def _query_tunnel_mechanical_update_detail(
+    record_id: str,
+    *,
+    base_url: str,
+    headers: dict[str, str],
+) -> dict[str, Any] | None:
+    if not record_id:
+        return None
+    url = f"{base_url}/prod-api/patrol/deviceCheck/get/{record_id}"
+    try:
+        async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
+            response = await client.get(url, headers=headers)
+            try:
+                body: Any = response.json()
+            except ValueError:
+                body = response.text[:2000]
+    except httpx.HTTPError:
+        return None
+    if _tunnel_mechanical_response_auth_expired(response.status_code, body):
+        raise HTTPException(status_code=401, detail="智慧养护登录已失效，正在自动重新登录")
+    if response.status_code != 200 or not isinstance(body, dict):
+        return None
+    data = body.get("data")
+    if str(body.get("code") or "") == "200" and isinstance(data, dict):
+        return data
+    return None
 
 
 async def _post_tunnel_mechanical_updates(
@@ -4767,9 +4799,15 @@ async def _post_tunnel_mechanical_updates(
                             "ok": ok,
                             "body": body,
                         }
-                        if ok or response.status_code not in {404, 405}:
+                        if ok or not _tunnel_mechanical_update_should_try_next(response.status_code, body):
                             break
-                    if last_result and (last_result["ok"] or int(last_result["status"] or 0) not in {404, 405}):
+                    if last_result and (
+                        last_result["ok"]
+                        or not _tunnel_mechanical_update_should_try_next(
+                            int(last_result["status"] or 0),
+                            last_result["body"],
+                        )
+                    ):
                         break
                 if last_result is None:
                     last_result = {
@@ -4785,6 +4823,18 @@ async def _post_tunnel_mechanical_updates(
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"修改智慧养护平台记录失败：{exc}") from exc
     return results
+
+
+def _tunnel_mechanical_update_should_try_next(status_code: int, body: Any) -> bool:
+    if int(status_code or 0) in {404, 405}:
+        return True
+    if not isinstance(body, dict):
+        return False
+    code = str(body.get("code") or body.get("status") or "").strip()
+    message = str(body.get("msg") or body.get("message") or body.get("error") or "")
+    if code in {"404", "405"}:
+        return True
+    return "Request method" in message and "not supported" in message
 
 
 def _build_tunnel_mechanical_update_payload(
@@ -4806,21 +4856,45 @@ def _build_tunnel_mechanical_update_payload(
         _set_tunnel_mechanical_payload_value(payload, ("recorder", "recorderName"), request.newRecorder)
         _set_tunnel_mechanical_payload_value(payload, ("recorderId",), request.newRecorderId)
     domains = payload.get("domains") or payload.get("domainList") or payload.get("deviceCheckDomainList")
+    if not isinstance(domains, list):
+        domains = [_build_tunnel_mechanical_update_domain(payload, record_id)]
+        payload["domains"] = domains
+    payload.setdefault("faultRecordList", [])
+    payload.setdefault("assetIds", [])
     if isinstance(domains, list):
         for domain in domains:
             if not isinstance(domain, dict):
                 continue
-            if request.newCheckTime and any(key in domain for key in ("checkTime", "checkDate")):
+            if request.newCheckTime and _tunnel_mechanical_domain_has_value(domain, ("checkTime", "checkDate")):
                 _set_tunnel_mechanical_payload_value(domain, ("checkTime", "checkDate"), request.newCheckTime.isoformat())
-            if request.newWeather and "weather" in domain:
+            if request.newWeather and _tunnel_mechanical_domain_has_value(domain, ("weather",)):
                 _set_tunnel_mechanical_payload_value(domain, ("weather",), request.newWeather)
-            if request.newChecker and any(key in domain for key in ("checker", "checkerName", "checkerId")):
+            if request.newChecker and _tunnel_mechanical_domain_has_value(domain, ("checker", "checkerName", "checkerId")):
                 _set_tunnel_mechanical_payload_value(domain, ("checker", "checkerName"), request.newChecker)
                 _set_tunnel_mechanical_payload_value(domain, ("checkerId",), request.newCheckerId)
-            if request.newRecorder and any(key in domain for key in ("recorder", "recorderName", "recorderId")):
+            if request.newRecorder and _tunnel_mechanical_domain_has_value(domain, ("recorder", "recorderName", "recorderId")):
                 _set_tunnel_mechanical_payload_value(domain, ("recorder", "recorderName"), request.newRecorder)
                 _set_tunnel_mechanical_payload_value(domain, ("recorderId",), request.newRecorderId)
     return payload
+
+
+def _tunnel_mechanical_domain_has_value(domain: dict[str, Any], keys: tuple[str, ...]) -> bool:
+    return any(str(domain.get(key) or "").strip() for key in keys)
+
+
+def _build_tunnel_mechanical_update_domain(payload: dict[str, Any], record_id: str) -> dict[str, Any]:
+    return {
+        "checkId": _first_present(payload, "checkId", "deviceCheckId", "id") or record_id or None,
+        "devName": _first_present(payload, "devName"),
+        "location": _first_present(payload, "location"),
+        "content": _first_present(payload, "content"),
+        "result": payload.get("result"),
+        "describe": payload.get("describe"),
+        "measures": payload.get("measures"),
+        "picPaths": payload.get("picPaths"),
+        "carLicense": payload.get("carLicense"),
+        "nums": payload.get("nums"),
+    }
 
 
 def _set_tunnel_mechanical_payload_value(payload: dict[str, Any], keys: tuple[str, ...], value: Any) -> None:

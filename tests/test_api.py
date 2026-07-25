@@ -2811,6 +2811,41 @@ def test_tunnel_mechanical_modify_queries_then_posts_edit_payload(tmp_path, monk
 
         async def get(self, url, headers=None, params=None):
             captured["gets"].append({"url": url, "headers": headers or {}, "params": params or {}})
+            if url == "https://example.test/prod-api/patrol/deviceCheck/get/check-1":
+                return FakeResponse(
+                    {
+                        "code": 200,
+                        "data": {
+                            "id": "parent-check-1",
+                            "assetName": "example tunnel",
+                            "assetCode": "ASSET001",
+                            "checkTime": "2026-07-26",
+                            "weather": "sunny",
+                            "checkerId": "1001",
+                            "checker": "checker",
+                            "recorderId": "1002",
+                            "recorder": "recorder",
+                            "assetIds": None,
+                            "faultRecordList": None,
+                            "domains": [
+                                {
+                                    "id": "check-1",
+                                    "checkId": "parent-check-1",
+                                    "devName": "device",
+                                    "location": "K1+000-K2+000",
+                                    "content": "daily check",
+                                    "result": 1,
+                                    "checkTime": None,
+                                    "weather": None,
+                                    "checkerId": None,
+                                    "checker": None,
+                                    "recorderId": None,
+                                    "recorder": None,
+                                }
+                            ],
+                        },
+                    }
+                )
             return FakeResponse(
                 {
                     "code": 200,
@@ -2871,16 +2906,121 @@ def test_tunnel_mechanical_modify_queries_then_posts_edit_payload(tmp_path, monk
     assert captured["gets"][0]["headers"]["Authorization"] == "Bearer cached-token"
     assert captured["gets"][0]["headers"]["Cookie"] == "sid=abc"
     assert captured["gets"][0]["params"]["checkTime"] == "2026-07-26"
+    assert captured["gets"][1]["url"] == "https://example.test/prod-api/patrol/deviceCheck/get/check-1"
     assert captured["posts"][0]["url"] == "https://example.test/prod-api/patrol/deviceCheck/edit"
     payload = captured["posts"][0]["payload"]
-    assert payload["id"] == "check-1"
+    assert payload["id"] == "parent-check-1"
     assert payload["checkTime"] == "2026-07-25"
     assert payload["weather"] == "多云"
     assert payload["checkerId"] == "1002"
     assert payload["checker"] == "李四"
     assert payload["recorderId"] == "1001"
     assert payload["recorder"] == "张三"
-    assert payload["domains"][0]["checkId"] == "check-1"
+    assert payload["domains"][0]["checkId"] == "parent-check-1"
+    assert payload["domains"][0]["checkTime"] is None
+
+
+def test_tunnel_mechanical_modify_retries_put_when_post_not_supported(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, body, status_code=200):
+            self._body = body
+            self.status_code = status_code
+            self.text = str(body)
+
+        def json(self):
+            return self._body
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, headers=None, json=None):
+            calls.append(("POST", url, json))
+            return FakeResponse({"code": 500, "msg": "Request method 'POST' not supported"})
+
+        async def put(self, url, headers=None, json=None):
+            calls.append(("PUT", url, json))
+            return FakeResponse({"code": 200, "msg": "ok"})
+
+    monkeypatch.setattr(main_module.httpx, "AsyncClient", FakeAsyncClient)
+
+    results = asyncio.run(
+        main_module._post_tunnel_mechanical_updates(
+            [{"recordId": "check-1", "assetName": "示例隧道", "payload": {"id": "check-1"}}],
+            base_url="https://example.test",
+            headers={"Authorization": "Bearer token"},
+            update_paths=["/prod-api/patrol/deviceCheck/edit"],
+        )
+    )
+
+    assert results[0]["ok"] is True
+    assert results[0]["method"] == "PUT"
+    assert calls == [
+        ("POST", "https://example.test/prod-api/patrol/deviceCheck/edit", {"id": "check-1"}),
+        ("PUT", "https://example.test/prod-api/patrol/deviceCheck/edit", {"id": "check-1"}),
+    ]
+
+
+def test_tunnel_mechanical_modify_builds_domains_from_flat_record():
+    request = main_module.TunnelMechanicalModifyRequest(
+        checkTime=date(2026, 7, 26),
+        weather="sunny",
+        checkerId="1001",
+        checker="checker",
+        recorderId="1002",
+        recorder="recorder",
+        newCheckTime=date(2026, 7, 25),
+    )
+
+    payload = main_module._build_tunnel_mechanical_update_payload(
+        request,
+        {
+            "id": "check-1",
+            "assetId": "asset-1",
+            "assetName": "tunnel",
+            "devName": "device",
+            "location": "K1+000-K2+000",
+            "content": "daily check",
+            "result": 1,
+            "describe": None,
+            "measures": None,
+            "picPaths": None,
+            "carLicense": "plate",
+            "nums": 1,
+            "checkTime": "2026-07-26",
+            "weather": "sunny",
+            "checkerId": "1001",
+            "checker": "checker",
+            "recorderId": "1002",
+            "recorder": "recorder",
+        },
+    )
+
+    assert payload["checkTime"] == "2026-07-25"
+    assert payload["assetIds"] == []
+    assert payload["faultRecordList"] == []
+    assert payload["domains"] == [
+        {
+            "checkId": "check-1",
+            "devName": "device",
+            "location": "K1+000-K2+000",
+            "content": "daily check",
+            "result": 1,
+            "describe": None,
+            "measures": None,
+            "picPaths": None,
+            "carLicense": "plate",
+            "nums": 1,
+        }
+    ]
 
 
 def test_wechat_query_tunnel_mechanical_missing_person_returns_help(tmp_path, monkeypatch):
