@@ -6443,4 +6443,4 @@ def _wecom_client_from_env() -> WeComClient | None:
     return WeComClient(corp_id=corp_id, corp_secret=corp_secret, agent_id=int(agent_id))
 
 
-app = create_app(start_scheduler=os.getenv("ENABLE_SCHEDULER", "false").lower() == "true")
+app = create_app(start_scheduler=os.getenv("ENABLE_SCHEDULER", "true").lower() == "true")

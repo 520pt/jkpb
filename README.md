@@ -63,7 +63,7 @@ ghcr.io/520pt/jkpb:latest
 
 大部分固定配置已经写进镜像默认值：内部服务地址、微信查询接口、频道类型、Web 监听地址、上传清理、隧道机电登录保活等都不需要在 Compose 里配置。
 
-账号、密码、token、模型 key 这些部署时需要确认的环境变量仍然保留在 Compose 里，直接打开 `docker-compose.prod.yml` 修改即可。
+账号、密码、token、模型 key 这些部署时需要确认的环境变量仍然保留在 Compose 里，直接打开 `docker-compose.prod.yml` 修改即可。定时提醒默认会自动启动，不需要再配 `ENABLE_SCHEDULER`；只有要关闭时才设置 `ENABLE_SCHEDULER=false`。
 
 当前生产 Compose 的核心配置如下：
 
