@@ -500,6 +500,12 @@
       gap: 6px;
       margin-top: 2px;
     }
+    .saved-duty-pair {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      align-items: start;
+    }
     .saved-duty-item strong {
       font-size: 12px;
       font-weight: 650;
@@ -4928,13 +4934,15 @@
         <div class="saved-duty-grid">
           <section class="saved-duty-card monitor">
             <h4>监控班</h4>
-            <div class="saved-duty-item">
-              <strong>今日早班</strong>
-              <div class="saved-duty-list">${renderDutyChipList(details.early)}</div>
-            </div>
-            <div class="saved-duty-item">
-              <strong>明日早班</strong>
-              <div class="saved-duty-list">${renderDutyChipList(details.tomorrow_early)}</div>
+            <div class="saved-duty-pair">
+              <div class="saved-duty-item">
+                <strong>今日早班</strong>
+                <div class="saved-duty-list">${renderDutyChipList(details.early)}</div>
+              </div>
+              <div class="saved-duty-item">
+                <strong>明日早班</strong>
+                <div class="saved-duty-list">${renderDutyChipList(details.tomorrow_early)}</div>
+              </div>
             </div>
             <div class="saved-duty-item">
               <strong>中班</strong>

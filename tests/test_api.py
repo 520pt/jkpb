@@ -146,6 +146,7 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert "right-column" in html
     assert "daily-duty-column" in html
     assert "patrol-warning-column" in html
+    assert "saved-duty-pair" in html
     assert "明日早班：{tomorrow_early}" in html
     assert "details.tomorrow_early" in html
     assert "has-image" in html
