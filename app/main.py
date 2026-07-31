@@ -5450,7 +5450,7 @@ def _build_daily_duty_preview(repo: DutyRepository, target: date) -> dict[str, A
     resting: list[str] = []
     afternoon_return: list[str] = []
     for row in rows:
-        rest_status = _rest_status_for_date(repo, row["name"], target, include_cross_month=False)
+        rest_status = _rest_status_for_date(repo, row["name"], target)
         if not rest_status:
             continue
         status_text = rest_status["rest_status"]

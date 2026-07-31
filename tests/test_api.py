@@ -4757,11 +4757,12 @@ def test_daily_duty_preview_does_not_cross_into_next_month(tmp_path):
     body = response.json()
     assert body["details"]["early"] == "七月早班"
     assert body["details"]["tomorrow_early"] == "无"
-    assert body["details"]["afternoon_rest"] == "无"
+    assert body["details"]["afternoon_rest"] == "明日休息人"
     assert body["details"]["resting"] == "月末休息人"
     assert body["details"]["afternoon_return"] == "无"
     assert "八月早班" not in body["content"]
     assert "明日早班：无" in body["content"]
+    assert "今日下午休息：明日休息人" in body["content"]
 
 
 def test_daily_duty_preview_defaults_to_beijing_today(tmp_path, monkeypatch):
