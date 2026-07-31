@@ -4721,6 +4721,49 @@ def test_daily_duty_preview_summarizes_on_duty_people_and_drivers(tmp_path):
     assert body["details"]["afternoon_return"] == "示例壬"
 
 
+def test_daily_duty_preview_does_not_cross_into_next_month(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/rosters/confirm",
+        json={
+            "year": 2026,
+            "month": 7,
+            "source_image_path": "uploads/july.png",
+            "grid": [
+                {"name": "七月早班", "days": {"31": "早"}},
+                {"name": "明日休息人", "days": {"31": ""}},
+                {"name": "月末休息人", "days": {"31": "休"}},
+            ],
+        },
+    )
+    client.post(
+        "/api/rosters/confirm",
+        json={
+            "year": 2026,
+            "month": 8,
+            "source_image_path": "uploads/august.png",
+            "grid": [
+                {"name": "八月早班", "days": {"1": "早"}},
+                {"name": "明日休息人", "days": {"1": "休"}},
+                {"name": "月末休息人", "days": {"1": "休"}},
+            ],
+        },
+    )
+
+    response = client.post("/api/daily-duty-preview", json={"target_date": "2026-07-31"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["details"]["early"] == "七月早班"
+    assert body["details"]["tomorrow_early"] == "无"
+    assert body["details"]["afternoon_rest"] == "无"
+    assert body["details"]["resting"] == "月末休息人"
+    assert body["details"]["afternoon_return"] == "无"
+    assert "八月早班" not in body["content"]
+    assert "明日早班：无" in body["content"]
+
+
 def test_daily_duty_preview_defaults_to_beijing_today(tmp_path, monkeypatch):
     class FixedDateTime(datetime):
         @classmethod
