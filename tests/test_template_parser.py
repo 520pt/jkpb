@@ -3,7 +3,14 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from app.ocr import OcrText, _classify_template_cell, _find_day_x_lines, extract_roster_image, recheck_template_roster_cells
+from app.ocr import (
+    OcrText,
+    _classify_template_cell,
+    _find_day_x_lines,
+    _find_person_y_lines,
+    extract_roster_image,
+    recheck_template_roster_cells,
+)
 
 
 def test_template_parser_reads_fixed_roster_grid(tmp_path: Path):
@@ -37,6 +44,20 @@ def test_template_cell_classifier_does_not_treat_tall_single_white_text_as_trip(
     cv2.line(cell, (6, 14), (14, 14), (0, 0, 0), 1)
 
     assert _classify_template_cell(cell) == ""
+
+
+def test_template_cell_classifier_reads_sparse_stacked_trip_text():
+    cell = np.full((29, 20, 3), 255, dtype=np.uint8)
+    for y in (1, 5, 9, 11):
+        cv2.line(cell, (7, y), (13, y), (0, 0, 0), 1)
+    for x in (8, 12):
+        cv2.line(cell, (x, 2), (x, 10), (0, 0, 0), 1)
+    for y in (18, 22, 26):
+        cv2.line(cell, (6, y), (15, y), (0, 0, 0), 1)
+    for x in (9, 13):
+        cv2.line(cell, (x, 17), (x, 27), (0, 0, 0), 1)
+
+    assert _classify_template_cell(cell) == "出差"
 
 
 def test_template_cell_classifier_reads_green_middle_cell():
@@ -92,6 +113,46 @@ def test_template_parser_fits_day_lines_when_half_cell_noise_is_present(tmp_path
     dark = gray < 80
 
     assert _find_day_x_lines(dark, image=image) == expected
+
+
+def test_template_parser_fits_person_lines_when_any_row_has_trip_text_noise(tmp_path: Path):
+    x_lines = list(range(161, 906, 24))
+    if x_lines[-1] != 905:
+        x_lines.append(905)
+    y_lines = list(range(120, 120 + 17 * 33, 33))
+
+    for trip_row in range(16):
+        image_path = tmp_path / f"roster-trip-row-{trip_row}.png"
+        _write_synthetic_roster(image_path, row_count=16)
+        image = cv2.imread(str(image_path))
+        for day in range(31):
+            _paint_cell(image, x_lines[day], y_lines[trip_row], x_lines[day + 1], y_lines[trip_row + 1], "出差")
+        cv2.imwrite(str(image_path), image)
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        dark = gray < 80
+
+        assert _find_person_y_lines(dark) == y_lines
+
+        if trip_row not in {1, 7, 15}:
+            continue
+
+        result = extract_roster_image(image_path)
+
+        assert result["grid"][trip_row]["days"]["1"] == "出差"
+        assert result["grid"][trip_row]["boxes"]["1"] == {
+            "x": 161,
+            "y": y_lines[trip_row],
+            "width": 24,
+            "height": 33,
+        }
+        if trip_row + 1 < 16:
+            assert result["grid"][trip_row + 1]["days"]["1"] == ""
+            assert result["grid"][trip_row + 1]["boxes"]["1"] == {
+                "x": 161,
+                "y": y_lines[trip_row + 1],
+                "width": 24,
+                "height": 33,
+            }
 
 
 def test_template_recheck_uses_existing_cell_boxes(tmp_path: Path):

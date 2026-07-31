@@ -504,8 +504,17 @@ def _score_day_line_window(image: Any, lines: list[int]) -> float:
 def _find_person_y_lines(dark: Any) -> list[int]:
     import numpy as np
 
+    line_candidates, line_counts = _find_long_horizontal_line_candidates(dark)
+    fitted = _fit_regular_person_y_lines(line_candidates, line_counts, image_height=dark.shape[0])
+    if fitted:
+        return fitted
+
     counts = dark.sum(axis=1)
     candidates = _group_centers(np.where(counts > dark.shape[1] * 0.36)[0])
+    fitted = _fit_regular_person_y_lines(candidates, counts, image_height=dark.shape[0])
+    if fitted:
+        return fitted
+
     best: list[int] = []
     for start in range(len(candidates)):
         sequence = [candidates[start]]
@@ -518,6 +527,69 @@ def _find_person_y_lines(dark: Any) -> list[int]:
         if len(sequence) > len(best):
             best = sequence
     return best if len(best) >= 16 else []
+
+
+def _find_long_horizontal_line_candidates(dark: Any) -> tuple[list[int], Any]:
+    import cv2
+    import numpy as np
+
+    binary = np.asarray(dark, dtype=np.uint8) * 255
+    kernel_width = max(24, min(160, int(round(binary.shape[1] * 0.08))))
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_width, 1))
+    horizontal = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+    counts = (horizontal > 0).sum(axis=1)
+    max_count = int(counts.max()) if counts.size else 0
+    if max_count <= 0:
+        return [], counts
+    threshold = max(binary.shape[1] * 0.18, max_count * 0.45)
+    return _group_centers(np.where(counts >= threshold)[0]), counts
+
+
+def _fit_regular_person_y_lines(candidates: list[int], counts: Any, *, image_height: int) -> list[int]:
+    if len(candidates) < 16:
+        return []
+
+    import numpy as np
+
+    counts_array = np.asarray(counts)
+    max_count = float(counts_array.max()) if counts_array.size else 0.0
+    if max_count <= 0:
+        return []
+
+    best_score: tuple[int, float, float, int, int] | None = None
+    best_lines: list[int] = []
+    for start in candidates:
+        for step in range(25, 41):
+            snapped: list[int] = []
+            strength_score = 0.0
+            distance_score = 0.0
+            expected = start
+            while expected < image_height:
+                top = max(0, int(round(expected)) - 6)
+                bottom = min(len(counts_array), int(round(expected)) + 7)
+                if bottom <= top:
+                    break
+                local_values = counts_array[top:bottom]
+                local_offset = int(np.argmax(local_values))
+                local_y = top + local_offset
+                local_strength = float(local_values[local_offset]) / max_count
+                if local_strength < 0.55:
+                    break
+                if snapped and local_y <= snapped[-1]:
+                    break
+                snapped.append(local_y)
+                strength_score += local_strength
+                distance_score += abs(local_y - expected)
+                expected += step
+
+            if len(snapped) < 16:
+                continue
+            score = (len(snapped), strength_score, -distance_score, -abs(step - 33), -start)
+            if best_score is None or score > best_score:
+                best_score = score
+                best_lines = snapped
+
+    return best_lines
 
 
 def _classify_template_cell(cell: Any) -> str:
@@ -565,9 +637,40 @@ def _looks_like_stacked_trip(ink: Any) -> bool:
 
     strong_groups = [(top, bottom, total) for top, bottom, total in groups if bottom - top >= 5 and total >= 20]
     if len(strong_groups) < 2:
-        return False
+        return _looks_like_sparse_stacked_trip(groups, projection)
     first, second = strong_groups[0], strong_groups[1]
     return first[1] < second[0] and second[0] - first[1] >= 2
+
+
+def _looks_like_sparse_stacked_trip(groups: list[tuple[int, int, int]], projection: Any) -> bool:
+    if not groups:
+        return False
+
+    top = min(group[0] for group in groups)
+    bottom = max(group[1] for group in groups)
+    ink_height = bottom - top + 1
+    if ink_height < 22:
+        return False
+
+    midpoint = (top + bottom) // 2
+    upper_total = sum(total for group_top, group_bottom, total in groups if group_bottom <= midpoint)
+    lower_total = sum(total for group_top, group_bottom, total in groups if group_top > midpoint)
+    if upper_total < 8 or lower_total < 8:
+        return False
+
+    gap_start = None
+    max_gap = 0
+    for index in range(top, bottom + 1):
+        if int(projection[index]) <= 1:
+            gap_start = index if gap_start is None else gap_start
+        elif gap_start is not None:
+            if gap_start <= midpoint <= index - 1:
+                max_gap = max(max_gap, index - gap_start)
+            gap_start = None
+    if gap_start is not None and gap_start <= midpoint <= bottom:
+        max_gap = max(max_gap, bottom + 1 - gap_start)
+
+    return max_gap >= 2
 
 
 def _classify_template_cell_metrics(metrics: list[CellMetrics]) -> list[str]:
