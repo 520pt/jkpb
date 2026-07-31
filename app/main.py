@@ -5383,30 +5383,19 @@ def _render_simple_template(template: str, values: dict[str, str]) -> str:
     return content
 
 
-def _same_roster_month(left: date, right: date) -> bool:
-    return left.year == right.year and left.month == right.month
-
-
-def _rest_status_for_date(
-    repo: DutyRepository,
-    person_name: str,
-    target: date,
-    *,
-    include_cross_month: bool = True,
-) -> dict[str, str] | None:
+def _rest_status_for_date(repo: DutyRepository, person_name: str, target: date) -> dict[str, str] | None:
     today_is_rest = _is_rest_code(_roster_code_for_person(repo, person_name, target))
     tomorrow = target + timedelta(days=1)
-    can_read_tomorrow = include_cross_month or _same_roster_month(target, tomorrow)
-    tomorrow_is_rest = can_read_tomorrow and _is_rest_code(_roster_code_for_person(repo, person_name, tomorrow))
+    tomorrow_is_rest = _is_rest_code(_roster_code_for_person(repo, person_name, tomorrow))
     if not today_is_rest and tomorrow_is_rest:
         return {
             "date": f"{tomorrow:%Y-%m-%d}",
             "rest_start_date": f"{tomorrow:%Y-%m-%d}",
-            "rest_end_date": f"{_rest_end_date(repo, person_name, tomorrow, include_cross_month=include_cross_month):%Y-%m-%d}",
+            "rest_end_date": f"{_rest_end_date(repo, person_name, tomorrow):%Y-%m-%d}",
             "rest_status": "今日下午休息",
         }
-    if today_is_rest and (tomorrow_is_rest or not can_read_tomorrow):
-        rest_end_date = _rest_end_date(repo, person_name, target, include_cross_month=include_cross_month)
+    if today_is_rest and tomorrow_is_rest:
+        rest_end_date = _rest_end_date(repo, person_name, target)
         return {
             "date": f"{target:%Y-%m-%d}",
             "rest_start_date": f"{target:%Y-%m-%d}",
@@ -5423,15 +5412,10 @@ def _rest_status_for_date(
     return None
 
 
-def _rest_end_date(repo: DutyRepository, person_name: str, start: date, *, include_cross_month: bool = True) -> date:
+def _rest_end_date(repo: DutyRepository, person_name: str, start: date) -> date:
     current = start
-    while True:
-        next_day = current + timedelta(days=1)
-        if not include_cross_month and not _same_roster_month(start, next_day):
-            break
-        if not _is_rest_code(_roster_code_for_person(repo, person_name, next_day)):
-            break
-        current = next_day
+    while _is_rest_code(_roster_code_for_person(repo, person_name, current + timedelta(days=1))):
+        current += timedelta(days=1)
     return current
 
 
@@ -5439,7 +5423,7 @@ def _build_daily_duty_preview(repo: DutyRepository, target: date) -> dict[str, A
     config = repo.get_daily_duty_config()
     rows = _roster_rows_for_date(repo, target)
     tomorrow = target + timedelta(days=1)
-    tomorrow_rows = _roster_rows_for_date(repo, tomorrow) if _same_roster_month(target, tomorrow) else []
+    tomorrow_rows = _roster_rows_for_date(repo, tomorrow)
     shift_names = {
         "early": [row["name"] for row in rows if row["code"] == "早"],
         "tomorrow_early": [row["name"] for row in tomorrow_rows if row["code"] == "早"],
