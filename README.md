@@ -114,8 +114,10 @@ INSTALL_OCR=true docker compose up -d --build
 
 - `./data:/app/data`：SQLite 数据库、排班、配置、发送记录。
 - `./uploads:/app/uploads`：上传的排班图片。
+- `./wechat:/app/wechat`：内置个人微信群桥的微信登录态、群 ID 映射、成员 ID 映射。
 
-因此更新镜像、重新 `docker compose -f docker-compose.prod.yml up -d` 后数据仍会保留。不要删除服务器目录里的 `data` 和 `uploads`。
+因此更新镜像、重新 `docker compose -f docker-compose.prod.yml up -d` 后数据仍会保留。不要删除服务器目录里的 `data`、`uploads` 和 `wechat`。
+NAS 或宿主机重启后，只要 `./wechat` 目录仍在且微信网页版登录态没有被微信侧踢下线，容器会随 `restart: unless-stopped` 自动启动并恢复登录。若删除 `./wechat`、改了挂载目录、账号在手机端退出网页微信、微信侧判定登录态失效，后台会重新出现扫码登录状态，需要再次扫码。
 
 本地构建用的 `docker-compose.yml` 默认使用 Docker volume：
 

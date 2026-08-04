@@ -39,6 +39,16 @@ function emit(type, payload = {}) {
   process.stdout.write(JSON.stringify({ type, ...payload }) + '\n')
 }
 
+async function saveWechatSession(reason) {
+  try {
+    if (state.memory) await state.memory.save()
+  } catch (error) {
+    emit('error', {
+      message: `failed to save WeChat session during ${reason}: ${error.message || String(error)}`,
+    })
+  }
+}
+
 async function listRooms() {
   const rooms = await state.bot.Room.findAll()
   const payload = []
@@ -247,6 +257,7 @@ async function start() {
     .on('login', async user => {
       state.self = user
       emit('status', { status: 'logged_in', self_id: user.id, self_name: user.name() })
+      await saveWechatSession('login')
       await listRooms()
       emit('status', { status: 'connected', self_id: user.id, self_name: user.name() })
     })

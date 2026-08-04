@@ -2,10 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 
 from app.wechat_bridge.manager import WechatBridgeManager
 from app.wechat_bridge.notify import WechatBridgeNotifyClient
 from app.wechat_bridge.protocol import SidecarEvent, SidecarEventType
+
+
+def test_wechat_bridge_sidecar_saves_session_after_login():
+    source = Path("app/wechat_bridge/sidecar/wechaty-sidecar.mjs").read_text(encoding="utf-8")
+
+    assert "async function saveWechatSession(reason)" in source
+    assert "await saveWechatSession('login')" in source
+    assert "if (state.memory) await state.memory.save()" in source
 
 
 def test_wechat_bridge_normalizes_rooms_and_persists_stable_ids(tmp_path):
