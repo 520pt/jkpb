@@ -108,6 +108,33 @@ def test_patrol_record_groups_pair_adjacent_end_and_start_times():
     assert [record["id"] for record in groups[0]["records"]] == ["r-1", "r-2"]
 
 
+def test_patrol_record_groups_pair_adjacent_records_across_midnight():
+    records = [
+        {
+            "id": "r-before-midnight",
+            "start_time": "2026-07-12T23:57:00+08:00",
+            "end_time": "2026-07-13T00:37:00+08:00",
+            "direction": "上行",
+        },
+        {
+            "id": "r-after-midnight",
+            "start_time": "2026-07-13T00:38:00+08:00",
+            "end_time": "2026-07-13T01:13:00+08:00",
+            "direction": "下行",
+        },
+    ]
+
+    groups = _record_groups(records)
+
+    assert len(groups) == 1
+    assert groups[0]["count"] == 1
+    assert [record["id"] for record in groups[0]["records"]] == [
+        "r-before-midnight",
+        "r-after-midnight",
+    ]
+    assert _patrol_record_group_count(records) == 1
+
+
 def test_patrol_record_groups_handle_multiple_pairs_and_singletons():
     records = [
         {

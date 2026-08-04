@@ -144,6 +144,7 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'isGroupEnd: highlighted && index === (group.records || []).length - 1' in html
     assert 'endTimestamp: orangeWarningRecordEndTimestamp(record)' in html
     assert 'next.timestamp - current.endTimestamp <= windowMs' in html
+    assert 'current.date === next.date' not in html
     assert 'function exportOrangeWarningStatsImage' in html
     assert 'function exportOrangeWarningStatsTable' in html
     assert 'function orangeWarningDrawExportGroupBorder' in html

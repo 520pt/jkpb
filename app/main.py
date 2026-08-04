@@ -2704,8 +2704,6 @@ def _patrol_record_group_count(records: list[dict[str, Any]]) -> int:
 def _patrol_records_can_pair(current: dict[str, Any], following: dict[str, Any]) -> bool:
     if {str(current.get("direction") or ""), str(following.get("direction") or "")} != {"上行", "下行"}:
         return False
-    if str(current.get("start_time") or "")[:10] != str(following.get("start_time") or "")[:10]:
-        return False
     current_start = _patrol_record_datetime(current, "start_time", "end_time")
     current_end = _patrol_record_datetime(current, "end_time", "start_time")
     following_start = _patrol_record_datetime(following, "start_time", "end_time")

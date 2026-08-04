@@ -148,8 +148,6 @@ def _can_pair(current: dict[str, Any], following: dict[str, Any] | None) -> bool
         return False
     if {str(current.get("direction") or ""), str(following.get("direction") or "")} != {"上行", "下行"}:
         return False
-    if str(current.get("start_time") or "")[:10] != str(following.get("start_time") or "")[:10]:
-        return False
     current_start = _record_datetime(current, "start_time", "end_time")
     current_end = _record_datetime(current, "end_time", "start_time")
     following_start = _record_datetime(following, "start_time", "end_time")
