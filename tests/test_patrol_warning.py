@@ -135,6 +135,52 @@ def test_patrol_record_groups_pair_adjacent_records_across_midnight():
     assert _patrol_record_group_count(records) == 1
 
 
+def test_patrol_record_groups_keep_extra_nearby_and_same_direction_records_separate():
+    records = [
+        {
+            "id": "r-up-1",
+            "start_time": "2026-07-16T01:48:00+08:00",
+            "end_time": "2026-07-16T02:26:00+08:00",
+            "direction": "上行",
+        },
+        {
+            "id": "r-down-1",
+            "start_time": "2026-07-16T02:27:00+08:00",
+            "end_time": "2026-07-16T02:27:00+08:00",
+            "direction": "下行",
+        },
+        {
+            "id": "r-down-2",
+            "start_time": "2026-07-16T02:28:00+08:00",
+            "end_time": "2026-07-16T03:04:00+08:00",
+            "direction": "下行",
+        },
+        {
+            "id": "r-up-2",
+            "start_time": "2026-07-16T13:50:00+08:00",
+            "end_time": "2026-07-16T14:39:00+08:00",
+            "direction": "上行",
+        },
+        {
+            "id": "r-up-3",
+            "start_time": "2026-07-16T14:39:00+08:00",
+            "end_time": "2026-07-16T15:30:00+08:00",
+            "direction": "上行",
+        },
+    ]
+
+    groups = _record_groups(records)
+
+    assert [group["count"] for group in groups] == [1, 2, 3, 4]
+    assert [[record["id"] for record in group["records"]] for group in groups] == [
+        ["r-up-1", "r-down-1"],
+        ["r-down-2"],
+        ["r-up-2"],
+        ["r-up-3"],
+    ]
+    assert _patrol_record_group_count(records) == 4
+
+
 def test_patrol_record_groups_handle_multiple_pairs_and_singletons():
     records = [
         {

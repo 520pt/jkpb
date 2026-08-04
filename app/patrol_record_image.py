@@ -134,6 +134,8 @@ def _record_groups(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     while index < len(ordered):
         current = ordered[index]
         next_record = ordered[index + 1] if index + 1 < len(ordered) else None
+        # Consume at most one adjacent opposite-direction pair. Extra nearby
+        # records, including repeated directions, remain separate counts.
         if _can_pair(current, next_record):
             groups.append({"count": len(groups) + 1, "records": [current, next_record]})
             index += 2

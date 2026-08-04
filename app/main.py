@@ -2694,6 +2694,9 @@ def _patrol_record_group_count(records: list[dict[str, Any]]) -> int:
     index = 0
     while index < len(ordered):
         count += 1
+        # A close cluster can contain more than two records; only one
+        # adjacent opposite-direction pair is merged, never repeated
+        # same-direction records.
         if index + 1 < len(ordered) and _patrol_records_can_pair(ordered[index], ordered[index + 1]):
             index += 2
             continue

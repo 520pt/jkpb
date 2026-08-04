@@ -6524,6 +6524,8 @@
         const current = items[index];
         const next = items[index + 1];
         count += 1;
+        // Merge one adjacent opposite-direction pair only; extra nearby or
+        // repeated-direction records remain separate actual counts.
         if (
           (current.direction === "上行" || current.direction === "下行")
           && orangeWarningCanPairItems(current, next)
