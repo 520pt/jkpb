@@ -8,5 +8,6 @@ data
 uploads
 logs
 work
+tmp
 *.db
 *.pyc

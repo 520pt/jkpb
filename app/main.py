@@ -36,11 +36,13 @@ from app.patrol_warning import (
     due_end_reminder_slot,
     fetch_latest_warning,
     fetch_latest_warning_result,
+    fetch_patrol_records_by_name_result,
     failure_backoff_until,
     next_poll_time,
     warning_from_dict,
 )
 from app.patrol_warning_image import render_patrol_warning_image
+from app.patrol_record_image import render_patrol_record_image
 from app.reminders import DEFAULT_MESSAGE_TEMPLATE, ReminderEvent, ReminderSettings, plan_reminders_for_day
 from app.roster import Shift, ShiftAssignment, normalize_shift_code
 from app.storage import (
@@ -70,6 +72,20 @@ UPLOAD_KEEP_DAYS = int(os.getenv("UPLOAD_KEEP_DAYS", "90"))
 TUNNEL_MECHANICAL_KEEPALIVE_ENABLED = os.getenv("TUNNEL_MECHANICAL_KEEPALIVE_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
 TUNNEL_MECHANICAL_KEEPALIVE_INTERVAL_MINUTES = max(5, int(os.getenv("TUNNEL_MECHANICAL_KEEPALIVE_INTERVAL_MINUTES", "30") or 30))
 TUNNEL_MECHANICAL_KEEPALIVE_REFRESH_BEFORE_MINUTES = max(5, int(os.getenv("TUNNEL_MECHANICAL_KEEPALIVE_REFRESH_BEFORE_MINUTES", "30") or 30))
+DEFAULT_PATROL_RECORD_TRIGGERS = ["巡查记录", "查询巡查记录", "查巡查记录", "巡查记录查询"]
+DEFAULT_PATROL_RECORD_TEMPLATE = "查询商邱宏巡查记录 2026-07-01至2026-07-31"
+DEFAULT_TUNNEL_TEMPLATE_TRIGGERS = ["模板"]
+DEFAULT_TUNNEL_MODIFY_TEMPLATE_TRIGGERS = ["修改", "修改模板", "改模板"]
+DEFAULT_TUNNEL_TEMPLATE = "隧道机电录入 日期{date} 负责人罗富耀 记录人商邱宏 天气晴"
+DEFAULT_TUNNEL_MODIFY_TEMPLATE = "隧道机电修改 日期{date} 负责人罗富耀 记录人商邱宏 天气晴 修改日期为{date}"
+DEFAULT_WECHAT_INTERACTION_CONFIG = {
+    "patrol_record_triggers": DEFAULT_PATROL_RECORD_TRIGGERS,
+    "patrol_record_template": DEFAULT_PATROL_RECORD_TEMPLATE,
+    "tunnel_template_triggers": DEFAULT_TUNNEL_TEMPLATE_TRIGGERS,
+    "tunnel_template": DEFAULT_TUNNEL_TEMPLATE,
+    "tunnel_modify_template_triggers": DEFAULT_TUNNEL_MODIFY_TEMPLATE_TRIGGERS,
+    "tunnel_modify_template": DEFAULT_TUNNEL_MODIFY_TEMPLATE,
+}
 
 
 class RosterConfirmRequest(BaseModel):
@@ -155,6 +171,15 @@ class FeatureChannelConfigRequest(BaseModel):
     allow_tunnel_mechanical: bool = True
     allow_duty_query: bool = True
     allow_roster_import: bool = True
+
+
+class WechatInteractionConfigRequest(BaseModel):
+    patrol_record_triggers: list[str] = Field(default_factory=list)
+    patrol_record_template: str = ""
+    tunnel_template_triggers: list[str] = Field(default_factory=list)
+    tunnel_template: str = ""
+    tunnel_modify_template_triggers: list[str] = Field(default_factory=list)
+    tunnel_modify_template: str = ""
 
 
 class PreviewRequest(BaseModel):
@@ -370,6 +395,7 @@ def create_app(
     app = FastAPI(title="Duty Reminder")
     app.state.repo = repo
     app.state.upload_dir = uploads
+    app.state.patrol_record_cache_path = base_data_dir / "patrol-warning-records-cache.json"
     app.state.scheduler_enabled = start_scheduler
     app.state.cjk_font_ready = has_cjk_font()
     app.state.wechat_bridge_enabled = wechat_bridge_enabled()
@@ -404,7 +430,10 @@ def create_app(
 
     @app.get("/")
     def index():
-        return FileResponse(static_dir / "index.html")
+        return FileResponse(
+            static_dir / "index.html",
+            headers={"Cache-Control": "no-cache, max-age=0, must-revalidate"},
+        )
 
     @app.get("/login")
     def login_page(request: Request):
@@ -699,14 +728,17 @@ def create_app(
     @app.post("/api/patrol-warning-config")
     def save_patrol_warning_config(request: PatrolWarningConfigRequest):
         existing = repo.get_patrol_warning_config()
+        previous_poll_interval = int(existing.get("poll_interval_minutes") or 10)
+        next_poll_interval = max(1, min(int(request.poll_interval_minutes), 1440))
         password = request.password if request.password else str(existing.get("password", ""))
         should_reset_state = any(
             str(existing.get(key) or "").strip() != str(getattr(request, key) or "").strip()
             for key in ("login_url", "warning_url", "project_id", "platform", "route_code")
         )
         repo.save_patrol_warning_config(**{**request.model_dump(), "password": password})
+        state_updates: dict[str, Any] = {}
         if should_reset_state:
-            repo.save_patrol_warning_state(
+            state_updates.update(
                 warning_key="",
                 warning={},
                 last_checked_at="",
@@ -718,6 +750,24 @@ def create_app(
                 failure_count=0,
                 backoff_until="",
                 last_error="",
+            )
+        if not request.enabled:
+            state_updates.update(
+                next_check_at="",
+                backoff_until="",
+                failure_count=0,
+                last_error="",
+            )
+        elif next_poll_interval != previous_poll_interval or (request.enabled and not existing.get("enabled")):
+            state_updates.update(
+                next_check_at=next_poll_time(datetime.now(TZ), next_poll_interval).isoformat(),
+                backoff_until="",
+                failure_count=0,
+                last_error="",
+            )
+        if state_updates:
+            repo.save_patrol_warning_state(
+                **state_updates,
             )
         return {
             "success": True,
@@ -803,6 +853,38 @@ def create_app(
         except Exception as exc:
             raise HTTPException(status_code=502, detail=_sanitize_wechat_ids_for_display(repo, f"发送预警提醒失败：{exc}")) from exc
         return {"success": True, "content": content}
+
+    @app.get("/api/patrol-warning/orange-records")
+    async def query_patrol_warning_orange_records(name: str = "", limit: int = 5000):
+        query_name = str(name or "").strip()
+        if not query_name:
+            raise HTTPException(status_code=400, detail="请输入要查询的姓名")
+        config = repo.get_patrol_warning_config()
+        state = repo.get_patrol_warning_state()
+        try:
+            result = await fetch_patrol_records_by_name_result(
+                config,
+                TZ,
+                name=query_name,
+                token=str(state.get("token") or ""),
+                token_expires_at=str(state.get("token_expires_at") or ""),
+                limit=max(1, min(int(limit or 5000), 5000)),
+                cache_path=app.state.patrol_record_cache_path,
+            )
+        except PatrolWarningError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        repo.save_patrol_warning_state(
+            token=result.token,
+            token_expires_at=result.token_expires_at,
+            last_error="",
+        )
+        return {
+            "success": True,
+            "name": query_name,
+            "route_code": str(config.get("route_code") or "").strip(),
+            "records": result.records,
+            "stats": result.stats,
+        }
 
     @app.get("/api/tunnel-mechanical/templates")
     def get_tunnel_mechanical_templates():
@@ -1002,17 +1084,17 @@ def create_app(
             ]
         )
         repo.save_feature_channel_config(
-            enabled=bool(request.enabled),
+            enabled=True,
             lightagent_web_url=lightagent_web_url,
             lightagent_web_password=lightagent_web_password,
             wechat_group_room_id=request.wechat_group_room_id.strip(),
             wechat_group_room_name=request.wechat_group_room_name.strip(),
             wechat_group_rooms=rooms,
-            allow_tunnel_mechanical=bool(request.allow_tunnel_mechanical),
-            allow_duty_query=bool(request.allow_duty_query),
-            allow_roster_import=bool(request.allow_roster_import),
+            allow_tunnel_mechanical=True,
+            allow_duty_query=True,
+            allow_roster_import=True,
         )
-        lightagent_sync = _sync_lightagent_feature_channel_rooms(repo, bool(request.enabled), rooms)
+        lightagent_sync = _sync_lightagent_feature_channel_rooms(repo, True, rooms)
         return {
             "success": True,
             "config": _public_feature_channel_config(repo.get_feature_channel_config()),
@@ -1033,6 +1115,54 @@ def create_app(
         )
         result = await _build_wechat_query_response(repo, query, uploads=uploads)
         return {"success": True, "result": result}
+
+    @app.get("/api/wechat-interaction-config")
+    def get_wechat_interaction_config():
+        return {"config": _public_wechat_interaction_config(repo)}
+
+    @app.post("/api/wechat-interaction-config")
+    def save_wechat_interaction_config(request: WechatInteractionConfigRequest):
+        repo.save_wechat_interaction_config(
+            patrol_record_triggers=_normalize_wechat_trigger_list(request.patrol_record_triggers, DEFAULT_PATROL_RECORD_TRIGGERS),
+            patrol_record_template=(request.patrol_record_template.strip() or DEFAULT_PATROL_RECORD_TEMPLATE),
+            tunnel_template_triggers=_normalize_wechat_trigger_list(request.tunnel_template_triggers, DEFAULT_TUNNEL_TEMPLATE_TRIGGERS),
+            tunnel_template=(request.tunnel_template.strip() or DEFAULT_TUNNEL_TEMPLATE),
+            tunnel_modify_template_triggers=_normalize_wechat_trigger_list(request.tunnel_modify_template_triggers, DEFAULT_TUNNEL_MODIFY_TEMPLATE_TRIGGERS),
+            tunnel_modify_template=(request.tunnel_modify_template.strip() or DEFAULT_TUNNEL_MODIFY_TEMPLATE),
+        )
+        return {"success": True, "config": _public_wechat_interaction_config(repo)}
+
+    @app.post("/api/wechat-interaction-config/test")
+    async def test_wechat_interaction_config():
+        room_id = next(iter(_notification_wechat_target_room_ids(repo)), "")
+        interaction = _wechat_interaction_config(repo)
+        tests = [
+            ("patrol_record", next(iter(interaction["patrol_record_triggers"]), "巡查记录")),
+            ("tunnel_template", next(iter(interaction["tunnel_template_triggers"]), "模板")),
+            ("tunnel_modify_template", next(iter(interaction["tunnel_modify_template_triggers"]), "修改模板")),
+        ]
+        results: list[dict[str, Any]] = []
+        for query_type, trigger in tests:
+            query = WechatQueryRequest(
+                text=trigger,
+                room_id=room_id,
+                stable_room_id=room_id,
+                sender_id="wechat-interaction-test",
+                runtime_sender_id="wechat-interaction-test",
+                sender_name="微信交互测试",
+            )
+            result = await _build_wechat_query_response_with_log(repo, query, uploads=uploads)
+            results.append({"query_type": query_type, "trigger": trigger, "result": result})
+        primary_result = next((item["result"] for item in results if item["query_type"] == "patrol_record"), results[0]["result"] if results else {})
+        summary = "；".join(
+            f"{item['trigger']} -> {str(item['result'].get('reply') or '').strip() or '无回复'}"
+            for item in results
+        )
+        return {"success": True, "result": primary_result, "results": results, "summary": summary}
+
+    @app.get("/api/wechat-interaction-logs")
+    def get_wechat_interaction_logs(limit: int = 20):
+        return {"logs": _public_wechat_interaction_logs(repo, repo.list_wechat_interaction_logs(limit))}
 
     @app.get("/api/lightagent/wechat/status")
     def lightagent_wechat_status():
@@ -1119,7 +1249,7 @@ def create_app(
     @app.post("/api/wechat-query")
     async def wechat_query(http_request: Request, query: WechatQueryRequest):
         _require_wechat_query_auth(http_request)
-        return await _build_wechat_query_response(repo, query, uploads=uploads)
+        return await _build_wechat_query_response_with_log(repo, query, uploads=uploads)
 
     @app.post("/api/wechat-roster/import")
     def wechat_roster_import(
@@ -1515,7 +1645,7 @@ def _feature_channel_config_with_env_defaults(config: dict[str, Any]) -> dict[st
         if value and not str(merged.get(key, "")).strip():
             merged[key] = value
     for key in ("enabled", "allow_tunnel_mechanical", "allow_duty_query", "allow_roster_import"):
-        merged[key] = _feature_channel_bool(merged.get(key), default=True)
+        merged[key] = True
     merged["wechat_group_rooms"] = _feature_channel_config_rooms(merged)
     return merged
 
@@ -1592,18 +1722,128 @@ def _public_feature_channel_config(config: dict[str, Any]) -> dict[str, Any]:
     rooms = _feature_channel_config_rooms(config)
     primary_room = rooms[0] if rooms else {}
     return {
-        "enabled": bool(config.get("enabled", True)),
+        "enabled": True,
         "wechat_bridge_enabled": wechat_bridge_enabled(),
         "lightagent_web_url": str(config.get("lightagent_web_url") or ""),
         "lightagent_web_password_configured": bool(str(config.get("lightagent_web_password") or "").strip()),
         "wechat_group_room_id": str(primary_room.get("id") or ""),
         "wechat_group_room_name": str(primary_room.get("name") or ""),
         "wechat_group_rooms": rooms,
-        "allow_tunnel_mechanical": bool(config.get("allow_tunnel_mechanical", True)),
-        "allow_duty_query": bool(config.get("allow_duty_query", True)),
-        "allow_roster_import": bool(config.get("allow_roster_import", True)),
+        "allow_tunnel_mechanical": True,
+        "allow_duty_query": True,
+        "allow_roster_import": True,
         "configured": bool(rooms),
     }
+
+
+def _normalize_wechat_trigger_list(values: Any, defaults: list[str]) -> list[str]:
+    if isinstance(values, str):
+        candidates = re.split(r"[\n,，;；、]+", values)
+    elif isinstance(values, list):
+        candidates = values
+    else:
+        candidates = []
+    normalized: list[str] = []
+    for item in candidates:
+        text = str(item or "").strip()
+        if text and text not in normalized:
+            normalized.append(text)
+    if normalized:
+        return normalized
+    return list(defaults)
+
+
+def _wechat_interaction_config(repo: DutyRepository) -> dict[str, Any]:
+    raw = repo.get_wechat_interaction_config()
+    return {
+        "patrol_record_triggers": _normalize_wechat_trigger_list(raw.get("patrol_record_triggers"), DEFAULT_PATROL_RECORD_TRIGGERS),
+        "patrol_record_template": str(raw.get("patrol_record_template") or DEFAULT_PATROL_RECORD_TEMPLATE).strip() or DEFAULT_PATROL_RECORD_TEMPLATE,
+        "tunnel_template_triggers": _normalize_wechat_trigger_list(raw.get("tunnel_template_triggers"), DEFAULT_TUNNEL_TEMPLATE_TRIGGERS),
+        "tunnel_template": str(raw.get("tunnel_template") or DEFAULT_TUNNEL_TEMPLATE).strip() or DEFAULT_TUNNEL_TEMPLATE,
+        "tunnel_modify_template_triggers": _normalize_wechat_trigger_list(raw.get("tunnel_modify_template_triggers"), DEFAULT_TUNNEL_MODIFY_TEMPLATE_TRIGGERS),
+        "tunnel_modify_template": str(raw.get("tunnel_modify_template") or DEFAULT_TUNNEL_MODIFY_TEMPLATE).strip() or DEFAULT_TUNNEL_MODIFY_TEMPLATE,
+    }
+
+
+def _public_wechat_interaction_config(repo: DutyRepository) -> dict[str, Any]:
+    config = _wechat_interaction_config(repo)
+    notification = _notification_config_with_env_defaults(repo.get_notification_config())
+    rooms = _normalize_feature_channel_rooms(notification.get("lightagent_targets"))
+    legacy = str(notification.get("lightagent_target") or "").strip()
+    if legacy:
+        rooms = _normalize_feature_channel_rooms(rooms + [{"id": legacy}])
+    return {
+        **config,
+        "defaults": copy.deepcopy(DEFAULT_WECHAT_INTERACTION_CONFIG),
+        "notification_rooms": rooms,
+        "menu_preview": _wechat_query_help_text(),
+    }
+
+
+def _public_wechat_interaction_logs(repo: DutyRepository, logs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    del repo
+    items: list[dict[str, Any]] = []
+    for log in logs:
+        reply_text = str(log.get("reply_text") or "").strip()
+        error = str(log.get("error") or "").strip()
+        items.append(
+            {
+                "id": log.get("id"),
+                "room_id": str(log.get("room_id") or "").strip(),
+                "room_name": str(log.get("room_name") or "").strip(),
+                "sender_id": str(log.get("sender_id") or "").strip(),
+                "sender_name": str(log.get("sender_name") or "").strip(),
+                "command_text": str(log.get("command_text") or "").strip(),
+                "query_type": str(log.get("query_type") or "").strip(),
+                "status": str(log.get("status") or "").strip(),
+                "reply_text": reply_text,
+                "reply_preview": reply_text[:120],
+                "error": error,
+                "created_at": str(log.get("created_at") or "").strip(),
+            }
+        )
+    return items
+
+
+def _save_wechat_interaction_log(
+    repo: DutyRepository | None,
+    query: WechatQueryRequest,
+    result: dict[str, Any],
+    *,
+    error: str = "",
+) -> None:
+    if repo is None:
+        return
+    reply_text = str(result.get("reply") or "").strip()
+    repo.save_wechat_interaction_log(
+        room_id=str(query.stable_room_id or query.room_id or "").strip(),
+        room_name=str(query.room_name or "").strip(),
+        sender_id=str(query.runtime_sender_id or query.sender_id or "").strip(),
+        sender_name=str(query.sender_name or "").strip(),
+        command_text=str(query.text or "").strip(),
+        query_type=str(result.get("query_type") or "").strip(),
+        status="success" if bool(result.get("success")) else "failed",
+        reply_text=reply_text,
+        error=str(error or result.get("error") or "").strip(),
+    )
+
+
+async def _build_wechat_query_response_with_log(
+    repo: DutyRepository,
+    query: WechatQueryRequest,
+    *,
+    uploads: Path | None = None,
+) -> dict[str, Any]:
+    try:
+        result = await _build_wechat_query_response(repo, query, uploads=uploads)
+    except HTTPException as exc:
+        _save_wechat_interaction_log(repo, query, {"success": False, "query_type": "", "reply": str(exc.detail)}, error=str(exc.detail))
+        raise
+    except Exception as exc:
+        _save_wechat_interaction_log(repo, query, {"success": False, "query_type": "", "reply": f"查询失败：{exc}"}, error=str(exc))
+        raise
+    _save_wechat_interaction_log(repo, query, result)
+    return result
 
 
 def _lightagent_web_base_url(config: dict[str, Any]) -> str:
@@ -1990,20 +2230,34 @@ def _feature_channel_query_room_ids(query: WechatQueryRequest) -> set[str]:
     } - {""}
 
 
+def _notification_wechat_target_rooms(repo: DutyRepository) -> list[dict[str, str]]:
+    config = _notification_config_with_env_defaults(repo.get_notification_config())
+    rooms = _normalize_feature_channel_rooms(config.get("lightagent_targets"))
+    legacy_room_id = str(config.get("lightagent_target") or "").strip()
+    if legacy_room_id:
+        rooms = _normalize_feature_channel_rooms(rooms + [{"id": legacy_room_id}])
+    return rooms
+
+
+def _notification_wechat_target_room_ids(repo: DutyRepository) -> set[str]:
+    return {room["id"] for room in _notification_wechat_target_rooms(repo) if room.get("id")}
+
+
+def _notification_wechat_target_room_label(repo: DutyRepository) -> str:
+    rooms = _notification_wechat_target_rooms(repo)
+    names = [room.get("name") or room.get("id") or "" for room in rooms]
+    return "、".join([name for name in names if name])
+
+
 def _require_feature_channel_for_wechat_query(
     repo: DutyRepository,
     query: WechatQueryRequest,
     permission_key: str,
 ) -> None:
-    config = _feature_channel_config_with_env_defaults(repo.get_feature_channel_config())
-    if not bool(config.get("enabled", True)):
-        raise HTTPException(status_code=403, detail="功能通道未启用")
-    if not bool(config.get(permission_key, True)):
-        raise HTTPException(status_code=403, detail="该功能未在功能通道启用")
-    configured_room_ids = _feature_channel_config_room_ids(config)
+    configured_room_ids = _notification_wechat_target_room_ids(repo)
     if configured_room_ids and not (configured_room_ids & _feature_channel_query_room_ids(query)):
-        room_name = _feature_channel_config_room_label(config) or "未命名功能群"
-        raise HTTPException(status_code=403, detail=f"当前微信群不是功能通道：{room_name}")
+        room_name = _notification_wechat_target_room_label(repo) or "未命名微信群"
+        raise HTTPException(status_code=403, detail=f"当前微信群不是通知渠道配置的个人微信群：{room_name}")
 
 
 def _require_feature_channel_for_roster_import(
@@ -2011,16 +2265,11 @@ def _require_feature_channel_for_roster_import(
     room_id: str = "",
     stable_room_id: str = "",
 ) -> None:
-    config = _feature_channel_config_with_env_defaults(repo.get_feature_channel_config())
-    if not bool(config.get("enabled", True)):
-        raise HTTPException(status_code=403, detail="功能通道未启用")
-    if not bool(config.get("allow_roster_import", True)):
-        raise HTTPException(status_code=403, detail="排班导入未在功能通道启用")
-    configured_room_ids = _feature_channel_config_room_ids(config)
+    configured_room_ids = _notification_wechat_target_room_ids(repo)
     supplied = {str(room_id or "").strip(), str(stable_room_id or "").strip()} - {""}
     if configured_room_ids and not (configured_room_ids & supplied):
-        room_name = _feature_channel_config_room_label(config) or "未命名功能群"
-        raise HTTPException(status_code=403, detail=f"当前微信群不是功能通道：{room_name}")
+        room_name = _notification_wechat_target_room_label(repo) or "未命名微信群"
+        raise HTTPException(status_code=403, detail=f"当前微信群不是通知渠道配置的个人微信群：{room_name}")
 
 
 def _build_wechat_roster_import_response(
@@ -2149,8 +2398,8 @@ async def _build_wechat_query_response(
     text = _wechat_query_menu_selection_command(_normalize_wechat_query_text(query.text))
     if (
         _is_tunnel_mechanical_wechat_request(text)
-        or _is_tunnel_mechanical_wechat_template_shortcut(text)
-        or _is_tunnel_mechanical_wechat_modify_template_shortcut(text)
+        or _is_tunnel_mechanical_wechat_template_shortcut(text, repo)
+        or _is_tunnel_mechanical_wechat_modify_template_shortcut(text, repo)
     ):
         _require_feature_channel_for_wechat_query(repo, query, "allow_tunnel_mechanical")
     else:
@@ -2158,6 +2407,9 @@ async def _build_wechat_query_response(
     tunnel_response = await _build_tunnel_mechanical_wechat_response(repo, query, text, uploads=uploads)
     if tunnel_response is not None:
         return tunnel_response
+    patrol_record_response = await _build_wechat_patrol_record_response(repo, query, text, uploads=uploads)
+    if patrol_record_response is not None:
+        return patrol_record_response
     if _is_wechat_query_help(text):
         return _wechat_query_help_response()
     person = _person_for_wechat_query(repo, query)
@@ -2213,7 +2465,7 @@ def _handle_wechat_bridge_message(repo: DutyRepository, uploads: Path, message: 
     if not text:
         return
     normalized = _normalize_wechat_query_text(text)
-    if not _looks_like_duty_wechat_command(normalized):
+    if not _looks_like_duty_wechat_command(normalized, repo):
         return
     LOGGER.warning(
         "内置微信桥收到功能命令：room=%s sender=%s text=%s",
@@ -2233,7 +2485,7 @@ def _handle_wechat_bridge_message(repo: DutyRepository, uploads: Path, message: 
         sender_name=str(message.get("sender_name") or ""),
     )
     try:
-        result = asyncio.run(_build_wechat_query_response(repo, query, uploads=uploads))
+        result = asyncio.run(_build_wechat_query_response_with_log(repo, query, uploads=uploads))
     except HTTPException as exc:
         result = {"success": False, "reply": str(exc.detail)}
     except Exception as exc:
@@ -2256,16 +2508,19 @@ def _handle_wechat_bridge_message(repo: DutyRepository, uploads: Path, message: 
         LOGGER.exception("内置微信桥发送查询回复失败")
 
 
-def _looks_like_duty_wechat_command(text: str) -> bool:
+def _looks_like_duty_wechat_command(text: str, repo: DutyRepository | None = None) -> bool:
     value = _wechat_query_menu_selection_command(str(text or "").strip())
     if not value:
         return False
+    if repo is not None and _is_wechat_interaction_trigger(repo, value):
+        return True
     return any(
         checker(value)
         for checker in (
             _is_tunnel_mechanical_wechat_request,
             _is_tunnel_mechanical_wechat_template_shortcut,
             _is_tunnel_mechanical_wechat_modify_template_shortcut,
+            _is_wechat_patrol_record_command,
             _is_wechat_query_help,
             _is_wechat_self_bind_command,
             _is_wechat_binding_query,
@@ -2273,6 +2528,198 @@ def _looks_like_duty_wechat_command(text: str) -> bool:
             _is_wechat_monitor_query,
         )
     )
+
+
+async def _build_wechat_patrol_record_response(
+    repo: DutyRepository,
+    query: WechatQueryRequest,
+    text: str,
+    *,
+    uploads: Path | None = None,
+) -> dict[str, Any] | None:
+    if not _is_wechat_patrol_record_command(text) and not _is_wechat_patrol_record_template_trigger(repo, text):
+        return None
+    if _is_wechat_patrol_record_template_trigger(repo, text):
+        template = _wechat_patrol_record_template(repo)
+        return {
+            "success": True,
+            "query_type": "patrol_record_template",
+            "reply": template,
+            "replies": [template],
+            "template": template,
+        }
+    if uploads is None:
+        return {"success": False, "query_type": "patrol_record", "reply": "当前服务未配置上传目录，无法生成巡查记录图片。"}
+    name = _wechat_patrol_record_name(repo, text)
+    date_range = _wechat_patrol_record_date_range(text)
+    if not name:
+        return {
+            "success": False,
+            "query_type": "patrol_record",
+            "reply": "没有识别到姓名，请按格式发送：查询商邱宏巡查记录 2026-07-01至2026-07-31",
+        }
+    if date_range is None:
+        return {
+            "success": False,
+            "query_type": "patrol_record",
+            "reply": f"没有识别到起止日期，请按格式发送：查询{name}巡查记录 2026-07-01至2026-07-31",
+        }
+    start_date, end_date = date_range
+    config = repo.get_patrol_warning_config()
+    state = repo.get_patrol_warning_state()
+    try:
+        result = await fetch_patrol_records_by_name_result(
+            config,
+            TZ,
+            name=name,
+            token=str(state.get("token") or ""),
+            token_expires_at=str(state.get("token_expires_at") or ""),
+            limit=5000,
+            cache_path=repo.db_path.parent / "patrol-warning-records-cache.json",
+        )
+    except PatrolWarningError as exc:
+        repo.save_send_record(kind="patrol_record_wechat", target=name, status="failed", content=query.text, error=str(exc))
+        return {"success": False, "query_type": "patrol_record", "reply": f"巡查记录查询失败：{exc}"}
+    repo.save_patrol_warning_state(token=result.token, token_expires_at=result.token_expires_at, last_error="")
+    records = [
+        record for record in result.records
+        if start_date <= _record_start_date(record) <= end_date
+    ]
+    image_name = f"patrol-record-{uuid.uuid4().hex}.png"
+    image_path = uploads / image_name
+    uploads.mkdir(parents=True, exist_ok=True)
+    image_path.write_bytes(
+        render_patrol_record_image(
+            records,
+            name=name,
+            start_date=start_date.isoformat(),
+            end_date=end_date.isoformat(),
+            route_code=str(config.get("route_code") or "").strip(),
+        )
+    )
+    image_url = f"/api/uploads/{image_name}"
+    reply = (
+        f"已查询 {name} 巡查记录：{start_date.isoformat()}至{end_date.isoformat()}，"
+        f"共 {len(records)} 条，实际次数 {_patrol_record_group_count(records)} 次，图片已生成，正在发送。"
+    )
+    repo.save_send_record(kind="patrol_record_wechat", target=name, status="success", content=query.text)
+    return {
+        "success": True,
+        "query_type": "patrol_record",
+        "name": name,
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "records": records,
+        "count": len(records),
+        "image_url": image_url,
+        "image_full_url": _public_app_url(image_url),
+        "reply": reply,
+        "replies": [reply],
+    }
+
+
+def _is_wechat_patrol_record_command(text: str) -> bool:
+    value = str(text or "").strip()
+    return "巡查记录" in value or value in {"巡查记录", "查询巡查", "查巡查"}
+
+
+def _is_wechat_patrol_record_template_trigger(repo: DutyRepository, text: str) -> bool:
+    value = str(text or "").strip()
+    return value in _wechat_interaction_config(repo)["patrol_record_triggers"]
+
+
+def _is_wechat_interaction_trigger(repo: DutyRepository, text: str) -> bool:
+    value = str(text or "").strip()
+    config = _wechat_interaction_config(repo)
+    return value in {
+        *config["patrol_record_triggers"],
+        *config["tunnel_template_triggers"],
+        *config["tunnel_modify_template_triggers"],
+    }
+
+
+def _wechat_patrol_record_template(repo: DutyRepository | None = None) -> str:
+    if repo is None:
+        return DEFAULT_PATROL_RECORD_TEMPLATE
+    return _wechat_interaction_config(repo)["patrol_record_template"]
+
+
+def _wechat_patrol_record_name(repo: DutyRepository, text: str) -> str:
+    value = str(text or "")
+    known_names = sorted(
+        {str(person.get("name") or "").strip() for person in repo.list_personnel() if str(person.get("name") or "").strip()},
+        key=len,
+        reverse=True,
+    )
+    for name in known_names:
+        if name in value and name not in {"巡查记录", "查询巡查记录"}:
+            return name
+    match = re.search(r"(?:查询|查)?(.+?)巡查记录", value)
+    if match:
+        candidate = re.sub(r"[，,、：: ]", "", match.group(1)).strip()
+        return candidate if candidate not in {"", "查询"} else ""
+    match = re.search(r"巡查记录(?:查询)?(.+)", value)
+    if match:
+        return re.sub(r"[，,、：: ]", "", match.group(1)).strip()
+    return ""
+
+
+def _wechat_patrol_record_date_range(text: str) -> tuple[date, date] | None:
+    matches = re.findall(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}", str(text or ""))
+    if len(matches) < 2:
+        return None
+    parsed: list[date] = []
+    for item in matches[:2]:
+        try:
+            parsed.append(date.fromisoformat(item.replace("/", "-")))
+        except ValueError:
+            return None
+    start_date, end_date = parsed
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
+    return start_date, end_date
+
+
+def _record_start_date(record: dict[str, Any]) -> date:
+    value = str(record.get("start_time") or "")
+    try:
+        return datetime.fromisoformat(value).date()
+    except ValueError:
+        return date.min
+
+
+def _patrol_record_group_count(records: list[dict[str, Any]]) -> int:
+    ordered = sorted(records, key=lambda record: (str(record.get("start_time") or ""), str(record.get("id") or "")))
+    count = 0
+    index = 0
+    while index < len(ordered):
+        count += 1
+        if index + 1 < len(ordered) and _patrol_records_can_pair(ordered[index], ordered[index + 1]):
+            index += 2
+            continue
+        index += 1
+    return count
+
+
+def _patrol_records_can_pair(current: dict[str, Any], following: dict[str, Any]) -> bool:
+    if {str(current.get("direction") or ""), str(following.get("direction") or "")} != {"上行", "下行"}:
+        return False
+    if str(current.get("start_time") or "")[:10] != str(following.get("start_time") or "")[:10]:
+        return False
+    current_start = _patrol_record_datetime(current, "start_time", "end_time")
+    current_end = _patrol_record_datetime(current, "end_time", "start_time")
+    following_start = _patrol_record_datetime(following, "start_time", "end_time")
+    if not current_start or not current_end or not following_start:
+        return False
+    return following_start >= current_start and 0 <= (following_start - current_end).total_seconds() <= 3600
+
+
+def _patrol_record_datetime(record: dict[str, Any], field: str, fallback_field: str) -> datetime | None:
+    value = str(record.get(field) or record.get(fallback_field) or "")
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 def _wechat_query_result_image_path(result: dict[str, Any], uploads: Path) -> Path | None:
@@ -2293,13 +2740,13 @@ async def _build_tunnel_mechanical_wechat_response(
 ) -> dict[str, Any] | None:
     if (
         not _is_tunnel_mechanical_wechat_request(text)
-        and not _is_tunnel_mechanical_wechat_template_shortcut(text)
-        and not _is_tunnel_mechanical_wechat_modify_template_shortcut(text)
+        and not _is_tunnel_mechanical_wechat_template_shortcut(text, repo)
+        and not _is_tunnel_mechanical_wechat_modify_template_shortcut(text, repo)
     ):
         return None
     template = _public_tunnel_mechanical_template(repo.get_tunnel_mechanical_template())
-    if _is_tunnel_mechanical_wechat_modify_template_shortcut(text):
-        template_line = _tunnel_mechanical_wechat_modify_template_line(template, query.target_date)
+    if _is_tunnel_mechanical_wechat_modify_template_shortcut(text, repo):
+        template_line = _tunnel_mechanical_wechat_modify_template_line(template, query.target_date, repo=repo)
         return {
             "success": True,
             "query_type": "tunnel_mechanical_modify_template",
@@ -2307,8 +2754,8 @@ async def _build_tunnel_mechanical_wechat_response(
             "replies": [template_line],
             "template": template_line,
         }
-    if _is_tunnel_mechanical_wechat_template_shortcut(text):
-        template_line = _tunnel_mechanical_wechat_template_line(template, query.target_date)
+    if _is_tunnel_mechanical_wechat_template_shortcut(text, repo):
+        template_line = _tunnel_mechanical_wechat_template_line(template, query.target_date, repo=repo)
         return {
             "success": True,
             "query_type": "tunnel_mechanical_template",
@@ -2318,12 +2765,12 @@ async def _build_tunnel_mechanical_wechat_response(
         }
     if _is_tunnel_mechanical_wechat_modify_command(text):
         return await _build_tunnel_mechanical_wechat_modify_response(repo, query, text, template, uploads=uploads)
-    if _is_tunnel_mechanical_wechat_template_command(text):
-        return _tunnel_mechanical_wechat_template_response(template, query.target_date)
+    if _is_tunnel_mechanical_wechat_template_command(text, repo):
+        return _tunnel_mechanical_wechat_template_response(template, query.target_date, repo=repo)
     if _is_tunnel_mechanical_wechat_result_query_command(text):
         return await _build_tunnel_mechanical_wechat_result_query_response(repo, query, text, template, uploads=uploads)
     if not _is_tunnel_mechanical_wechat_submit_command(text):
-        return _tunnel_mechanical_wechat_template_response(template, query.target_date)
+        return _tunnel_mechanical_wechat_template_response(template, query.target_date, repo=repo)
     if not template["assets"] or not template["people"]:
         return {
             "success": False,
@@ -2337,7 +2784,7 @@ async def _build_tunnel_mechanical_wechat_response(
     if not params.get("recorder"):
         missing.append("记录人")
     if missing:
-        example = _tunnel_mechanical_wechat_template_line(template, params["checkTime"])
+        example = _tunnel_mechanical_wechat_template_line(template, params["checkTime"], repo=repo)
         return {
             "success": False,
             "query_type": "tunnel_mechanical",
@@ -2617,12 +3064,16 @@ def _is_tunnel_mechanical_wechat_request(text: str) -> bool:
     )
 
 
-def _is_tunnel_mechanical_wechat_template_shortcut(text: str) -> bool:
-    return str(text or "").strip() == "模板"
+def _is_tunnel_mechanical_wechat_template_shortcut(text: str, repo: DutyRepository | None = None) -> bool:
+    value = str(text or "").strip()
+    triggers = _wechat_interaction_config(repo)["tunnel_template_triggers"] if repo is not None else DEFAULT_TUNNEL_TEMPLATE_TRIGGERS
+    return value in triggers
 
 
-def _is_tunnel_mechanical_wechat_modify_template_shortcut(text: str) -> bool:
-    return str(text or "").strip() in {"修改", "修改模板", "改模板"}
+def _is_tunnel_mechanical_wechat_modify_template_shortcut(text: str, repo: DutyRepository | None = None) -> bool:
+    value = str(text or "").strip()
+    triggers = _wechat_interaction_config(repo)["tunnel_modify_template_triggers"] if repo is not None else DEFAULT_TUNNEL_MODIFY_TEMPLATE_TRIGGERS
+    return value in triggers
 
 
 def _public_app_url(path: str) -> str:
@@ -2645,8 +3096,8 @@ def _is_tunnel_mechanical_wechat_modify_command(text: str) -> bool:
     )
 
 
-def _is_tunnel_mechanical_wechat_template_command(text: str) -> bool:
-    return _is_tunnel_mechanical_wechat_template_shortcut(text) or (
+def _is_tunnel_mechanical_wechat_template_command(text: str, repo: DutyRepository | None = None) -> bool:
+    return _is_tunnel_mechanical_wechat_template_shortcut(text, repo) or (
         _is_tunnel_mechanical_wechat_request(text) and any(keyword in text for keyword in ("格式", "模板", "示例"))
     )
 
@@ -2655,9 +3106,14 @@ def _is_tunnel_mechanical_wechat_result_query_command(text: str) -> bool:
     return _is_tunnel_mechanical_wechat_request(text) and any(keyword in text for keyword in ("查询", "查"))
 
 
-def _tunnel_mechanical_wechat_template_response(template: dict[str, Any], target_date: date | None = None) -> dict[str, Any]:
-    intro = _tunnel_mechanical_wechat_template_reply(template, target_date)
-    template_line = _tunnel_mechanical_wechat_template_line(template, target_date)
+def _tunnel_mechanical_wechat_template_response(
+    template: dict[str, Any],
+    target_date: date | None = None,
+    *,
+    repo: DutyRepository | None = None,
+) -> dict[str, Any]:
+    intro = _tunnel_mechanical_wechat_template_reply(template, target_date, repo=repo)
+    template_line = _tunnel_mechanical_wechat_template_line(template, target_date, repo=repo)
     return {
         "success": True,
         "query_type": "tunnel_mechanical_template",
@@ -2667,17 +3123,42 @@ def _tunnel_mechanical_wechat_template_response(template: dict[str, Any], target
     }
 
 
-def _tunnel_mechanical_wechat_template_line(template: dict[str, Any], target_date: date | None = None) -> str:
+def _render_wechat_template_text(pattern: str, target_date: date | None = None) -> str:
     check_time = (target_date or _today_in_tz()).isoformat()
-    return f"隧道机电录入 日期{check_time} 负责人罗富耀 记录人商邱宏 天气晴"
+    text = str(pattern or "").strip()
+    if not text:
+        return ""
+    return text.replace("{{date}}", check_time).replace("{date}", check_time)
 
 
-def _tunnel_mechanical_wechat_modify_template_line(template: dict[str, Any], target_date: date | None = None) -> str:
-    check_time = (target_date or _today_in_tz()).isoformat()
-    return f"隧道机电修改 日期{check_time} 负责人罗富耀 记录人商邱宏 天气晴 修改日期为{check_time}"
+def _tunnel_mechanical_wechat_template_line(
+    template: dict[str, Any],
+    target_date: date | None = None,
+    *,
+    repo: DutyRepository | None = None,
+) -> str:
+    del template
+    pattern = _wechat_interaction_config(repo)["tunnel_template"] if repo is not None else DEFAULT_TUNNEL_TEMPLATE
+    return _render_wechat_template_text(pattern, target_date) or _render_wechat_template_text(DEFAULT_TUNNEL_TEMPLATE, target_date)
 
 
-def _tunnel_mechanical_wechat_template_reply(template: dict[str, Any], target_date: date | None = None) -> str:
+def _tunnel_mechanical_wechat_modify_template_line(
+    template: dict[str, Any],
+    target_date: date | None = None,
+    *,
+    repo: DutyRepository | None = None,
+) -> str:
+    del template
+    pattern = _wechat_interaction_config(repo)["tunnel_modify_template"] if repo is not None else DEFAULT_TUNNEL_MODIFY_TEMPLATE
+    return _render_wechat_template_text(pattern, target_date) or _render_wechat_template_text(DEFAULT_TUNNEL_MODIFY_TEMPLATE, target_date)
+
+
+def _tunnel_mechanical_wechat_template_reply(
+    template: dict[str, Any],
+    target_date: date | None = None,
+    *,
+    repo: DutyRepository | None = None,
+) -> str:
     check_time = (target_date or _today_in_tz()).isoformat()
     asset_count = len(template.get("assets") or [])
     people = [str(person.get("name") or "").strip() for person in (template.get("people") or []) if person.get("name")]
@@ -2694,7 +3175,7 @@ def _tunnel_mechanical_wechat_template_reply(template: dict[str, Any], target_da
         "- 只想预览请求，把“录入”改成“预览”\n\n"
         "修改记录：\n"
         "- 发送“修改模板”获取可复制修改模板\n"
-        f"- {_tunnel_mechanical_wechat_modify_template_line(template, target_date)}\n"
+        f"- {_tunnel_mechanical_wechat_modify_template_line(template, target_date, repo=repo)}\n"
         "- 也可以修改天气、负责人、记录人，例如：修改天气为多云、负责人改为罗富耀、记录人改为商邱宏\n"
         f"登录失效时会自动重新登录；验证码识别失败会自动重试。"
         f"{asset_line}"
@@ -3174,6 +3655,8 @@ def _wechat_query_help_text() -> str:
         f"9. 查询{today}机电\n"
         "10. 查看隧道机电录入格式\n"
         "直接回复序号即可执行。\n"
+        "发送“巡查记录”可获取巡查记录查询模板。\n"
+        "示例：查询商邱宏巡查记录 2026-07-01至2026-07-31\n"
         "发送“模板”可单独获取隧道机电录入模板。\n"
         "发送“修改模板”可单独获取隧道机电修改模板。\n"
         "发送“机电”可查看隧道机电菜单。\n"

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import random
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -108,6 +110,15 @@ class FetchWarningResult:
     token_reused: bool
 
 
+@dataclass(frozen=True)
+class FetchPatrolRecordResult:
+    records: list[dict[str, Any]]
+    stats: dict[str, int]
+    token: str
+    token_expires_at: str
+    token_reused: bool
+
+
 def warning_from_dict(value: dict[str, Any], tz: ZoneInfo) -> PatrolWarning | None:
     if not value:
         return None
@@ -140,6 +151,101 @@ def warning_from_dict(value: dict[str, Any], tz: ZoneInfo) -> PatrolWarning | No
 async def fetch_latest_warning(config: dict[str, Any], tz: ZoneInfo) -> tuple[PatrolWarning | None, dict[str, int]]:
     result = await fetch_latest_warning_result(config, tz)
     return result.warning, result.stats
+
+
+async def fetch_patrol_records_by_name_result(
+    config: dict[str, Any],
+    tz: ZoneInfo,
+    *,
+    name: str,
+    token: str = "",
+    token_expires_at: str = "",
+    now: datetime | None = None,
+    limit: int = 500,
+    cache_path: str | Path | None = None,
+) -> FetchPatrolRecordResult:
+    query_name = str(name or "").strip()
+    if not query_name:
+        raise PatrolWarningError("请输入要查询的姓名")
+    now = now or datetime.now(tz)
+    cache = _load_patrol_record_cache(cache_path, config)
+    known_keys = {_patrol_record_cache_key(record) for record in cache}
+    current_token = token if is_token_valid(token, token_expires_at, now) else ""
+    token_reused = bool(current_token)
+    if not current_token:
+        try:
+            current_token = await _login(config)
+            token_expires_at = token_cache_expires_at(current_token, now, tz).isoformat()
+        except PatrolWarningError:
+            if not cache:
+                raise
+            current_token = ""
+            rows, total_rows, remote_exhausted = [], len(cache), False
+        else:
+            rows = []
+            total_rows = 0
+            remote_exhausted = False
+    else:
+        rows = []
+        total_rows = 0
+        remote_exhausted = False
+    try:
+        if current_token:
+            rows, total_rows, remote_exhausted = await _fetch_patrol_record_rows_for_cache(
+                config,
+                current_token,
+                known_keys=known_keys,
+                limit=limit,
+                use_incremental=bool(cache),
+                tz=tz,
+            )
+    except PatrolWarningError as exc:
+        if not token_reused or not exc.is_auth_error:
+            if cache:
+                rows, total_rows, remote_exhausted = [], len(cache), False
+            else:
+                raise
+        else:
+            current_token = await _login(config)
+            token_expires_at = token_cache_expires_at(current_token, now, tz).isoformat()
+            token_reused = False
+            rows, total_rows, remote_exhausted = await _fetch_patrol_record_rows_for_cache(
+                config,
+                current_token,
+                known_keys=known_keys,
+                limit=limit,
+                use_incremental=bool(cache),
+                tz=tz,
+            )
+
+    fetched = [
+        record
+        for index, row in enumerate(rows)
+        if (record := normalize_patrol_record(row, tz, index=index))
+    ]
+    normalized = _merge_patrol_record_cache(cache, fetched)
+    if fetched or (cache and remote_exhausted):
+        _save_patrol_record_cache(cache_path, config, normalized, total_rows=total_rows)
+    matched = [record for record in normalized if _patrol_record_name_matches(record, query_name)]
+    matched.sort(key=lambda record: (record.get("start_timestamp") or 0, str(record.get("id") or "")), reverse=True)
+    loaded_rows = len(normalized)
+    return FetchPatrolRecordResult(
+        records=matched,
+        stats={
+            "total_rows": max(total_rows, loaded_rows),
+            "loaded_rows": loaded_rows,
+            "cached_rows": len(cache),
+            "fetched_rows": len(rows),
+            "new_rows": max(0, loaded_rows - len(cache)),
+            "cache_used": 1 if cache else 0,
+            "remote_exhausted": 1 if remote_exhausted else 0,
+            "route_matched_rows": loaded_rows,
+            "matched_rows": len(matched),
+        },
+        token=current_token,
+        token_expires_at=token_expires_at,
+        token_reused=token_reused,
+    )
 
 
 async def fetch_latest_warning_result(
@@ -245,6 +351,45 @@ def normalize_warning(row: dict[str, Any], tz: ZoneInfo) -> PatrolWarning | None
         end_stake=end_stake,
         raw=row,
     )
+
+
+def normalize_patrol_record(row: dict[str, Any], tz: ZoneInfo, *, index: int = 0) -> dict[str, Any] | None:
+    if not isinstance(row, dict):
+        return None
+    raw_id = str(_first_value(row, "Id", "id", "DailyId", "dailyId") or "").strip()
+    start_time = _parse_datetime(
+        _first_value(row, "InspectionAlstime", "inspectionAlstime", "InspectionAllDate", "inspectionAllDate", "CreateTime", "createTime"),
+        tz,
+    )
+    end_time = _parse_datetime(
+        _first_value(row, "InspectionAletime", "inspectionAletime", "EndTime", "endTime", "FinishTime", "finishTime"),
+        tz,
+    )
+    route_code = str(_first_value(row, "RouteNumber", "routeNumber", "RouteCode", "routeCode") or "").strip()
+    route_name = str(_first_value(row, "RouteName", "routeName", "SectionName", "Name", "name") or "").strip()
+    responsible_person = str(_first_value(row, "ResponsiblePerson", "responsiblePerson") or "").strip()
+    recorder = str(_first_value(row, "Recorder", "recorder") or "").strip()
+    if not (raw_id or route_code or route_name or responsible_person or recorder):
+        return None
+    start_stake = _format_plain_stake(_first_value(row, "StartingStake", "StartStake", "startStake", "BeginStake", "beginStake"))
+    end_stake = _format_plain_stake(_first_value(row, "EndStake", "endStake", "FinishStake", "EndingStake", "finishStake"))
+    direction = _direction_text(_first_value(row, "InspectionAllDirection", "inspectionAllDirection", "Direction", "direction"))
+    return {
+        "id": raw_id or f"record-{index}",
+        "route_code": route_code,
+        "route_name": route_name,
+        "direction": direction,
+        "responsible_person": responsible_person,
+        "recorder": recorder,
+        "start_stake": start_stake,
+        "end_stake": end_stake,
+        "stake_range": _plain_stake_range(start_stake, end_stake),
+        "start_time": start_time.isoformat() if start_time else "",
+        "end_time": end_time.isoformat() if end_time else "",
+        "start_timestamp": int(start_time.timestamp()) if start_time else 0,
+        "status": "已完成" if end_time else "巡查中",
+        "raw": row,
+    }
 
 
 def _warning_level_from_text_fields(row: dict[str, Any]) -> str:
@@ -472,6 +617,169 @@ async def _fetch_rows(config: dict[str, Any], token: str) -> list[dict[str, Any]
     return [row for row in rows if isinstance(row, dict)]
 
 
+async def _fetch_patrol_record_rows(
+    config: dict[str, Any],
+    token: str,
+    *,
+    limit: int = 500,
+) -> tuple[list[dict[str, Any]], int]:
+    rows, total_rows, _ = await _fetch_patrol_record_rows_for_cache(
+        config,
+        token,
+        known_keys=set(),
+        limit=limit,
+        use_incremental=False,
+        tz=ZoneInfo("Asia/Shanghai"),
+    )
+    return rows, total_rows
+
+
+async def _fetch_patrol_record_rows_for_cache(
+    config: dict[str, Any],
+    token: str,
+    *,
+    known_keys: set[str],
+    limit: int = 500,
+    use_incremental: bool = False,
+    tz: ZoneInfo,
+) -> tuple[list[dict[str, Any]], int, bool]:
+    records_url = _patrol_records_url(config)
+    if not records_url:
+        raise PatrolWarningError("请先填写预警列表接口地址，系统会自动推导巡查记录接口")
+    headers = {**_request_headers(config), "Authorization": f"Bearer${token}"}
+    page_size = max(1, min(int(config.get("record_rows") or 200), 1000))
+    max_records = max(1, min(int(limit or 500), 5000))
+    page = 1
+    all_rows: list[dict[str, Any]] = []
+    total_rows = 0
+    try:
+        async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
+            while len(all_rows) < max_records:
+                response = await client.post(
+                    records_url,
+                    headers=headers,
+                    data={"page": page, "rows": page_size},
+                )
+                response.raise_for_status()
+                data = response.json()
+                _raise_for_api_failure(data, "公路巡查APP巡查记录查询失败")
+                rows = _extract_rows(data)
+                total_rows = _extract_total(data, total_rows or len(rows))
+                if not rows:
+                    break
+                if use_incremental and _all_patrol_rows_cached(rows, known_keys, tz):
+                    break
+                all_rows.extend(row for row in rows if isinstance(row, dict))
+                if len(rows) < page_size or (total_rows and len(all_rows) >= total_rows):
+                    break
+                page += 1
+    except httpx.HTTPStatusError as exc:
+        raise PatrolWarningError(
+            f"公路巡查APP巡查记录查询失败：HTTP {exc.response.status_code}",
+            status_code=exc.response.status_code,
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise PatrolWarningError(f"公路巡查APP巡查记录查询失败：{exc.__class__.__name__}") from exc
+    except ValueError as exc:
+        raise PatrolWarningError("公路巡查APP巡查记录响应不是JSON") from exc
+    loaded = all_rows[:max_records]
+    remote_exhausted = not use_incremental or len(loaded) >= (total_rows or len(loaded))
+    return loaded, total_rows or len(loaded), remote_exhausted
+
+
+def _patrol_record_cache_scope(config: dict[str, Any]) -> str:
+    source = {
+        "records_url": _patrol_records_url(config),
+        "warning_url": str(config.get("warning_url") or "").strip(),
+        "platform": str(config.get("platform") or "").strip(),
+        "project_id": str(config.get("project_id") or "").strip(),
+    }
+    return hashlib.sha256(json.dumps(source, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def _load_patrol_record_cache(cache_path: str | Path | None, config: dict[str, Any]) -> list[dict[str, Any]]:
+    if not cache_path:
+        return []
+    path = Path(cache_path)
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return []
+    if not isinstance(data, dict) or data.get("scope") != _patrol_record_cache_scope(config):
+        return []
+    records = data.get("records")
+    return [record for record in records if isinstance(record, dict)] if isinstance(records, list) else []
+
+
+def _save_patrol_record_cache(
+    cache_path: str | Path | None,
+    config: dict[str, Any],
+    records: list[dict[str, Any]],
+    *,
+    total_rows: int,
+) -> None:
+    if not cache_path:
+        return
+    path = Path(cache_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": 1,
+        "scope": _patrol_record_cache_scope(config),
+        "updated_at": datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(),
+        "total_rows": int(total_rows or len(records)),
+        "records": records,
+    }
+    temp = path.with_suffix(f"{path.suffix}.tmp")
+    temp.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    temp.replace(path)
+
+
+def _merge_patrol_record_cache(cached: list[dict[str, Any]], fetched: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for record in cached:
+        key = _patrol_record_cache_key(record)
+        if key:
+            merged[key] = record
+    for record in fetched:
+        key = _patrol_record_cache_key(record)
+        if key:
+            merged[key] = record
+    records = list(merged.values())
+    records.sort(key=lambda record: (record.get("start_timestamp") or 0, str(record.get("id") or "")), reverse=True)
+    return records
+
+
+def _all_patrol_rows_cached(rows: list[dict[str, Any]], known_keys: set[str], tz: ZoneInfo) -> bool:
+    row_keys = {
+        key
+        for index, row in enumerate(rows)
+        if isinstance(row, dict)
+        if (record := normalize_patrol_record(row, tz, index=index))
+        if (key := _patrol_record_cache_key(record))
+    }
+    return bool(row_keys) and row_keys.issubset(known_keys)
+
+
+def _patrol_record_cache_key(record: dict[str, Any]) -> str:
+    raw_id = str(record.get("id") or "").strip()
+    if raw_id and not re.fullmatch(r"record-\d+", raw_id):
+        return f"id:{raw_id}"
+    parts = [
+        str(record.get("route_code") or ""),
+        str(record.get("route_name") or ""),
+        str(record.get("direction") or ""),
+        str(record.get("responsible_person") or ""),
+        str(record.get("recorder") or ""),
+        str(record.get("start_time") or ""),
+        str(record.get("end_time") or ""),
+        str(record.get("start_stake") or ""),
+        str(record.get("end_stake") or ""),
+    ]
+    return "fp:" + hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+
+
 def _request_headers(config: dict[str, Any]) -> dict[str, str]:
     headers = {"content-type": "application/x-www-form-urlencoded"}
     platform = str(config.get("platform") or "").strip()
@@ -483,12 +791,54 @@ def _request_headers(config: dict[str, Any]) -> dict[str, str]:
     return headers
 
 
+def _patrol_records_url(config: dict[str, Any]) -> str:
+    explicit = str(config.get("records_url") or "").strip()
+    if explicit:
+        return explicit
+    warning_url = str(config.get("warning_url") or "").strip()
+    if not warning_url:
+        return ""
+    replacements = (
+        ("mobile/warninginfo/findPage", "mobile/receive/newDailyInspection/findPage"),
+        ("mobile/waringinfo/findPage", "mobile/receive/newDailyInspection/findPage"),
+        ("warninginfo/findPage", "receive/newDailyInspection/findPage"),
+        ("waringinfo/findPage", "receive/newDailyInspection/findPage"),
+    )
+    lower = warning_url.lower()
+    for source, target in replacements:
+        index = lower.find(source.lower())
+        if index >= 0:
+            return warning_url[:index] + target + warning_url[index + len(source):]
+    base = warning_url.rsplit("/", 2)[0]
+    return f"{base}/receive/newDailyInspection/findPage"
+
+
 def _route_matches(warning: PatrolWarning, route_code: str) -> bool:
     if not route_code:
         return True
     candidates = [warning.route_code, warning.route_name]
     candidates.extend(str(warning.raw.get(key) or "") for key in ("RouteNumber", "routeNumber", "SectionName", "Name"))
     return any(str(value).strip().upper() == route_code for value in candidates if value)
+
+
+def _patrol_record_route_matches(record: dict[str, Any], route_code: str) -> bool:
+    if not route_code:
+        return True
+    candidates = [record.get("route_code"), record.get("route_name")]
+    raw = record.get("raw") if isinstance(record.get("raw"), dict) else {}
+    candidates.extend(str(raw.get(key) or "") for key in ("RouteNumber", "routeNumber", "RouteCode", "routeCode", "SectionName", "Name"))
+    return any(str(value).strip().upper() == route_code for value in candidates if value)
+
+
+def _patrol_record_name_matches(record: dict[str, Any], name: str) -> bool:
+    target = _compact_match_text(name)
+    if not target:
+        return False
+    fields = [
+        record.get("responsible_person"),
+        record.get("recorder"),
+    ]
+    return any(target in _compact_match_text(value) for value in fields)
 
 
 def _warning_sort_key(warning: PatrolWarning) -> tuple[datetime, str]:
@@ -510,6 +860,51 @@ def _nested_value(data: dict[str, Any], *keys: str) -> Any:
             return None
         current = current.get(key)
     return current
+
+
+def _extract_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = data.get("rows")
+    if rows is None:
+        rows = data.get("Rows")
+    for key in ("data", "Data"):
+        if rows is None and isinstance(data.get(key), dict):
+            nested = data[key]
+            rows = nested.get("rows") or nested.get("Rows") or nested.get("list") or nested.get("List")
+        if rows is None and isinstance(data.get(key), list):
+            rows = data.get(key)
+    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+
+
+def _extract_total(data: dict[str, Any], default: int = 0) -> int:
+    candidates = [
+        data.get("total"),
+        data.get("Total"),
+        data.get("records"),
+        data.get("Records"),
+    ]
+    for key in ("data", "Data"):
+        if isinstance(data.get(key), dict):
+            nested = data[key]
+            candidates.extend([nested.get("total"), nested.get("Total"), nested.get("records"), nested.get("Records")])
+    for value in candidates:
+        try:
+            total = int(value)
+        except (TypeError, ValueError):
+            continue
+        if total >= 0:
+            return total
+    return int(default or 0)
+
+
+def _raise_for_api_failure(data: dict[str, Any], prefix: str) -> None:
+    if not isinstance(data, dict):
+        return
+    success = data.get("Success")
+    if success is None:
+        success = data.get("success")
+    if success is False or success == 0:
+        message = data.get("Message") or data.get("message") or data.get("msg") or "接口返回失败"
+        raise PatrolWarningError(f"{prefix}：{message}")
 
 
 def _jwt_exp(token: str, tz: ZoneInfo) -> datetime | None:
@@ -563,6 +958,34 @@ def _format_stake(value: Any) -> str:
     except (TypeError, ValueError):
         text = str(value).strip()
         return text if text.upper().startswith("K") else f"K{text}"
+
+
+def _format_plain_stake(value: Any) -> str:
+    if value in (None, ""):
+        return "-"
+    text = str(value).strip()
+    if not text:
+        return "-"
+    try:
+        number = float(text)
+    except (TypeError, ValueError):
+        return text[1:] if text.upper().startswith("K") else text
+    return f"{number:g}"
+
+
+def _plain_stake_range(start_stake: str, end_stake: str) -> str:
+    if start_stake == "-" and end_stake == "-":
+        return "-"
+    return f"{start_stake} ~ {end_stake}"
+
+
+def _direction_text(value: Any) -> str:
+    text = str(value or "").strip()
+    return {"1": "上行", "2": "下行", "3": "双向", "4": "匝道"}.get(text, text)
+
+
+def _compact_match_text(value: Any) -> str:
+    return re.sub(r"[\s,，、;；/\\|]+", "", str(value or "").strip())
 
 
 def _stake_range(warning: PatrolWarning) -> str:

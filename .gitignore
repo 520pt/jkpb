@@ -10,6 +10,7 @@ data/
 uploads/
 logs/
 work/
+tmp/
 *.db
 apk/
 apk_analysis_*/

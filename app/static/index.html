@@ -4,6 +4,16 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>监控班提醒</title>
+  <script>
+    (function () {
+      try {
+        const tab = localStorage.getItem("duty-reminder:lastActiveMainTab");
+        if (tab) document.documentElement.dataset.initialMainTab = tab;
+      } catch (error) {
+        void error;
+      }
+    })();
+  </script>
   <style>
     :root {
       --bg: #f5f7fb;
@@ -74,6 +84,19 @@
       padding: 0 16px 16px;
     }
     .hidden, .tab-page.hidden { display: none !important; }
+    html[data-initial-main-tab] .tab-page {
+      display: none !important;
+    }
+    html[data-initial-main-tab="today"] #todayPage,
+    html[data-initial-main-tab="review"] #reviewPage,
+    html[data-initial-main-tab="saved"] #savedPage,
+    html[data-initial-main-tab="tunnelMechanical"] #tunnelMechanicalPage,
+    html[data-initial-main-tab="orangeWarning"] #orangeWarningPage,
+    html[data-initial-main-tab="settings"] #settingsPage,
+    html[data-initial-main-tab="records"] #recordsPage,
+    html[data-initial-main-tab="status"] #statusPage {
+      display: block !important;
+    }
     #reviewPage.dragover {
       border-color: var(--blue);
       box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.2);
@@ -179,6 +202,359 @@
     }
     .patrol-warning-query-meta span {
       white-space: nowrap;
+    }
+    .orange-warning-results {
+      align-content: start;
+      flex: 1;
+      min-height: 0;
+      max-height: none;
+      overflow: auto;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      padding-right: 2px;
+    }
+    .orange-warning-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(580px, 720px);
+      gap: 18px;
+      align-items: stretch;
+      min-height: 0;
+      overflow: hidden;
+    }
+    .orange-warning-main {
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    #orangeWarningPage .body.orange-warning-layout {
+      min-height: 0;
+    }
+    .orange-warning-search-hero {
+      display: grid;
+      gap: 8px;
+      justify-items: center;
+      text-align: center;
+      min-height: 150px;
+      padding: 18px 28px;
+      margin-bottom: 10px;
+      border: 1px solid #d6e1f5;
+      border-radius: 8px;
+      background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+      box-shadow: 0 8px 22px rgba(37, 99, 235, 0.08);
+    }
+    .orange-warning-search-hero.hidden {
+      display: none;
+    }
+    .orange-warning-search-brand {
+      color: var(--blue);
+      font-size: 21px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+    .orange-warning-search-box {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: min(100%, 600px);
+      min-height: 58px;
+      padding: 7px 9px 7px 18px;
+      border: 1px solid #d8e2f2;
+      border-radius: 999px;
+      background: white;
+      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+    }
+    .orange-warning-search-box input {
+      flex: 1;
+      min-width: 0;
+      height: 40px;
+      border: 0;
+      padding: 0 8px;
+      border-radius: 999px;
+      font-size: 16px;
+      box-shadow: none;
+      outline: none;
+    }
+    .orange-warning-search-box button {
+      height: 38px;
+      min-width: 78px;
+      border-radius: 999px;
+    }
+    .orange-warning-search-meta {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .orange-warning-search-empty-tip {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .orange-warning-stats-panel {
+      align-self: stretch;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      background: #ffffff;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      min-height: 0;
+    }
+    .orange-warning-tools {
+      display: grid;
+      gap: 12px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .orange-warning-tools-row {
+      display: flex;
+      align-items: end;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .orange-warning-search-control {
+      display: grid;
+      gap: 5px;
+      flex: 1 1 220px;
+      min-width: 220px;
+    }
+    .orange-warning-search-control input {
+      height: 40px;
+      border-radius: 999px;
+      padding-inline: 14px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    }
+    .orange-warning-date-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      width: 100%;
+    }
+    .orange-warning-date-grid label {
+      display: grid;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .orange-warning-date-grid input {
+      height: 34px;
+    }
+    .orange-warning-tools-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .orange-warning-stats-card {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-width: 0;
+      min-height: 0;
+      flex: 1;
+    }
+    .orange-warning-stats-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--line);
+    }
+    .orange-warning-stats-head strong {
+      font-size: 14px;
+      white-space: nowrap;
+    }
+    .orange-warning-stats-head small {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+      text-align: right;
+      white-space: nowrap;
+    }
+    .orange-warning-stats-meta {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .orange-warning-stats-table-wrap {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+    }
+    .orange-warning-stats-table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      table-layout: fixed;
+      font-size: 12px;
+    }
+    .orange-warning-stats-table th,
+    .orange-warning-stats-table td {
+      padding: 8px 4px;
+      border-right: 1px solid #d8dee8;
+      border-bottom: 1px solid #e5eaf2;
+      text-align: center;
+      vertical-align: middle;
+      max-width: 0;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      line-break: anywhere;
+    }
+    .orange-warning-person-list {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 2px 4px;
+      width: 100%;
+      min-width: 0;
+      word-break: normal;
+      overflow-wrap: normal;
+      line-break: auto;
+    }
+    .orange-warning-person-name {
+      display: inline-block;
+      flex: 0 0 auto;
+      white-space: nowrap;
+      word-break: keep-all;
+      overflow-wrap: normal;
+    }
+    .orange-warning-stats-table th:nth-child(1),
+    .orange-warning-stats-table td:nth-child(1) {
+      width: 44px;
+    }
+    .orange-warning-stats-table th:nth-child(2),
+    .orange-warning-stats-table td:nth-child(2) {
+      width: 90px;
+    }
+    .orange-warning-stats-table th:nth-child(3),
+    .orange-warning-stats-table td:nth-child(3) {
+      width: 120px;
+    }
+    .orange-warning-stats-table th:nth-child(4),
+    .orange-warning-stats-table td:nth-child(4) {
+      width: 54px;
+    }
+    .orange-warning-stats-table th:nth-child(5),
+    .orange-warning-stats-table td:nth-child(5),
+    .orange-warning-stats-table th:nth-child(6),
+    .orange-warning-stats-table td:nth-child(6) {
+      width: 64px;
+    }
+    .orange-warning-stats-table td.orange-warning-stats-group-count {
+      font-weight: 700;
+      color: #111827;
+    }
+    .orange-warning-stats-table td.orange-warning-stats-edge-top {
+      border-top: 2px solid #111827 !important;
+    }
+    .orange-warning-stats-table td.orange-warning-stats-edge-right {
+      border-right: 2px solid #111827 !important;
+    }
+    .orange-warning-stats-table td.orange-warning-stats-edge-bottom {
+      border-bottom: 2px solid #111827 !important;
+    }
+    .orange-warning-stats-table td.orange-warning-stats-edge-left {
+      border-left: 2px solid #111827 !important;
+    }
+    .orange-warning-stats-footnote {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .orange-warning-stats-pagination {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      padding-top: 2px;
+    }
+    .orange-warning-stats-pagination .page-separator {
+      color: var(--muted);
+      padding: 0 2px;
+    }
+    .orange-warning-stats-pagination button {
+      min-width: 34px;
+      height: 30px;
+      padding: 0 10px;
+      border-radius: 6px;
+    }
+    .orange-warning-stats-pagination button.active {
+      background: var(--blue);
+      border-color: var(--blue);
+      color: white;
+    }
+    .orange-warning-stats-pagination button:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+    .orange-warning-card {
+      display: grid;
+      gap: 7px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px;
+      background: #fbfcff;
+    }
+    .orange-warning-card-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 6px;
+    }
+    .orange-warning-card-title {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+    .orange-warning-card-title strong {
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .orange-warning-card-subline {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.3;
+    }
+    .orange-warning-chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .orange-warning-chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 20px;
+      padding: 0 7px;
+      border-radius: 999px;
+      background: #eef3ff;
+      color: var(--ink);
+      border: 1px solid #d7e1ff;
+      font-size: 11px;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    .orange-warning-card-body {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 7px 10px;
+      font-size: 11px;
+    }
+    .orange-warning-card-body div {
+      min-width: 0;
+    }
+    .orange-warning-card-body strong {
+      display: block;
+      margin-bottom: 2px;
+      font-size: 11px;
+    }
+    .orange-warning-card-body small {
+      color: var(--muted);
+    }
+    .orange-warning-card-body .orange-warning-card-people {
+      text-align: right;
     }
     .patrol-delivery-row {
       display: grid;
@@ -716,6 +1092,29 @@
     }
     .settings-panel.active { display: grid; }
     .settings-panel.single { grid-template-columns: minmax(0, 1fr); }
+    .settings-panel.wechat-interaction-panel {
+      grid-template-columns: minmax(340px, 1.1fr) minmax(320px, 0.9fr);
+    }
+    .wechat-interaction-editor {
+      display: grid;
+      gap: 10px;
+    }
+    .wechat-interaction-editor .item {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: minmax(150px, 0.42fr) minmax(220px, 0.58fr);
+    }
+    .wechat-interaction-editor .item strong {
+      grid-column: 1 / -1;
+      margin-bottom: 0;
+      color: #111827;
+    }
+    .wechat-interaction-editor .item label {
+      min-width: 0;
+    }
+    .wechat-interaction-editor textarea {
+      min-height: 88px;
+    }
     .settings-panel.overview {
       grid-template-columns: minmax(0, 1fr);
     }
@@ -1794,6 +2193,9 @@
       }
       .settings-panel,
       .settings-panel.single { grid-template-columns: 1fr; }
+      .settings-panel.wechat-interaction-panel {
+        grid-template-columns: minmax(300px, 1.08fr) minmax(280px, 0.92fr);
+      }
       .settings-panel.reminder-card-panel {
         min-height: 0;
       }
@@ -1805,6 +2207,28 @@
         max-height: 480px;
       }
       .settings-card-grid { grid-template-columns: 1fr; }
+      .orange-warning-query-grid {
+        grid-template-columns: 1fr;
+        max-width: none;
+      }
+      .orange-warning-layout {
+        grid-template-columns: 1fr;
+      }
+      .orange-warning-date-grid { grid-template-columns: 1fr; }
+      .orange-warning-card-body {
+        grid-template-columns: 1fr;
+      }
+      .orange-warning-search-hero { padding: 18px; }
+      .orange-warning-search-box {
+        border-radius: 18px;
+        flex-direction: column;
+        align-items: stretch;
+        padding: 12px;
+      }
+      .orange-warning-search-box input,
+      .orange-warning-search-box button {
+        width: 100%;
+      }
       .notification-channel-switch {
         width: 100%;
       }
@@ -1846,6 +2270,10 @@
       .tunnel-meta-grid,
       .tunnel-asset-grid { grid-template-columns: 1fr; }
       .tunnel-asset-grid .wide { grid-column: auto; }
+    }
+    @media (max-width: 720px) {
+      .settings-panel.wechat-interaction-panel { grid-template-columns: 1fr; }
+      .wechat-interaction-editor .item { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -1913,6 +2341,7 @@
     <button class="tab-button" data-tab="review">排班核对</button>
     <button class="tab-button" data-tab="saved">已导入排班</button>
     <button class="tab-button" data-tab="tunnelMechanical">隧道机电</button>
+    <button class="tab-button" data-tab="orangeWarning">橙色预警查询</button>
     <button class="tab-button" data-tab="settings">配置中心</button>
     <button class="tab-button" data-tab="records">发送记录</button>
     <button class="tab-button" data-tab="status">系统状态</button>
@@ -2156,6 +2585,56 @@
       </div>
     </section>
 
+    <section id="orangeWarningPage" class="tab-page hidden">
+      <div class="section-head">
+        <div>
+          <h2>橙色预警记录查询</h2>
+          <p id="orangeWarningStatus" class="status"></p>
+        </div>
+      </div>
+      <div id="orangeWarningLayout" class="body orange-warning-layout">
+        <div class="orange-warning-main">
+          <div id="orangeWarningHero" class="orange-warning-search-hero">
+            <div class="orange-warning-search-brand">橙色预警记录</div>
+            <div class="orange-warning-search-box">
+              <input id="orangeWarningName" placeholder="输入姓名，例如 商邱宏" />
+              <button class="primary" id="queryOrangeWarningBtn" type="button">查询</button>
+            </div>
+            <div id="orangeWarningHeroMeta" class="orange-warning-search-meta">全部日期 · 结果会按多列卡片展示</div>
+            <div class="orange-warning-search-empty-tip">输入姓名后查询，历史记录会优先读取本地缓存。</div>
+          </div>
+          <div id="orangeWarningResults" class="people-list orange-warning-results"></div>
+        </div>
+        <aside class="orange-warning-stats-panel">
+          <div class="orange-warning-tools">
+            <div class="orange-warning-date-grid">
+              <label>开始日期 <input id="orangeWarningStartDate" type="date" /></label>
+              <label>结束日期 <input id="orangeWarningEndDate" type="date" /></label>
+            </div>
+            <div class="orange-warning-tools-actions">
+              <button id="clearOrangeWarningDateBtn" type="button">清除筛选</button>
+              <button id="exportOrangeWarningStatsTableBtn" type="button">导出表格</button>
+              <button id="exportOrangeWarningStatsImageBtn" type="button">导出图片</button>
+            </div>
+          </div>
+          <div class="orange-warning-stats-card">
+            <div class="orange-warning-stats-head">
+              <strong>统计信息</strong>
+              <small id="orangeWarningSummary">按当前筛选结果统计</small>
+            </div>
+            <div id="orangeWarningStatsMeta" class="orange-warning-stats-meta">第 1/1 页</div>
+            <div class="orange-warning-stats-table-wrap">
+              <table class="orange-warning-stats-table">
+                <tbody id="orangeWarningStatsTable"></tbody>
+              </table>
+            </div>
+            <div id="orangeWarningStatsPagination" class="orange-warning-stats-pagination"></div>
+            <div id="orangeWarningStatsFootnote" class="orange-warning-stats-footnote"></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
     <aside id="settingsPage" class="tab-page hidden">
       <div class="settings-shell">
         <nav class="settings-nav">
@@ -2164,7 +2643,7 @@
           <button class="active" data-settings-target="settingsOverview">配置总览</button>
           <div class="settings-nav-group">通道配置</div>
           <button data-settings-target="wecomSettings">消息通知渠道</button>
-          <button data-settings-target="featureChannelSettings">微信群交互配置</button>
+                  <button data-settings-target="featureChannelSettings">微信交互功能</button>
           <div class="settings-nav-group">提醒配置</div>
           <button data-settings-target="driverSettings">今日在岗提醒</button>
           <button data-settings-target="patrolWarningSettings">公路巡查预警</button>
@@ -2262,38 +2741,70 @@
             </div>
           </section>
 
-          <section class="settings-panel single" id="featureChannelSettings">
-            <div class="side-block wide">
+          <section class="settings-panel wechat-interaction-panel" id="featureChannelSettings">
+            <div class="side-block">
               <h3>微信交互功能</h3>
-              <p class="settings-panel-note">用于微信里主动触发的功能，例如“隧道机电”“查询今日机电”“查询 2026-07-22机电”和排班导入。这里可以配置多个微信群。</p>
+              <p class="settings-panel-note">这里管理微信里主动触发的菜单、触发词和回复模板。可用微信群取自“消息通知渠道”的个人微信群配置。</p>
               <div class="stack">
-                <label class="checkbox-label"><span>启用微信群功能通道</span><input id="featureChannelEnabled" type="checkbox" /></label>
-                <div class="field-grid">
-                  <label id="featureLightAgentWebUrlField">LightAgent Web 地址 <input id="featureLightAgentWebUrl" placeholder="例如 http://127.0.0.1:9899" /></label>
-                  <label id="featureLightAgentWebPasswordField">Web 密码 <input id="featureLightAgentWebPassword" type="password" placeholder="已配置时可留空" /></label>
+                <div class="item">
+                  <strong>模板和触发词管理</strong>
+                  <small>触发词一行一个；模板正文支持 {date}，发送时会自动替换为当天日期。</small>
                 </div>
-                <div class="field-grid">
-                  <label>交互功能微信群
-                    <select id="featureChannelRoomSelect"></select>
-                  </label>
-                  <label>功能群 ID <input id="featureChannelRoomId" placeholder="选择群后自动填入，也可手动输入 wgr_..." /></label>
-                </div>
-                <input id="featureChannelRoomName" type="hidden" />
-                <div class="settings-actions">
-                  <button type="button" id="addFeatureChannelRoomBtn">添加功能群</button>
-                </div>
-                <div id="featureChannelRoomList" class="list"></div>
-                <div class="field-grid">
-                  <label class="checkbox-label"><span>隧道机电查询/录入</span><input id="featureAllowTunnelMechanical" type="checkbox" /></label>
-                  <label class="checkbox-label"><span>监控班和值班查询</span><input id="featureAllowDutyQuery" type="checkbox" /></label>
-                  <label class="checkbox-label"><span>微信群排班导入</span><input id="featureAllowRosterImport" type="checkbox" /></label>
-                </div>
-                <div class="settings-actions">
-                  <button type="button" id="refreshFeatureWechatRoomsBtn">同步微信群</button>
-                  <button class="primary" type="button" id="saveFeatureChannelBtn">保存功能通道</button>
-                  <button type="button" id="testFeatureChannelBtn">测试功能通道</button>
+                <div class="wechat-interaction-editor">
+                  <div class="item">
+                    <strong>巡查记录查询模板</strong>
+                    <label>触发词
+                      <textarea id="wechatPatrolRecordTriggers" rows="2" placeholder="巡查记录"></textarea>
+                    </label>
+                    <label>回复模板
+                      <textarea id="wechatPatrolRecordTemplate" rows="2" placeholder="查询商邱宏巡查记录 2026-07-01至2026-07-31"></textarea>
+                    </label>
+                  </div>
+                  <div class="item">
+                    <strong>隧道机电录入模板</strong>
+                    <label>触发词
+                      <textarea id="wechatTunnelTemplateTriggers" rows="2" placeholder="模板"></textarea>
+                    </label>
+                    <label>回复模板
+                      <textarea id="wechatTunnelTemplate" rows="2" placeholder="隧道机电录入 日期{date} 负责人罗富耀 记录人商邱宏 天气晴"></textarea>
+                    </label>
+                  </div>
+                  <div class="item">
+                    <strong>隧道机电修改模板</strong>
+                    <label>触发词
+                      <textarea id="wechatTunnelModifyTemplateTriggers" rows="2" placeholder="修改模板"></textarea>
+                    </label>
+                    <label>回复模板
+                      <textarea id="wechatTunnelModifyTemplate" rows="2" placeholder="隧道机电修改 日期{date} 负责人罗富耀 记录人商邱宏 天气晴 修改日期为{date}"></textarea>
+                    </label>
+                  </div>
                 </div>
                 <p id="featureChannelStatus" class="status"></p>
+              </div>
+            </div>
+            <div class="side-block">
+              <h3>预览和日志</h3>
+              <p class="settings-panel-note">用于核对当前交互群、菜单内容、测试回复和最近命中情况。</p>
+              <div class="stack">
+                <div class="item">
+                  <strong>交互微信群</strong>
+                  <small id="wechatInteractionNotificationRooms">读取消息通知渠道配置</small>
+                </div>
+                <label>菜单预览
+                  <pre id="wechatInteractionMenuPreview" class="tunnel-result-box"></pre>
+                </label>
+                <div class="settings-actions">
+                  <button type="button" id="restoreFeatureChannelBtn">恢复默认</button>
+                  <button type="button" id="copyFeatureChannelMenuBtn">复制菜单</button>
+                  <button type="button" id="refreshFeatureChannelLogsBtn">刷新日志</button>
+                  <button class="primary" type="button" id="saveFeatureChannelBtn">保存交互配置</button>
+                  <button type="button" id="testFeatureChannelBtn">测试模板回复</button>
+                </div>
+                <div class="item">
+                  <strong>命中日志</strong>
+                  <small>最近微信交互命中、模板触发和测试结果。</small>
+                </div>
+                <div id="wechatInteractionLogList" class="people-list reminder-card-list"></div>
               </div>
             </div>
           </section>
@@ -2609,7 +3120,9 @@
       lightAgentWechatConnected: false,
       wechatBridgeEnabled: false,
       featureChannelConfig: null,
+      featureChannelDefaults: null,
       featureChannelRooms: [],
+      featureChannelLogs: [],
       todayReminderEvents: [],
       todayReminderGroupStatuses: [],
       todayReminderDate: "",
@@ -2618,6 +3131,13 @@
       patrolWarningLatest: null,
       patrolWarningPanelState: null,
       patrolWarningPanelRefreshInFlight: false,
+      patrolWarningQueryDueRefreshAt: 0,
+      orangeWarningRecords: [],
+      orangeWarningRecordsAll: [],
+      orangeWarningQueryName: "",
+      orangeWarningRouteCode: "",
+      orangeWarningQueryStats: null,
+      orangeWarningStatsPage: 1,
       tunnelMechanicalTemplates: null,
       tunnelMechanicalCaptchaUuid: "",
     };
@@ -2923,28 +3443,60 @@
       });
     }
 
-    document.querySelectorAll(".tab-button").forEach((button) => {
-      button.addEventListener("click", () => {
-        document.querySelectorAll(".tab-button").forEach((item) => item.classList.remove("active"));
-        button.classList.add("active");
-        const tab = button.dataset.tab;
-        $("todayPage").classList.toggle("hidden", tab !== "today");
-        $("reviewPage").classList.toggle("hidden", tab !== "review");
-        $("savedPage").classList.toggle("hidden", tab !== "saved");
-        $("tunnelMechanicalPage").classList.toggle("hidden", tab !== "tunnelMechanical");
-        $("settingsPage").classList.toggle("hidden", tab !== "settings");
-        $("recordsPage").classList.toggle("hidden", tab !== "records");
-        $("statusPage").classList.toggle("hidden", tab !== "status");
-        if (tab === "today") loadTodayReminders();
-        if (tab === "saved") {
-          loadSavedRosters();
-          loadSavedDutyChart();
-        }
-        if (tab === "tunnelMechanical") loadTunnelMechanicalTemplates();
-        if (tab === "records") loadSendRecords();
-        if (tab === "status") loadSystemStatus();
+    const MAIN_TAB_STORAGE_KEY = "duty-reminder:lastActiveMainTab";
+    const MAIN_TABS = new Set(["today", "review", "saved", "tunnelMechanical", "orangeWarning", "settings", "records", "status"]);
+
+    function getSavedMainTab() {
+      const fallback = document.querySelector(".tab-button.active")?.dataset.tab || "today";
+      try {
+        const value = localStorage.getItem(MAIN_TAB_STORAGE_KEY) || "";
+        return MAIN_TABS.has(value) ? value : fallback;
+      } catch (error) {
+        void error;
+        return fallback;
+      }
+    }
+
+    function saveMainTab(tab) {
+      try {
+        localStorage.setItem(MAIN_TAB_STORAGE_KEY, tab);
+      } catch (error) {
+        void error;
+      }
+    }
+
+    function activateMainTab(tab, { persist = true } = {}) {
+      const target = MAIN_TABS.has(tab) ? tab : "today";
+      document.querySelectorAll(".tab-button").forEach((button) => {
+        button.classList.toggle("active", button.dataset.tab === target);
       });
+      $("todayPage").classList.toggle("hidden", target !== "today");
+      $("reviewPage").classList.toggle("hidden", target !== "review");
+      $("savedPage").classList.toggle("hidden", target !== "saved");
+      $("tunnelMechanicalPage").classList.toggle("hidden", target !== "tunnelMechanical");
+      $("orangeWarningPage").classList.toggle("hidden", target !== "orangeWarning");
+      $("settingsPage").classList.toggle("hidden", target !== "settings");
+      $("recordsPage").classList.toggle("hidden", target !== "records");
+      $("statusPage").classList.toggle("hidden", target !== "status");
+      document.documentElement.removeAttribute("data-initial-main-tab");
+      if (persist) saveMainTab(target);
+      if (target === "today") loadTodayReminders();
+      if (target === "saved") {
+        loadSavedRosters();
+        loadSavedDutyChart();
+      }
+      if (target === "tunnelMechanical") loadTunnelMechanicalTemplates();
+      if (target === "records") loadSendRecords();
+      if (target === "status") loadSystemStatus();
+      if (target === "orangeWarning") requestAnimationFrame(updateOrangeWarningLayoutHeight);
+    }
+
+    document.querySelectorAll(".tab-button").forEach((button) => {
+      button.addEventListener("click", () => activateMainTab(button.dataset.tab));
     });
+
+    window.addEventListener("resize", updateOrangeWarningLayoutHeight);
+    activateMainTab(getSavedMainTab(), { persist: false });
 
     function switchSettingsPanel(targetId) {
       document.querySelectorAll(".settings-nav button").forEach((button) => {
@@ -3114,17 +3666,18 @@
           ],
         },
         {
-          title: "微信群交互配置",
-          status: featureEnabled ? "已启用" : (feature.enabled === false ? "未启用" : "未配置"),
-          description: "处理微信主动查询、隧道机电和排班导入。",
+          title: "微信交互功能",
+          status: "已启用",
+          description: "管理微信菜单、触发词和可复制模板。",
           meta: [
-            `功能群：${featureRooms.length} 个`,
-            `隧道机电：${feature.allow_tunnel_mechanical === false ? "未启用" : "已启用"}`,
-            `值班查询：${feature.allow_duty_query === false ? "未启用" : "已启用"}`,
+            `通知群：${featureRooms.length} 个`,
+            `巡查触发：${(feature.patrol_record_triggers || []).join("、") || "巡查记录"}`,
+            `隧道录入：${(feature.tunnel_template_triggers || []).join("、") || "模板"}`,
+            `隧道修改：${(feature.tunnel_modify_template_triggers || []).join("、") || "修改模板"}`,
+            `日志：${(state.featureChannelLogs || []).length} 条`,
           ],
           actions: [
             { label: "去配置", target: "featureChannelSettings", primary: true },
-            { label: featureEnabled ? "关闭功能" : "启用功能", toggle: "feature", current: featureEnabled, enabled: !featureEnabled, disabled: !feature.configured },
             { label: "隧道机电", tab: "tunnelMechanical" },
           ],
         },
@@ -3204,9 +3757,6 @@
             });
           }
           await loadCustomReminders();
-        } else if (kind === "feature") {
-          $("featureChannelEnabled").checked = enabled;
-          await saveFeatureChannelConfig(false);
         }
         renderSettingsOverview();
       } catch (error) {
@@ -5255,121 +5805,229 @@
       renderSettingsOverview();
     }
 
+    function linesFromTextarea(id) {
+      return $(id).value.split(/[\n,，;；、]+/).map((item) => item.trim()).filter(Boolean);
+    }
+
+    function textareaFromList(id, values) {
+      $(id).value = (values || []).join("\n");
+    }
+
     function featureChannelPayload() {
-      const roomOption = $("featureChannelRoomSelect").selectedOptions[0];
-      const rooms = normalizeFeatureChannelRooms(state.featureChannelRooms || []);
-      const primaryRoom = rooms[0] || {
-        id: $("featureChannelRoomId").value.trim(),
-        name: $("featureChannelRoomName").value.trim() || (roomOption ? String(roomOption.dataset.roomName || "").trim() : "")
-      };
       return {
-        enabled: $("featureChannelEnabled").checked,
-        lightagent_web_url: $("featureLightAgentWebUrl").value.trim(),
-        lightagent_web_password: $("featureLightAgentWebPassword").value,
-        wechat_group_room_id: String(primaryRoom.id || "").trim(),
-        wechat_group_room_name: String(primaryRoom.name || "").trim(),
-        wechat_group_rooms: rooms,
-        allow_tunnel_mechanical: $("featureAllowTunnelMechanical").checked,
-        allow_duty_query: $("featureAllowDutyQuery").checked,
-        allow_roster_import: $("featureAllowRosterImport").checked
+        patrol_record_triggers: linesFromTextarea("wechatPatrolRecordTriggers"),
+        patrol_record_template: $("wechatPatrolRecordTemplate").value.trim(),
+        tunnel_template_triggers: linesFromTextarea("wechatTunnelTemplateTriggers"),
+        tunnel_template: $("wechatTunnelTemplate").value.trim(),
+        tunnel_modify_template_triggers: linesFromTextarea("wechatTunnelModifyTemplateTriggers"),
+        tunnel_modify_template: $("wechatTunnelModifyTemplate").value.trim()
       };
     }
 
+    function featureChannelDefaultPayload() {
+      const defaults = state.featureChannelDefaults || {};
+      return {
+        patrol_record_triggers: defaults.patrol_record_triggers || ["巡查记录", "查询巡查记录", "查巡查记录", "巡查记录查询"],
+        patrol_record_template: defaults.patrol_record_template || "查询商邱宏巡查记录 2026-07-01至2026-07-31",
+        tunnel_template_triggers: defaults.tunnel_template_triggers || ["模板"],
+        tunnel_template: defaults.tunnel_template || "隧道机电录入 日期{date} 负责人罗富耀 记录人商邱宏 天气晴",
+        tunnel_modify_template_triggers: defaults.tunnel_modify_template_triggers || ["修改", "修改模板", "改模板"],
+        tunnel_modify_template: defaults.tunnel_modify_template || "隧道机电修改 日期{date} 负责人罗富耀 记录人商邱宏 天气晴 修改日期为{date}"
+      };
+    }
+
+    async function copyFeatureChannelMenu() {
+      const text = $("wechatInteractionMenuPreview").textContent.trim();
+      if (!text) throw new Error("菜单为空");
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      const ok = document.execCommand("copy");
+      textarea.remove();
+      if (!ok) throw new Error("复制失败");
+    }
+
+    function restoreFeatureChannelDefaults() {
+      const defaults = featureChannelDefaultPayload();
+      textareaFromList("wechatPatrolRecordTriggers", defaults.patrol_record_triggers);
+      $("wechatPatrolRecordTemplate").value = defaults.patrol_record_template;
+      textareaFromList("wechatTunnelTemplateTriggers", defaults.tunnel_template_triggers);
+      $("wechatTunnelTemplate").value = defaults.tunnel_template;
+      textareaFromList("wechatTunnelModifyTemplateTriggers", defaults.tunnel_modify_template_triggers);
+      $("wechatTunnelModifyTemplate").value = defaults.tunnel_modify_template;
+      $("featureChannelStatus").textContent = "已恢复默认交互配置";
+      $("featureChannelStatus").className = "status ok";
+    }
+
+    function wechatInteractionTypeLabel(type) {
+      return ({
+        patrol_record_template: "巡查记录模板",
+        patrol_record: "巡查记录查询",
+        tunnel_mechanical_modify_template: "隧道机电修改模板",
+        tunnel_mechanical_template: "隧道机电录入模板",
+        tunnel_mechanical_modify: "隧道机电修改",
+        tunnel_mechanical_result: "隧道机电查询",
+        tunnel_mechanical: "隧道机电录入",
+        help: "菜单查询",
+        binding: "绑定查询",
+        binding_update: "微信绑定",
+        monitor: "监控查询",
+        monitor_all: "全员监控查询",
+        monitor_range: "监控范围查询",
+        monitor_all_range: "全员监控范围查询",
+        reminder: "提醒查询",
+        reminder_all: "全员提醒查询",
+        reminder_range: "提醒范围查询",
+        reminder_all_range: "全员提醒范围查询",
+        next_reminder: "下次提醒查询",
+        next_reminder_all: "全员下次提醒查询",
+        unbound: "未绑定提醒",
+        unknown: "未识别命令"
+      })[String(type || "").trim()] || "微信交互";
+    }
+
+    function wechatInteractionStatusLabel(status) {
+      return ({
+        success: "成功",
+        failed: "失败",
+        error: "失败",
+        pending: "处理中"
+      })[String(status || "").trim()] || "未知";
+    }
+
+    function renderFeatureChannelLogs(logs) {
+      const box = $("wechatInteractionLogList");
+      if (!box) return;
+      const items = (logs || []).slice(0, 10);
+      box.innerHTML = items.map((log) => {
+        const when = log.created_at ? formatIsoMinute(log.created_at) : "-";
+        const typeLabel = wechatInteractionTypeLabel(log.query_type);
+        const statusLabel = wechatInteractionStatusLabel(log.status);
+        const room = cleanWechatVisibleName(log.room_name || "", log.room_id || "") || "未命名微信群";
+        const sender = cleanWechatVisibleName(log.sender_name || "", log.sender_id || "") || "未记录发送者";
+        const statusClass = log.status === "success" ? "ok" : "error";
+        const reply = log.reply_preview || log.reply_text || "无回复";
+        const error = log.error ? `<small class="status error">${escapeHtml(log.error)}</small>` : "";
+        return `<div class="item">
+          <strong>${escapeHtml(when)} · ${escapeHtml(typeLabel)} · <span class="status ${statusClass}">${escapeHtml(statusLabel)}</span></strong>
+          <small>${escapeHtml(room)} · ${escapeHtml(sender)}</small>
+          <div>${escapeHtml(log.command_text || "-")}</div>
+          <small>${escapeHtml(reply)}</small>
+          ${error}
+        </div>`;
+      }).join("") || `<div class="item"><small>暂无命中日志</small></div>`;
+      renderSettingsOverview();
+    }
+
+    async function loadFeatureChannelLogs() {
+      const response = await fetch("/api/wechat-interaction-logs?limit=10");
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.detail || "读取微信交互日志失败");
+      state.featureChannelLogs = body.logs || [];
+      renderFeatureChannelLogs(state.featureChannelLogs);
+    }
+
     async function saveFeatureChannelConfig(showStatus = true) {
-      if (showStatus) $("featureChannelStatus").textContent = "正在保存功能通道...";
-      const response = await fetch("/api/feature-channel-config", {
+      if (showStatus) $("featureChannelStatus").textContent = "正在保存微信交互配置...";
+      const response = await fetch("/api/wechat-interaction-config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(featureChannelPayload())
       });
       const body = await response.json();
-      if (!response.ok || !body.success) throw new Error(body.detail || "保存功能通道失败");
+      if (!response.ok || !body.success) throw new Error(body.detail || "保存微信交互配置失败");
       state.featureChannelConfig = body.config || {};
       renderFeatureChannelConfig(state.featureChannelConfig);
       if (showStatus) {
-        const sync = body.lightagent_sync || {};
-        const syncFailed = sync.success === false;
-        $("featureChannelStatus").textContent = syncFailed
-          ? `功能通道已保存，但同步${wechatGatewayLabel()}群失败：${sync.message || `请确认${wechatGatewayLabel()}已登录并已同步群列表`}`
-          : "功能通道已保存";
-        $("featureChannelStatus").className = `status ${syncFailed ? "error" : "ok"}`;
+        $("featureChannelStatus").textContent = "微信交互配置已保存";
+        $("featureChannelStatus").className = "status ok";
       }
       return true;
     }
 
     function renderFeatureChannelConfig(config) {
       config = config || {};
-      state.wechatBridgeEnabled = Boolean(config.wechat_bridge_enabled);
-      $("featureChannelEnabled").checked = config.enabled !== false;
-      $("featureLightAgentWebUrl").value = config.lightagent_web_url || "";
-      $("featureLightAgentWebPassword").value = "";
-      $("featureLightAgentWebPassword").placeholder = config.lightagent_web_password_configured ? "已配置，如需修改请输入新密码" : "未配置";
-      $("featureLightAgentWebUrlField").classList.toggle("hidden", state.wechatBridgeEnabled);
-      $("featureLightAgentWebPasswordField").classList.toggle("hidden", state.wechatBridgeEnabled);
-      state.featureChannelRooms = normalizeFeatureChannelRooms(config.wechat_group_rooms || (config.wechat_group_room_id ? [{ id: config.wechat_group_room_id, name: config.wechat_group_room_name || "" }] : []));
-      const primaryRoom = state.featureChannelRooms[0] || {};
-      $("featureChannelRoomId").value = primaryRoom.id || "";
-      $("featureChannelRoomName").value = primaryRoom.name || "";
-      $("featureAllowTunnelMechanical").checked = config.allow_tunnel_mechanical !== false;
-      $("featureAllowDutyQuery").checked = config.allow_duty_query !== false;
-      $("featureAllowRosterImport").checked = config.allow_roster_import !== false;
-      renderFeatureChannelRooms();
-      const selected = $("featureChannelRoomSelect").selectedOptions[0];
-      if (selected && !primaryRoom.name) {
-        $("featureChannelRoomName").value = String(selected.dataset.roomName || "").trim();
-      }
-      renderFeatureChannelRoomList();
+      state.featureChannelDefaults = config.defaults || state.featureChannelDefaults || featureChannelDefaultPayload();
+      state.featureChannelRooms = normalizeFeatureChannelRooms(config.notification_rooms || []);
+      if (config.menu_preview) $("wechatInteractionMenuPreview").textContent = config.menu_preview || "";
+      textareaFromList("wechatPatrolRecordTriggers", config.patrol_record_triggers || ["巡查记录"]);
+      $("wechatPatrolRecordTemplate").value = config.patrol_record_template || "查询商邱宏巡查记录 2026-07-01至2026-07-31";
+      textareaFromList("wechatTunnelTemplateTriggers", config.tunnel_template_triggers || ["模板"]);
+      $("wechatTunnelTemplate").value = config.tunnel_template || "隧道机电录入 日期{date} 负责人罗富耀 记录人商邱宏 天气晴";
+      textareaFromList("wechatTunnelModifyTemplateTriggers", config.tunnel_modify_template_triggers || ["修改模板"]);
+      $("wechatTunnelModifyTemplate").value = config.tunnel_modify_template || "隧道机电修改 日期{date} 负责人罗富耀 记录人商邱宏 天气晴 修改日期为{date}";
+      $("wechatInteractionNotificationRooms").textContent = state.featureChannelRooms.length
+        ? state.featureChannelRooms.map((room) => cleanWechatVisibleName(room.name, room.id) || room.id).join("、")
+        : "未在消息通知渠道配置个人微信群";
+      renderFeatureChannelLogs(state.featureChannelLogs || []);
       renderSettingsOverview();
     }
 
     async function loadFeatureChannelConfig() {
-      const response = await fetch("/api/feature-channel-config");
+      const response = await fetch("/api/wechat-interaction-config");
       const body = await response.json();
-      if (!response.ok) throw new Error(body.detail || "读取功能通道失败");
+      if (!response.ok) throw new Error(body.detail || "读取微信交互配置失败");
       state.featureChannelConfig = body.config || {};
       renderFeatureChannelConfig(state.featureChannelConfig);
       renderSettingsOverview();
     }
 
-    $("featureChannelRoomSelect").addEventListener("change", () => {
-      const option = $("featureChannelRoomSelect").selectedOptions[0];
-      $("featureChannelRoomId").value = option ? String(option.value || "").trim() : "";
-      $("featureChannelRoomName").value = option ? String(option.dataset.roomName || "").trim() : "";
-    });
-    $("addFeatureChannelRoomBtn").addEventListener("click", addFeatureChannelRoomFromInputs);
     $("notificationTargetRoomSelect").addEventListener("change", () => {
       const option = $("notificationTargetRoomSelect").selectedOptions[0];
       $("notificationTargetRoomId").value = option ? String(option.value || "").trim() : "";
       $("notificationTargetRoomName").value = option ? String(option.dataset.roomName || "").trim() : "";
     });
     $("addNotificationTargetRoomBtn").addEventListener("click", addNotificationTargetRoomFromInputs);
-    $("refreshFeatureWechatRoomsBtn").addEventListener("click", async () => {
-      try {
-        await saveFeatureChannelConfig(false);
-        await loadLightAgentRooms(true);
-        $("featureChannelStatus").textContent = `已同步 ${state.lightAgentRooms.length} 个微信群`;
-        $("featureChannelStatus").className = `status ${state.lightAgentRooms.length ? "ok" : ""}`;
-      } catch (error) {
-        $("featureChannelStatus").textContent = `同步微信群失败：${error.message || error}`;
+    $("saveFeatureChannelBtn").addEventListener("click", async () => {
+      try { await saveFeatureChannelConfig(true); } catch (error) {
+        $("featureChannelStatus").textContent = `保存微信交互配置失败：${error.message || error}`;
         $("featureChannelStatus").className = "status error";
       }
     });
-    $("saveFeatureChannelBtn").addEventListener("click", async () => {
-      try { await saveFeatureChannelConfig(true); } catch (error) {
-        $("featureChannelStatus").textContent = `保存功能通道失败：${error.message || error}`;
+    $("restoreFeatureChannelBtn").addEventListener("click", () => {
+      restoreFeatureChannelDefaults();
+    });
+    $("copyFeatureChannelMenuBtn").addEventListener("click", async () => {
+      try {
+        await copyFeatureChannelMenu();
+        $("featureChannelStatus").textContent = "菜单已复制到剪贴板";
+        $("featureChannelStatus").className = "status ok";
+      } catch (error) {
+        $("featureChannelStatus").textContent = `复制菜单失败：${error.message || error}`;
+        $("featureChannelStatus").className = "status error";
+      }
+    });
+    $("refreshFeatureChannelLogsBtn").addEventListener("click", async () => {
+      try {
+        await loadFeatureChannelLogs();
+        $("featureChannelStatus").textContent = "微信交互日志已刷新";
+        $("featureChannelStatus").className = "status ok";
+      } catch (error) {
+        $("featureChannelStatus").textContent = `刷新日志失败：${error.message || error}`;
         $("featureChannelStatus").className = "status error";
       }
     });
     $("testFeatureChannelBtn").addEventListener("click", async () => {
       try {
         await saveFeatureChannelConfig(false);
-        const response = await fetch("/api/feature-channel-config/test", { method: "POST" });
+        const response = await fetch("/api/wechat-interaction-config/test", { method: "POST" });
         const body = await response.json();
         if (!response.ok || !body.success) throw new Error(body.detail || "测试失败");
-        $("featureChannelStatus").textContent = body.result && body.result.reply ? `测试完成：${body.result.reply}` : "功能通道测试完成";
+        $("featureChannelStatus").textContent = body.summary
+          ? `测试完成：${body.summary}`
+          : (body.result && body.result.reply ? `测试完成：${body.result.reply}` : "微信交互测试完成");
         $("featureChannelStatus").className = "status ok";
+        await loadFeatureChannelLogs();
       } catch (error) {
-        $("featureChannelStatus").textContent = `功能通道测试失败：${error.message || error}`;
+        $("featureChannelStatus").textContent = `微信交互测试失败：${error.message || error}`;
         $("featureChannelStatus").className = "status error";
       }
     });
@@ -5509,9 +6167,9 @@
       const windowHours = Math.max(1, Number(config.end_reminder_window_hours || 48));
       const now = new Date();
       const deadline = new Date(endAt.getTime() + windowHours * 3600 * 1000);
-      if (now > deadline) return { done: true, nextAt: null, countdownMs: 0, text: `结束后 ${windowHours} 小时巡查窗口已结束` };
+      if (now >= deadline) return { done: true, nextAt: null, countdownMs: 0, text: `结束后 ${windowHours} 小时巡查窗口已结束` };
       let nextAt = endAt;
-      if (now > endAt) {
+      if (now >= endAt) {
         const elapsedMs = now.getTime() - endAt.getTime();
         const intervalMs = intervalHours * 3600 * 1000;
         const nextSlot = Math.floor(elapsedMs / intervalMs) + 1;
@@ -5536,15 +6194,17 @@
     }
 
     function patrolWarningQueryStatus(stateInfo) {
-      if (!stateInfo) return null;
+      if (!stateInfo || (state.patrolWarningConfig && state.patrolWarningConfig.enabled === false)) return null;
       const timeText = stateInfo.backoff_until || stateInfo.next_check_at || "";
       if (!timeText) return null;
       const nextAt = new Date(timeText);
       if (Number.isNaN(nextAt.getTime())) return null;
       const now = new Date();
+      const due = nextAt.getTime() <= now.getTime();
       return {
         nextAt,
-        countdownMs: Math.max(0, nextAt.getTime() - now.getTime()),
+        due,
+        countdownMs: due ? 0 : nextAt.getTime() - now.getTime(),
         label: stateInfo.backoff_until ? "失败退避到" : "下次查询更新时间"
       };
     }
@@ -5562,9 +6222,20 @@
       }
       const lastText = lastCheckedAt ? `上次查询：${lastCheckedAt}` : "上次查询：尚未查询";
       const nextText = query
-        ? `${query.label}：${formatBeijingMinute(query.nextAt)} · 倒计时：${formatCountdown(query.countdownMs)}`
+        ? (query.due
+          ? `${query.label}：正在等待后台查询`
+          : `${query.label}：${formatBeijingMinute(query.nextAt)} · 倒计时：${formatCountdown(query.countdownMs)}`)
         : "下次查询：等待首次查询";
       target.innerHTML = `<span>${escapeHtml(lastText)}</span><span>${escapeHtml(nextText)}</span>`;
+      if (query && query.due) {
+        const now = Date.now();
+        if (now - Number(state.patrolWarningQueryDueRefreshAt || 0) >= 10000) {
+          state.patrolWarningQueryDueRefreshAt = now;
+          refreshPatrolWarningPanel();
+        }
+      } else {
+        state.patrolWarningQueryDueRefreshAt = 0;
+      }
     }
 
     function updatePatrolWarningNextReminder() {
@@ -5577,6 +6248,10 @@
       }
       if (reminder.done) {
         target.textContent = reminder.text;
+        return;
+      }
+      if (reminder.countdownMs <= 0) {
+        target.textContent = "下次提醒：正在等待后台发送";
         return;
       }
       target.textContent = `下次提醒时间：${formatBeijingMinute(reminder.nextAt)} · 倒计时：${formatCountdown(reminder.countdownMs)} · ${reminder.text}`;
@@ -5592,6 +6267,7 @@
         state.patrolWarningConfig = body.config || state.patrolWarningConfig;
         renderPatrolWarningLatest(body.state && body.state.warning, null, body.state);
         renderSettingsOverview();
+        updatePatrolWarningQueryCountdown();
       } catch (error) {
         // 后台状态刷新失败时保留当前面板，避免打断正在编辑的配置。
       } finally {
@@ -5647,6 +6323,8 @@
         if (body.config && body.config.password_configured) $("patrolPassword").placeholder = "已配置，如需修改请输入新密码";
         renderPatrolWarningLatest(body.state && body.state.warning, null, body.state);
         renderSettingsOverview();
+        updatePatrolWarningQueryCountdown();
+        await loadTodayReminders();
       }
       return response.ok && body.success;
     }
@@ -5701,6 +6379,828 @@
       }
     });
 
+    function orangeWarningRecordDate(record) {
+      const value = String(record && record.start_time ? record.start_time : "");
+      return value ? value.slice(0, 10) : "";
+    }
+
+    function orangeWarningRecordTime(record) {
+      const startText = formatIsoMinute(record && record.start_time ? record.start_time : "") || "";
+      const endText = formatIsoMinute(record && record.end_time ? record.end_time : "") || "";
+      if (!startText) return endText ? endText.slice(11) : "-";
+      const time = startText.slice(11);
+      return endText && endText !== startText ? `${time} - ${endText.slice(11)}` : time;
+    }
+
+    const ORANGE_WARNING_PAIR_WINDOW_MINUTES = 60;
+
+    function orangeWarningRecordDirection(record) {
+      return String(record && record.direction ? record.direction : "").trim();
+    }
+
+    function orangeWarningRecordTimeValue(record, field, fallbackField) {
+      const value = String(record && (record[field] || record[fallbackField]) ? (record[field] || record[fallbackField]) : "").trim();
+      if (!value) return 0;
+      const time = new Date(value).getTime();
+      return Number.isNaN(time) ? 0 : time;
+    }
+
+    function orangeWarningRecordTimestamp(record) {
+      return orangeWarningRecordTimeValue(record, "start_time", "end_time");
+    }
+
+    function orangeWarningRecordEndTimestamp(record) {
+      return orangeWarningRecordTimeValue(record, "end_time", "start_time");
+    }
+
+    const ORANGE_WARNING_STATS_PAGE_SIZE = 18;
+
+    function orangeWarningSelectedDateRange() {
+      const start = $("orangeWarningStartDate") ? $("orangeWarningStartDate").value.trim() : "";
+      const end = $("orangeWarningEndDate") ? $("orangeWarningEndDate").value.trim() : "";
+      return { start, end };
+    }
+
+    function orangeWarningNormalizeDateRange() {
+      const range = orangeWarningSelectedDateRange();
+      if (range.start && range.end && range.start > range.end) {
+        return { start: range.end, end: range.start };
+      }
+      return range;
+    }
+
+    function orangeWarningFilteredRecords() {
+      const range = orangeWarningNormalizeDateRange();
+      const hasStart = Boolean(range.start);
+      const hasEnd = Boolean(range.end);
+      if (!hasStart && !hasEnd) return state.orangeWarningRecordsAll || [];
+      return (state.orangeWarningRecordsAll || []).filter((record) => {
+        const date = orangeWarningRecordDate(record);
+        if (!date) return false;
+        if (hasStart && date < range.start) return false;
+        if (hasEnd && date > range.end) return false;
+        return true;
+      });
+    }
+
+    function orangeWarningComparableRecords(records) {
+      const items = (records || [])
+        .map((record, index) => ({
+          record,
+          index,
+          direction: orangeWarningRecordDirection(record),
+          date: orangeWarningRecordDate(record),
+          timestamp: orangeWarningRecordTimestamp(record),
+          endTimestamp: orangeWarningRecordEndTimestamp(record),
+        }));
+      items.sort((left, right) => left.timestamp - right.timestamp || left.index - right.index);
+      return items;
+    }
+
+    function orangeWarningCanPairItems(current, next) {
+      const windowMs = ORANGE_WARNING_PAIR_WINDOW_MINUTES * 60 * 1000;
+      return Boolean(
+        next
+          && current.date
+          && current.date === next.date
+          && current.timestamp
+          && next.timestamp
+          && current.endTimestamp
+          && next.timestamp >= current.timestamp
+          && next.timestamp - current.endTimestamp >= 0
+          && next.timestamp - current.endTimestamp <= windowMs
+          && (
+            (current.direction === "上行" && next.direction === "下行")
+            || (current.direction === "下行" && next.direction === "上行")
+          )
+      );
+    }
+
+    function orangeWarningSummarizeRecords(records) {
+      const items = orangeWarningComparableRecords(records);
+      const stats = {
+        recordCount: items.length,
+        upCount: 0,
+        downCount: 0,
+        bidirectionalCount: 0,
+        pairedCount: 0,
+        singleUpCount: 0,
+        singleDownCount: 0,
+        otherCount: 0,
+        mergedCount: 0,
+      };
+      for (let index = 0; index < items.length; index += 1) {
+        const current = items[index];
+        if (current.direction === "双向") {
+          stats.bidirectionalCount += 1;
+          stats.mergedCount += 1;
+          continue;
+        }
+        if (current.direction !== "上行" && current.direction !== "下行") {
+          stats.otherCount += 1;
+          stats.mergedCount += 1;
+          continue;
+        }
+        if (current.direction === "上行") stats.upCount += 1;
+        if (current.direction === "下行") stats.downCount += 1;
+        const next = items[index + 1];
+        const paired = orangeWarningCanPairItems(current, next);
+        if (paired) {
+          stats.pairedCount += 1;
+          stats.mergedCount += 1;
+          index += 1;
+          continue;
+        }
+        stats.mergedCount += 1;
+        if (current.direction === "上行") stats.singleUpCount += 1;
+        if (current.direction === "下行") stats.singleDownCount += 1;
+      }
+      return stats;
+    }
+
+    function orangeWarningStatsGroups(records) {
+      const items = orangeWarningComparableRecords(records);
+      const groups = [];
+      let count = 0;
+      for (let index = 0; index < items.length; index += 1) {
+        const current = items[index];
+        const next = items[index + 1];
+        count += 1;
+        if (
+          (current.direction === "上行" || current.direction === "下行")
+          && orangeWarningCanPairItems(current, next)
+        ) {
+          groups.push({ count, records: [current.record, next.record] });
+          index += 1;
+          continue;
+        }
+        groups.push({ count, records: [current.record] });
+      }
+      return groups;
+    }
+
+    function orangeWarningStatsRows(records) {
+      const groups = orangeWarningStatsGroups(records);
+      const rows = [];
+      groups.forEach((group, groupIndex) => {
+        const highlighted = orangeWarningIsHighlightedStatsGroup(group);
+        const previousHighlighted = groupIndex > 0 && orangeWarningIsHighlightedStatsGroup(groups[groupIndex - 1]);
+        group.records.forEach((record, index) => {
+          rows.push({
+            count: group.count,
+            record,
+            countRowspan: index === 0 ? group.records.length : 0,
+            skipCountCell: index > 0,
+            highlighted,
+            isGroupStart: highlighted && index === 0 && !previousHighlighted,
+            isGroupEnd: highlighted && index === group.records.length - 1,
+          });
+        });
+      });
+      return rows;
+    }
+
+    function orangeWarningIsHighlightedStatsGroup(group) {
+      const records = group && Array.isArray(group.records) ? group.records : [];
+      if (records.length > 1) return true;
+      return orangeWarningRecordDirection(records[0]) === "双向";
+    }
+
+    function orangeWarningPersonNames(value) {
+      const text = String(value || "").trim();
+      if (!text || text === "-") return ["-"];
+      return text.split(/[，,、；;\/\s]+/).map((name) => name.trim()).filter(Boolean);
+    }
+
+    function orangeWarningPersonCellHtml(value) {
+      const names = orangeWarningPersonNames(value);
+      return `<div class="orange-warning-person-list">${names.map((name, index) => (
+        `<span class="orange-warning-person-name">${escapeHtml(name)}${index < names.length - 1 ? "、" : ""}</span>`
+      )).join("")}</div>`;
+    }
+
+    function orangeWarningRangeText() {
+      const range = orangeWarningNormalizeDateRange();
+      if (!range.start && !range.end) return "全部日期";
+      if (range.start && range.end) return `${range.start} 至 ${range.end}`;
+      if (range.start) return `从 ${range.start}`;
+      return `到 ${range.end}`;
+    }
+
+    function orangeWarningStatsPageCount(items) {
+      return Math.max(1, Math.ceil((items || []).length / ORANGE_WARNING_STATS_PAGE_SIZE));
+    }
+
+    function orangeWarningStatsPageRange(records) {
+      const total = (records || []).length;
+      const pageCount = orangeWarningStatsPageCount(records);
+      const currentPage = Math.min(Math.max(Number(state.orangeWarningStatsPage) || 1, 1), pageCount);
+      const startIndex = (currentPage - 1) * ORANGE_WARNING_STATS_PAGE_SIZE;
+      const endIndex = Math.min(startIndex + ORANGE_WARNING_STATS_PAGE_SIZE, total);
+      return { total, pageCount, currentPage, startIndex, endIndex, records: (records || []).slice(startIndex, endIndex) };
+    }
+
+    function orangeWarningPaginationItems(currentPage, pageCount) {
+      const pages = new Set([1, pageCount, currentPage - 2, currentPage - 1, currentPage, currentPage + 1, currentPage + 2]);
+      return Array.from(pages)
+        .filter((page) => page >= 1 && page <= pageCount)
+        .sort((left, right) => left - right)
+        .reduce((items, page) => {
+          const previous = items.length ? items[items.length - 1] : null;
+          if (previous !== null && page - previous > 1) items.push("...");
+          items.push(page);
+          return items;
+        }, []);
+    }
+
+    function updateOrangeWarningLayoutHeight() {
+      const layout = $("orangeWarningLayout");
+      const page = $("orangeWarningPage");
+      if (!layout || !page || page.classList.contains("hidden")) return;
+      const header = document.querySelector("header");
+      const tabs = document.querySelector(".tabs");
+      const sectionHead = page.querySelector(".section-head");
+      const body = page.querySelector(".body");
+      const bodyStyle = body ? getComputedStyle(body) : null;
+      const bodyPadding = bodyStyle ? (parseFloat(bodyStyle.paddingTop) || 0) + (parseFloat(bodyStyle.paddingBottom) || 0) : 0;
+      const available = Math.max(
+        420,
+        window.innerHeight
+          - (header ? header.offsetHeight : 0)
+          - (tabs ? tabs.offsetHeight : 0)
+          - (sectionHead ? sectionHead.offsetHeight : 0)
+          - bodyPadding
+      );
+      layout.style.height = `${available}px`;
+    }
+
+    function renderOrangeWarningHero(records, dateRangeText) {
+      const hero = $("orangeWarningHero");
+      if (!hero) return;
+      hero.classList.remove("hidden");
+      const meta = $("orangeWarningHeroMeta");
+      if (meta) {
+        const currentName = state.orangeWarningQueryName || "";
+        const recordText = records.length ? `显示 ${records.length} 条` : "等待查询";
+        meta.textContent = `${currentName || "输入姓名"} · ${dateRangeText || "全部日期"} · ${recordText}`;
+      }
+    }
+
+    function renderOrangeWarningStats(records) {
+      const stats = orangeWarningSummarizeRecords(records);
+      const displayGroups = orangeWarningStatsGroups(records);
+      const table = $("orangeWarningStatsTable");
+      const meta = $("orangeWarningStatsMeta");
+      const summary = $("orangeWarningSummary");
+      const footnote = $("orangeWarningStatsFootnote");
+      const pagination = $("orangeWarningStatsPagination");
+      const pageRange = orangeWarningStatsPageRange(displayGroups);
+      state.orangeWarningStatsPage = pageRange.currentPage;
+      if (meta) {
+        meta.textContent = `${orangeWarningRangeText()} · 第 ${pageRange.currentPage}/${pageRange.pageCount} 页`;
+      }
+      if (summary) summary.textContent = `巡查记录：${stats.recordCount}条 实际次数：${stats.mergedCount}次`;
+      if (footnote) {
+        footnote.textContent = `说明：上下行按上一条结束到下一条开始相邻 ${ORANGE_WARNING_PAIR_WINDOW_MINUTES} 分钟内按 1 次计，双向单独按 1 次计。`;
+      }
+      if (!table) return;
+      if (!displayGroups.length) {
+        table.innerHTML = '<tr><td colspan="6">暂无记录</td></tr>';
+        if (pagination) pagination.innerHTML = "";
+        return;
+      }
+      if (pagination) {
+        const items = orangeWarningPaginationItems(pageRange.currentPage, pageRange.pageCount);
+        pagination.innerHTML = `
+          <button type="button" data-orange-page="prev" ${pageRange.currentPage <= 1 ? "disabled" : ""}>上一页</button>
+          ${items.map((item) => (
+            item === "..."
+              ? '<span class="page-separator">…</span>'
+              : `<button type="button" data-orange-page="${item}" class="${item === pageRange.currentPage ? "active" : ""}">${item}</button>`
+          )).join("")}
+          <button type="button" data-orange-page="next" ${pageRange.currentPage >= pageRange.pageCount ? "disabled" : ""}>下一页</button>
+        `;
+      }
+      const pageRows = orangeWarningStatsRows(pageRange.records);
+      if (!pageRows.length) {
+        table.innerHTML = '<tr><td colspan="6">暂无记录</td></tr>';
+        return;
+      }
+      table.innerHTML = `
+        <tr><th>次数</th><th>日期</th><th>时间</th><th>方向</th><th>巡查人</th><th>记录人</th></tr>
+        ${pageRows.map((row) => {
+          const record = row.record || {};
+          const isHighlighted = Boolean(row.highlighted);
+          const isGroupStart = Boolean(row.isGroupStart);
+          const isGroupEnd = Boolean(row.isGroupEnd);
+          const rowClasses = [];
+          if (isGroupStart) rowClasses.push("orange-warning-stats-group-start");
+          if (isGroupEnd) rowClasses.push("orange-warning-stats-group-end");
+          const countClasses = ["orange-warning-stats-group-count"];
+          if (isHighlighted) countClasses.push("orange-warning-stats-edge-left", "orange-warning-stats-edge-bottom");
+          if (isGroupStart) countClasses.push("orange-warning-stats-edge-top");
+          const countClass = isHighlighted ? ` class="${countClasses.join(" ")}"` : "";
+          const countCell = row.skipCountCell ? "" : `<td${countClass} rowspan="${escapeHtml(row.countRowspan || 1)}">${escapeHtml(row.count)}</td>`;
+          const dataCellClass = (cellIndex) => {
+            const classes = [];
+            if (isGroupStart) classes.push("orange-warning-stats-edge-top");
+            if (isGroupEnd) classes.push("orange-warning-stats-edge-bottom");
+            if (isHighlighted && cellIndex === 4) classes.push("orange-warning-stats-edge-right");
+            return classes.length ? ` class="${classes.join(" ")}"` : "";
+          };
+          return `
+            <tr class="${rowClasses.join(" ")}">
+              ${countCell}
+              <td${dataCellClass(0)}>${escapeHtml(orangeWarningRecordDate(record) || "-")}</td>
+              <td${dataCellClass(1)}>${escapeHtml(orangeWarningRecordTime(record) || "-")}</td>
+              <td${dataCellClass(2)}>${escapeHtml(orangeWarningRecordDirection(record) || "-")}</td>
+              <td${dataCellClass(3)}>${orangeWarningPersonCellHtml(record.responsible_person || "-")}</td>
+              <td${dataCellClass(4)}>${orangeWarningPersonCellHtml(record.recorder || "-")}</td>
+            </tr>
+          `;
+        }).join("")}
+      `;
+    }
+
+    function orangeWarningCanvasLines(ctx, value, maxWidth, options = {}) {
+      const text = String(value || "-");
+      if (options.personNames) {
+        const lines = [];
+        let line = "";
+        orangeWarningPersonNames(text).forEach((name) => {
+          const next = line ? `${line}、${name}` : name;
+          if (line && ctx.measureText(next).width > maxWidth) {
+            lines.push(line);
+            line = name;
+          } else {
+            line = next;
+          }
+        });
+        lines.push(line || "-");
+        return lines;
+      }
+      const sourceLines = text.split(/\r?\n/);
+      const lines = [];
+      sourceLines.forEach((source) => {
+        let line = "";
+        Array.from(source || "-").forEach((char) => {
+          const next = `${line}${char}`;
+          if (line && ctx.measureText(next).width > maxWidth) {
+            lines.push(line);
+            line = char;
+          } else {
+            line = next;
+          }
+        });
+        lines.push(line || "-");
+      });
+      return lines;
+    }
+
+    function orangeWarningMeasureExportCell(ctx, value, width, metrics = {}) {
+      const horizontalPadding = Number(metrics.horizontalPadding) || 8;
+      const verticalPadding = Number(metrics.verticalPadding) || 8;
+      const lineHeight = Number(metrics.lineHeight) || 15;
+      const minHeight = Number(metrics.minHeight) || 33;
+      const lines = orangeWarningCanvasLines(ctx, value, Math.max(20, width - horizontalPadding * 2), metrics);
+      return Math.max(minHeight, lines.length * lineHeight + verticalPadding * 2);
+    }
+
+    function orangeWarningDrawExportText(ctx, value, x, y, width, height, options = {}) {
+      const fontWeight = options.bold ? "700" : "400";
+      ctx.font = `${fontWeight} ${options.fontSize || 12}px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif`;
+      ctx.fillStyle = options.color || "#111827";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      const lineHeight = options.lineHeight || 15;
+      const horizontalPadding = options.horizontalPadding || 8;
+      const lines = orangeWarningCanvasLines(ctx, value, Math.max(20, width - horizontalPadding * 2), options);
+      const startY = y + height / 2 - ((lines.length - 1) * lineHeight) / 2;
+      lines.forEach((line, index) => {
+        ctx.fillText(line, x + width / 2, startY + index * lineHeight);
+      });
+    }
+
+    function orangeWarningDrawExportGroupBorder(ctx, x, y, width, height, options = {}) {
+      const borderWidth = 3;
+      ctx.save();
+      ctx.fillStyle = "#111827";
+      if (!options.skipTop) {
+        ctx.fillRect(x + borderWidth, y, Math.max(0, width - borderWidth * 2), borderWidth);
+      }
+      ctx.fillRect(x + borderWidth, y + height - borderWidth, Math.max(0, width - borderWidth * 2), borderWidth);
+      ctx.fillRect(x, y, borderWidth, height);
+      ctx.fillRect(x + width - borderWidth, y, borderWidth, height);
+      ctx.restore();
+    }
+
+    function orangeWarningExportBaseName() {
+      const name = (state.orangeWarningQueryName || "橙色预警").replace(/[\\/:*?"<>|\s]+/g, "-");
+      const range = orangeWarningRangeText().replace(/[\\/:*?"<>|\s]+/g, "-");
+      return `橙色预警统计-${name}-${range}`;
+    }
+
+    function orangeWarningImageExportFilename() {
+      return `${orangeWarningExportBaseName()}.png`;
+    }
+
+    function orangeWarningTableExportFilename() {
+      return `${orangeWarningExportBaseName()}.xls`;
+    }
+
+    function orangeWarningDownloadBlob(filename, content, type) {
+      const blob = new Blob([content], { type });
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      link.download = filename;
+      link.href = url;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    function exportOrangeWarningStatsTable() {
+      const records = orangeWarningFilteredRecords();
+      const rows = orangeWarningStatsRows(records);
+      const stats = orangeWarningSummarizeRecords(records);
+      if (!rows.length) {
+        $("orangeWarningStatus").textContent = "暂无可导出的统计记录";
+        $("orangeWarningStatus").className = "status error";
+        return;
+      }
+      const htmlRows = rows.map((row) => {
+        const record = row.record || {};
+        const highlighted = Boolean(row.highlighted);
+        const cells = [];
+        if (!row.skipCountCell) {
+          const countStyles = [`font-weight:${highlighted ? "700" : "400"}`];
+          if (highlighted) countStyles.push("border-left:2px solid #111827", "border-bottom:2px solid #111827");
+          if (row.isGroupStart) countStyles.push("border-top:2px solid #111827");
+          const countStyle = countStyles.join(";");
+          cells.push(`<td rowspan="${row.countRowspan || 1}" style="${countStyle}">${escapeHtml(row.count)}</td>`);
+        }
+        const topStyle = row.isGroupStart ? "border-top:2px solid #111827;" : "";
+        const bottomStyle = row.isGroupEnd ? "border-bottom:2px solid #111827;" : "";
+        const rightStyle = highlighted ? "border-right:2px solid #111827;" : "";
+        const values = [
+          orangeWarningRecordDate(record) || "-",
+          orangeWarningRecordTime(record) || "-",
+          orangeWarningRecordDirection(record) || "-",
+          orangeWarningPersonCellHtml(record.responsible_person || "-"),
+          orangeWarningPersonCellHtml(record.recorder || "-"),
+        ];
+        values.forEach((value, cellIndex) => {
+          const edgeStyle = `${topStyle}${bottomStyle}${cellIndex === values.length - 1 ? rightStyle : ""}`;
+          const cellValue = cellIndex >= 3 ? value : escapeHtml(value);
+          cells.push(`<td style="${edgeStyle}">${cellValue}</td>`);
+        });
+        return `<tr>${cells.join("")}</tr>`;
+      }).join("");
+      const html = `
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <style>
+              body { font-family: "Microsoft YaHei", Arial, sans-serif; }
+              h2 { margin: 0 0 8px; font-size: 18px; }
+              p { margin: 0 0 12px; color: #475569; }
+              table { border-collapse: collapse; table-layout: fixed; width: 100%; }
+              th, td { border: 1px solid #cbd5e1; padding: 8px 6px; text-align: center; vertical-align: middle; white-space: normal; word-break: break-all; }
+              .orange-warning-person-list { display: block; width: 100%; }
+              .orange-warning-person-name { display: inline-block; white-space: nowrap; word-break: keep-all; overflow-wrap: normal; margin: 0 2px; }
+              th { background: #f8fafc; font-weight: 700; }
+            </style>
+          </head>
+          <body>
+            <h2>橙色预警统计信息</h2>
+            <p>${escapeHtml(orangeWarningRangeText())} · 巡查记录：${stats.recordCount}条 实际次数：${stats.mergedCount}次</p>
+            <table>
+              <colgroup>
+                <col style="width:58px" />
+                <col style="width:112px" />
+                <col style="width:160px" />
+                <col style="width:68px" />
+                <col style="width:210px" />
+                <col style="width:210px" />
+              </colgroup>
+              <tr><th>次数</th><th>日期</th><th>时间</th><th>方向</th><th>巡查人</th><th>记录人</th></tr>
+              ${htmlRows}
+            </table>
+          </body>
+        </html>
+      `;
+      orangeWarningDownloadBlob(orangeWarningTableExportFilename(), `\ufeff${html}`, "application/vnd.ms-excel;charset=utf-8");
+      $("orangeWarningStatus").textContent = "已导出统计表格";
+      $("orangeWarningStatus").className = "status ok";
+    }
+
+    function exportOrangeWarningStatsImage() {
+      const records = orangeWarningFilteredRecords();
+      const groups = orangeWarningStatsGroups(records);
+      const stats = orangeWarningSummarizeRecords(records);
+      if (!groups.length) {
+        $("orangeWarningStatus").textContent = "暂无可导出的统计记录";
+        $("orangeWarningStatus").className = "status error";
+        return;
+      }
+      const scale = Math.max(2, Math.min(window.devicePixelRatio || 2, 3));
+      const tableBody = $("orangeWarningStatsTable");
+      const visibleTable = tableBody ? tableBody.closest("table") : null;
+      const headerCells = visibleTable ? Array.from(visibleTable.querySelectorAll("thead th, tbody > tr:first-child th")) : [];
+      const sampleCell = visibleTable ? visibleTable.querySelector("tbody > tr:nth-child(2) td") : null;
+      const sampleStyle = sampleCell ? getComputedStyle(sampleCell) : null;
+      const tableStyle = visibleTable ? getComputedStyle(visibleTable) : null;
+      const defaultFontSize = sampleStyle ? parseFloat(sampleStyle.fontSize) || 12 : 12;
+      const defaultLineHeight = sampleStyle && sampleStyle.lineHeight !== "normal"
+        ? parseFloat(sampleStyle.lineHeight) || 15
+        : Math.round(defaultFontSize * 1.25);
+      const horizontalPadding = sampleStyle
+        ? (parseFloat(sampleStyle.paddingLeft) || 4) + (parseFloat(sampleStyle.paddingRight) || 4)
+        : 8;
+      const verticalPadding = sampleStyle
+        ? (parseFloat(sampleStyle.paddingTop) || 8) + (parseFloat(sampleStyle.paddingBottom) || 8)
+        : 16;
+      const columns = ["次数", "日期", "时间", "方向", "巡查人", "记录人"].map((title, index) => ({
+        title,
+        width: headerCells[index] ? headerCells[index].getBoundingClientRect().width : 114,
+      }));
+      const tableWidth = columns.reduce((sum, column) => sum + column.width, 0);
+      const margin = 16;
+      const titleHeight = 42;
+      const headerHeight = headerCells[0] ? headerCells[0].getBoundingClientRect().height : 33;
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      ctx.font = `400 ${defaultFontSize}px ${sampleStyle ? sampleStyle.fontFamily : '"Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif'}`;
+      const groupLayouts = groups.map((group) => {
+        const rows = group.records.map((record) => [
+          String(group.count),
+          orangeWarningRecordDate(record) || "-",
+          orangeWarningRecordTime(record) || "-",
+          orangeWarningRecordDirection(record) || "-",
+          record.responsible_person || "-",
+          record.recorder || "-",
+        ]);
+          const rowHeights = rows.map((row) => Math.max(
+          ...row.slice(1).map((value, index) => orangeWarningMeasureExportCell(ctx, value, columns[index + 1].width, {
+            horizontalPadding,
+            verticalPadding,
+            lineHeight: defaultLineHeight,
+            minHeight: Math.max(33, verticalPadding + defaultLineHeight),
+            personNames: index >= 3,
+          }))
+        ));
+        return { group, rows, rowHeights, height: rowHeights.reduce((sum, height) => sum + height, 0) };
+      });
+      const totalHeight = margin * 2 + titleHeight + headerHeight + groupLayouts.reduce((sum, group) => sum + group.height, 0);
+      if (totalHeight > 32000) {
+        $("orangeWarningStatus").textContent = "导出记录太多，请先筛选日期后再导出图片";
+        $("orangeWarningStatus").className = "status error";
+        return;
+      }
+      canvas.width = (tableWidth + margin * 2) * scale;
+      canvas.height = totalHeight * scale;
+      canvas.style.width = `${tableWidth + margin * 2}px`;
+      canvas.style.height = `${totalHeight}px`;
+      ctx.scale(scale, scale);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, tableWidth + margin * 2, totalHeight);
+      ctx.fillStyle = "#111827";
+      ctx.font = `700 ${Math.max(16, defaultFontSize + 4)}px ${sampleStyle ? sampleStyle.fontFamily : '"Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif'}`;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.fillText("统计信息", margin, margin);
+      ctx.font = `400 ${defaultFontSize}px ${sampleStyle ? sampleStyle.fontFamily : '"Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif'}`;
+      ctx.fillStyle = "#475569";
+      ctx.fillText(`巡查记录：${stats.recordCount}条 实际次数：${stats.mergedCount}次`, margin, margin + 24);
+      let y = margin + titleHeight;
+      let x = margin;
+      ctx.fillStyle = "#f8fafc";
+      ctx.fillRect(x, y, tableWidth, headerHeight);
+      ctx.save();
+      ctx.strokeStyle = "#cbd5e1";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      columns.forEach((column) => {
+        ctx.moveTo(x, y);
+        ctx.lineTo(x, y + headerHeight);
+        orangeWarningDrawExportText(ctx, column.title, x, y, column.width, headerHeight, {
+          bold: true,
+          fontSize: defaultFontSize,
+          lineHeight: defaultLineHeight,
+          horizontalPadding,
+        });
+        x += column.width;
+      });
+      ctx.moveTo(x, y);
+      ctx.lineTo(x, y + headerHeight);
+      ctx.moveTo(margin, y);
+      ctx.lineTo(margin + tableWidth, y);
+      ctx.moveTo(margin, y + headerHeight);
+      ctx.lineTo(margin + tableWidth, y + headerHeight);
+      ctx.stroke();
+      ctx.restore();
+      y += headerHeight;
+      groupLayouts.forEach((layout, layoutIndex) => {
+        const groupY = y;
+        const highlighted = orangeWarningIsHighlightedStatsGroup(layout.group);
+        const previousLayout = layoutIndex > 0 ? groupLayouts[layoutIndex - 1] : null;
+        const skipTopBorder = Boolean(
+          highlighted
+          && previousLayout
+          && orangeWarningIsHighlightedStatsGroup(previousLayout.group)
+        );
+        x = margin;
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(x, groupY, columns[0].width, layout.height);
+        orangeWarningDrawExportText(ctx, layout.rows[0][0], x, groupY, columns[0].width, layout.height, {
+          bold: highlighted,
+          fontSize: defaultFontSize,
+          lineHeight: defaultLineHeight,
+          horizontalPadding,
+        });
+        layout.rows.forEach((row, rowIndex) => {
+          let cellX = margin + columns[0].width;
+          const rowY = groupY + layout.rowHeights.slice(0, rowIndex).reduce((sum, height) => sum + height, 0);
+          const rowHeight = layout.rowHeights[rowIndex];
+          row.slice(1).forEach((value, cellIndex) => {
+            const column = columns[cellIndex + 1];
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(cellX, rowY, column.width, rowHeight);
+            orangeWarningDrawExportText(ctx, value, cellX, rowY, column.width, rowHeight, {
+              fontSize: defaultFontSize,
+              lineHeight: defaultLineHeight,
+              horizontalPadding,
+              personNames: cellIndex >= 3,
+            });
+            cellX += column.width;
+          });
+        });
+        ctx.save();
+        ctx.strokeStyle = "#cbd5e1";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        let gridX = margin;
+        columns.forEach((column) => {
+          ctx.moveTo(gridX, groupY);
+          ctx.lineTo(gridX, groupY + layout.height);
+          gridX += column.width;
+        });
+        ctx.moveTo(gridX, groupY);
+        ctx.lineTo(gridX, groupY + layout.height);
+        let gridY = groupY;
+        if (!skipTopBorder) {
+          ctx.moveTo(margin, gridY);
+          ctx.lineTo(margin + tableWidth, gridY);
+        }
+        layout.rowHeights.forEach((rowHeight) => {
+          gridY += rowHeight;
+          ctx.moveTo(margin + columns[0].width, gridY);
+          ctx.lineTo(margin + tableWidth, gridY);
+        });
+        ctx.stroke();
+        ctx.restore();
+        if (highlighted) {
+          orangeWarningDrawExportGroupBorder(ctx, margin, groupY, tableWidth, layout.height, { skipTop: skipTopBorder });
+        }
+        y += layout.height;
+      });
+      const link = document.createElement("a");
+      link.download = orangeWarningImageExportFilename();
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+      $("orangeWarningStatus").textContent = "已导出统计图片";
+      $("orangeWarningStatus").className = "status ok";
+    }
+
+    function renderOrangeWarningRecords(records, stats, name, routeCode) {
+      state.orangeWarningRecordsAll = records || [];
+      state.orangeWarningQueryName = name || "";
+      state.orangeWarningRouteCode = routeCode || "";
+      state.orangeWarningQueryStats = stats || null;
+      state.orangeWarningStatsPage = 1;
+      renderOrangeWarningFilteredRecords();
+    }
+
+    function renderOrangeWarningFilteredRecords() {
+      const target = $("orangeWarningResults");
+      const visibleRecords = orangeWarningFilteredRecords();
+      const visibleStats = orangeWarningSummarizeRecords(visibleRecords);
+      const totalRecords = state.orangeWarningRecordsAll || [];
+      const stats = state.orangeWarningQueryStats || {};
+      const matchedRows = stats.matched_rows !== undefined ? stats.matched_rows : totalRecords.length;
+      const routeText = state.orangeWarningRouteCode ? `路线 ${state.orangeWarningRouteCode}` : "全部路线";
+      const rangeText = orangeWarningRangeText();
+      const loadedText = stats.loaded_rows !== undefined ? `${stats.loaded_rows}/${stats.total_rows !== undefined ? stats.total_rows : stats.loaded_rows}` : "-";
+      const cacheText = stats.cache_used
+        ? `缓存 ${stats.cached_rows || 0} 条，本次新增 ${stats.new_rows || 0} 条`
+        : `本次拉取 ${stats.fetched_rows !== undefined ? stats.fetched_rows : visibleStats.recordCount} 条`;
+      const summary = $("orangeWarningSummary");
+      if (summary) summary.textContent = `姓名 ${state.orangeWarningQueryName || "-"} · ${routeText} · 日期 ${rangeText} · 显示 ${visibleStats.recordCount} 条 · 合并后 ${visibleStats.mergedCount} 次 · 命中 ${matchedRows} 条 · 已载入 ${loadedText} 条 · ${cacheText}`;
+      if (stats.total_rows !== undefined && stats.loaded_rows !== undefined && stats.loaded_rows < stats.total_rows) {
+        if (summary) summary.textContent += " · 可能未搜全";
+      }
+      renderOrangeWarningHero(visibleRecords, rangeText);
+      renderOrangeWarningStats(visibleRecords);
+      const range = orangeWarningNormalizeDateRange();
+      if ((range.start || range.end) && !visibleRecords.length) {
+        const rangeLabel = range.start && range.end ? `${range.start} 至 ${range.end}` : (range.start || range.end);
+        target.innerHTML = `<div class="item"><strong>该日期范围没有匹配记录</strong><small>当前查询结果中没有 ${escapeHtml(rangeLabel)} 的巡查记录。</small></div>`;
+        return;
+      }
+      if (!visibleRecords.length) {
+        target.innerHTML = `<div class="item"><strong>暂无匹配记录</strong><small>请先在左侧输入姓名并查询。</small></div>`;
+        return;
+      }
+      target.innerHTML = visibleRecords.map((record) => {
+        const startText = formatIsoMinute(record.start_time) || "-";
+        const endText = formatIsoMinute(record.end_time) || "-";
+        const dateText = orangeWarningRecordDate(record) || "-";
+        const startTime = startText && startText !== "-" ? startText.slice(11) : "-";
+        const endTime = endText && endText !== "-" ? endText.slice(11) : "-";
+        const timeText = startTime !== "-" || endTime !== "-" ? `${startTime} - ${endTime}` : "-";
+        return `
+        <article class="orange-warning-card">
+          <div class="orange-warning-card-head">
+            <div class="orange-warning-card-title">
+              <strong>${escapeHtml(dateText)} ${escapeHtml(timeText)}</strong>
+              <div class="orange-warning-card-subline">${escapeHtml(record.route_code || "-")} ${escapeHtml(record.direction || "-")}</div>
+            </div>
+            <div class="orange-warning-chip-row">
+              <span class="orange-warning-chip">${escapeHtml(record.status || "巡查中")}</span>
+            </div>
+          </div>
+          <div class="orange-warning-card-body">
+            <div><strong>桩号</strong><small>${escapeHtml(record.stake_range || "-")}</small></div>
+            <div class="orange-warning-card-people"><strong>人员</strong><small>${escapeHtml(record.responsible_person || "-")}<br>${escapeHtml(record.recorder || "-")}</small></div>
+          </div>
+        </article>
+      `;
+      }).join("");
+    }
+
+    async function queryOrangeWarningRecords() {
+      const button = $("queryOrangeWarningBtn");
+      const name = $("orangeWarningName").value.trim();
+      if (!name) {
+        $("orangeWarningStatus").textContent = "请输入姓名";
+        $("orangeWarningStatus").className = "status error";
+        $("orangeWarningName").focus();
+        return;
+      }
+      button.disabled = true;
+      $("orangeWarningStatus").textContent = "正在查询公路巡查记录...";
+      $("orangeWarningStatus").className = "status";
+      try {
+        const params = new URLSearchParams({ name, limit: "5000" });
+        const response = await fetch(`/api/patrol-warning/orange-records?${params.toString()}`);
+        const body = await response.json();
+        if (!response.ok || !body.success) throw new Error(body.detail || "查询失败");
+        $("orangeWarningStatus").textContent = "查询完成";
+        $("orangeWarningStatus").className = "status ok";
+        renderOrangeWarningRecords(body.records || [], body.stats || {}, body.name || name, body.route_code || "");
+      } catch (error) {
+        $("orangeWarningStatus").textContent = `查询失败：${error.message || error}`;
+        $("orangeWarningStatus").className = "status error";
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    $("queryOrangeWarningBtn").addEventListener("click", queryOrangeWarningRecords);
+    $("orangeWarningName").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") queryOrangeWarningRecords();
+    });
+    $("orangeWarningStartDate").addEventListener("change", () => {
+      state.orangeWarningStatsPage = 1;
+      renderOrangeWarningFilteredRecords();
+    });
+    $("orangeWarningEndDate").addEventListener("change", () => {
+      state.orangeWarningStatsPage = 1;
+      renderOrangeWarningFilteredRecords();
+    });
+    $("clearOrangeWarningDateBtn").addEventListener("click", () => {
+      $("orangeWarningStartDate").value = "";
+      $("orangeWarningEndDate").value = "";
+      state.orangeWarningStatsPage = 1;
+      renderOrangeWarningFilteredRecords();
+    });
+    $("exportOrangeWarningStatsTableBtn").addEventListener("click", exportOrangeWarningStatsTable);
+    $("exportOrangeWarningStatsImageBtn").addEventListener("click", exportOrangeWarningStatsImage);
+    $("orangeWarningStatsPagination").addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-orange-page]");
+      if (!button || button.disabled) return;
+      const visibleRecords = orangeWarningFilteredRecords();
+      const pageCount = orangeWarningStatsPageCount(orangeWarningStatsGroups(visibleRecords));
+      const currentPage = Math.min(Math.max(Number(state.orangeWarningStatsPage) || 1, 1), pageCount);
+      if (button.dataset.orangePage === "prev") {
+        state.orangeWarningStatsPage = Math.max(1, currentPage - 1);
+      } else if (button.dataset.orangePage === "next") {
+        state.orangeWarningStatsPage = Math.min(pageCount, currentPage + 1);
+      } else {
+        state.orangeWarningStatsPage = Math.min(Math.max(Number(button.dataset.orangePage) || 1, 1), pageCount);
+      }
+      renderOrangeWarningStats(visibleRecords);
+    });
+
     function sendRecordKindLabel(kind) {
       return ({
         daily_duty: "今日在岗",
@@ -5731,6 +7231,8 @@
         patrol_warning_end_test_resend: "预警结束巡查测试补发",
         patrol_warning_check: "公路巡查预警检查",
         patrol_warning_check_resend: "公路巡查预警检查补发",
+        patrol_record_wechat: "微信群巡查记录查询",
+        patrol_record_wechat_resend: "微信群巡查记录查询补发",
         tunnel_mechanical_wechat: "隧道机电录入",
         tunnel_mechanical_wechat_resend: "隧道机电录入补发",
         tunnel_mechanical_wechat_modify: "隧道机电修改",
@@ -6482,6 +7984,7 @@
     loadSavedDutyChart();
     loadNotificationConfig();
     loadFeatureChannelConfig().catch(() => null);
+    loadFeatureChannelLogs().catch(() => null);
     loadPatrolWarningConfig();
     loadTunnelMechanicalConfig();
     loadTunnelMechanicalTemplates();

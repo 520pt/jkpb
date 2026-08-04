@@ -174,6 +174,31 @@ class DutyRepository:
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
+                CREATE TABLE IF NOT EXISTS wechat_interaction_config (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    patrol_record_triggers_json TEXT NOT NULL DEFAULT '["巡查记录","查询巡查记录","查巡查记录","巡查记录查询"]',
+                    patrol_record_template TEXT NOT NULL DEFAULT '',
+                    tunnel_template_triggers_json TEXT NOT NULL DEFAULT '["模板"]',
+                    tunnel_template TEXT NOT NULL DEFAULT '',
+                    tunnel_modify_template_triggers_json TEXT NOT NULL DEFAULT '["修改","修改模板","改模板"]',
+                    tunnel_modify_template TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS wechat_interaction_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room_id TEXT NOT NULL DEFAULT '',
+                    room_name TEXT NOT NULL DEFAULT '',
+                    sender_id TEXT NOT NULL DEFAULT '',
+                    sender_name TEXT NOT NULL DEFAULT '',
+                    command_text TEXT NOT NULL DEFAULT '',
+                    query_type TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT '',
+                    reply_text TEXT NOT NULL DEFAULT '',
+                    error TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
                 CREATE TABLE IF NOT EXISTS personnel_names (
                     name TEXT PRIMARY KEY,
                     mention_mobile TEXT NOT NULL DEFAULT '',
@@ -366,6 +391,11 @@ class DutyRepository:
                 conn.execute("ALTER TABLE tunnel_mechanical_state ADD COLUMN refresh_token TEXT NOT NULL DEFAULT ''")
             if "cookie_header" not in tunnel_state_columns:
                 conn.execute("ALTER TABLE tunnel_mechanical_state ADD COLUMN cookie_header TEXT NOT NULL DEFAULT ''")
+            wechat_interaction_columns = {row["name"] for row in conn.execute("PRAGMA table_info(wechat_interaction_config)").fetchall()}
+            if "tunnel_template" not in wechat_interaction_columns:
+                conn.execute("ALTER TABLE wechat_interaction_config ADD COLUMN tunnel_template TEXT NOT NULL DEFAULT ''")
+            if "tunnel_modify_template" not in wechat_interaction_columns:
+                conn.execute("ALTER TABLE wechat_interaction_config ADD COLUMN tunnel_modify_template TEXT NOT NULL DEFAULT ''")
 
     def table_names(self) -> set[str]:
         with self._connect() as conn:
@@ -1095,6 +1125,138 @@ class DutyRepository:
             "allow_duty_query": bool(row["allow_duty_query"]),
             "allow_roster_import": bool(row["allow_roster_import"]),
         }
+
+    def save_wechat_interaction_config(
+        self,
+        *,
+        patrol_record_triggers: list[str],
+        patrol_record_template: str,
+        tunnel_template_triggers: list[str],
+        tunnel_template: str,
+        tunnel_modify_template_triggers: list[str],
+        tunnel_modify_template: str,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO wechat_interaction_config
+                    (
+                        id, patrol_record_triggers_json, patrol_record_template,
+                        tunnel_template_triggers_json, tunnel_template,
+                        tunnel_modify_template_triggers_json, tunnel_modify_template
+                    )
+                VALUES (1, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    patrol_record_triggers_json = excluded.patrol_record_triggers_json,
+                    patrol_record_template = excluded.patrol_record_template,
+                    tunnel_template_triggers_json = excluded.tunnel_template_triggers_json,
+                    tunnel_template = excluded.tunnel_template,
+                    tunnel_modify_template_triggers_json = excluded.tunnel_modify_template_triggers_json,
+                    tunnel_modify_template = excluded.tunnel_modify_template,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    json.dumps([str(item).strip() for item in patrol_record_triggers if str(item).strip()], ensure_ascii=False),
+                    str(patrol_record_template or "").strip(),
+                    json.dumps([str(item).strip() for item in tunnel_template_triggers if str(item).strip()], ensure_ascii=False),
+                    str(tunnel_template or "").strip(),
+                    json.dumps([str(item).strip() for item in tunnel_modify_template_triggers if str(item).strip()], ensure_ascii=False),
+                    str(tunnel_modify_template or "").strip(),
+                ),
+            )
+
+    def get_wechat_interaction_config(self) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT patrol_record_triggers_json, patrol_record_template,
+                       tunnel_template_triggers_json, tunnel_template,
+                       tunnel_modify_template_triggers_json, tunnel_modify_template
+                FROM wechat_interaction_config
+                WHERE id = 1
+                """
+            ).fetchone()
+        if row is None:
+            return {
+                "patrol_record_triggers": ["巡查记录", "查询巡查记录", "查巡查记录", "巡查记录查询"],
+                "patrol_record_template": "",
+                "tunnel_template_triggers": ["模板"],
+                "tunnel_template": "",
+                "tunnel_modify_template_triggers": ["修改", "修改模板", "改模板"],
+                "tunnel_modify_template": "",
+            }
+        return {
+            "patrol_record_triggers": _loads_json(row["patrol_record_triggers_json"], ["巡查记录", "查询巡查记录", "查巡查记录", "巡查记录查询"]),
+            "patrol_record_template": row["patrol_record_template"] or "",
+            "tunnel_template_triggers": _loads_json(row["tunnel_template_triggers_json"], ["模板"]),
+            "tunnel_template": row["tunnel_template"] or "",
+            "tunnel_modify_template_triggers": _loads_json(row["tunnel_modify_template_triggers_json"], ["修改", "修改模板", "改模板"]),
+            "tunnel_modify_template": row["tunnel_modify_template"] or "",
+        }
+
+    def save_wechat_interaction_log(
+        self,
+        *,
+        room_id: str = "",
+        room_name: str = "",
+        sender_id: str = "",
+        sender_name: str = "",
+        command_text: str = "",
+        query_type: str = "",
+        status: str = "",
+        reply_text: str = "",
+        error: str = "",
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO wechat_interaction_logs (
+                    room_id, room_name, sender_id, sender_name,
+                    command_text, query_type, status, reply_text, error
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(room_id or "").strip(),
+                    str(room_name or "").strip(),
+                    str(sender_id or "").strip(),
+                    str(sender_name or "").strip(),
+                    str(command_text or "").strip(),
+                    str(query_type or "").strip(),
+                    str(status or "").strip(),
+                    str(reply_text or "").strip(),
+                    str(error or "").strip(),
+                ),
+            )
+
+    def list_wechat_interaction_logs(self, limit: int = 100) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, room_id, room_name, sender_id, sender_name, command_text,
+                       query_type, status, reply_text, error, created_at
+                FROM wechat_interaction_logs
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (max(1, min(int(limit), 200)),),
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "room_id": row["room_id"],
+                "room_name": row["room_name"],
+                "sender_id": row["sender_id"],
+                "sender_name": row["sender_name"],
+                "command_text": row["command_text"],
+                "query_type": row["query_type"],
+                "status": row["status"],
+                "reply_text": row["reply_text"],
+                "error": row["error"],
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
 
     def save_daily_duty_config(
         self,

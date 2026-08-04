@@ -1,16 +1,21 @@
+import asyncio
 import base64
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import app.patrol_warning as patrol_module
+from app.main import _patrol_record_group_count
 from app.patrol_warning_image import _image_title, _patrol_summary_text, _status_text, render_patrol_warning_image
+from app.patrol_record_image import _record_groups
 from app.patrol_warning import (
     build_end_reminder_message,
     build_start_message,
     due_end_reminder_slot,
+    fetch_patrol_records_by_name_result,
     failure_backoff_until,
     is_token_valid,
+    normalize_patrol_record,
     normalize_warning,
     next_poll_time,
     token_cache_expires_at,
@@ -47,6 +52,272 @@ def test_normalizes_patrol_warning_fields_from_api_row():
     assert warning.end_stake == "K137.730"
     assert warning.start_time.isoformat() == "2026-07-21T22:35:01+08:00"
     assert warning.end_time.isoformat() == "2026-07-22T01:35:03+08:00"
+
+
+def test_normalizes_patrol_record_fields_from_api_row():
+    record = normalize_patrol_record(
+        {
+            "Id": "record-1",
+            "RouteNumber": "S41",
+            "RouteName": "南涧－宁洱",
+            "InspectionAllDirection": "2",
+            "StartingStake": 106.67,
+            "EndStake": 137.42,
+            "ResponsiblePerson": "李文杰 商邱宏",
+            "Recorder": "陈刚",
+            "InspectionAlstime": "2026-07-26T10:44:21+08:00",
+            "InspectionAletime": "2026-07-26T11:02:00+08:00",
+        },
+        TZ,
+    )
+
+    assert record is not None
+    assert record["id"] == "record-1"
+    assert record["route_code"] == "S41"
+    assert record["direction"] == "下行"
+    assert record["stake_range"] == "106.67 ~ 137.42"
+    assert record["responsible_person"] == "李文杰 商邱宏"
+    assert record["recorder"] == "陈刚"
+    assert record["status"] == "已完成"
+
+
+def test_patrol_record_groups_pair_adjacent_end_and_start_times():
+    records = [
+        {
+            "id": "r-1",
+            "start_time": "2026-07-13T08:01:00+08:00",
+            "end_time": "2026-07-13T09:29:00+08:00",
+            "direction": "上行",
+            "responsible_person": "罗森",
+            "recorder": "商邱宏",
+        },
+        {
+            "id": "r-2",
+            "start_time": "2026-07-13T09:30:00+08:00",
+            "end_time": "2026-07-13T10:02:00+08:00",
+            "direction": "下行",
+            "responsible_person": "罗森",
+            "recorder": "商邱宏",
+        },
+    ]
+
+    groups = _record_groups(records)
+
+    assert len(groups) == 1
+    assert groups[0]["count"] == 1
+    assert [record["id"] for record in groups[0]["records"]] == ["r-1", "r-2"]
+
+
+def test_patrol_record_groups_handle_multiple_pairs_and_singletons():
+    records = [
+        {
+            "id": "r-1",
+            "start_time": "2026-07-13T08:01:00+08:00",
+            "end_time": "2026-07-13T08:45:00+08:00",
+            "direction": "上行",
+            "responsible_person": "罗森",
+            "recorder": "商邱宏",
+        },
+        {
+            "id": "r-2",
+            "start_time": "2026-07-13T08:45:30+08:00",
+            "end_time": "2026-07-13T09:02:00+08:00",
+            "direction": "下行",
+            "responsible_person": "罗森",
+            "recorder": "商邱宏",
+        },
+        {
+            "id": "r-3",
+            "start_time": "2026-07-13T10:00:00+08:00",
+            "end_time": "2026-07-13T10:30:00+08:00",
+            "direction": "双向",
+            "responsible_person": "罗森",
+            "recorder": "商邱宏",
+        },
+        {
+            "id": "r-4",
+            "start_time": "2026-07-13T11:00:00+08:00",
+            "end_time": "2026-07-13T11:28:00+08:00",
+            "direction": "上行",
+            "responsible_person": "罗森",
+            "recorder": "商邱宏",
+        },
+        {
+            "id": "r-5",
+            "start_time": "2026-07-13T11:28:40+08:00",
+            "end_time": "2026-07-13T11:50:00+08:00",
+            "direction": "下行",
+            "responsible_person": "罗森",
+            "recorder": "商邱宏",
+        },
+    ]
+
+    groups = _record_groups(records)
+
+    assert len(groups) == 3
+    assert [group["count"] for group in groups] == [1, 2, 3]
+    assert [[record["id"] for record in group["records"]] for group in groups] == [
+        ["r-1", "r-2"],
+        ["r-3"],
+        ["r-4", "r-5"],
+    ]
+    assert _patrol_record_group_count(records) == 3
+
+
+def test_patrol_record_query_filters_route_and_name(monkeypatch):
+    async def fake_fetch_record_rows(config, token, *, known_keys, limit, use_incremental, tz):
+        return [
+            {
+                "Id": "match-responsible",
+                "RouteNumber": "S41",
+                "ResponsiblePerson": "李文杰 商邱宏",
+                "Recorder": "陈刚",
+                "InspectionAlstime": "2026-07-26T10:44:21+08:00",
+            },
+            {
+                "Id": "match-recorder",
+                "RouteNumber": "S41",
+                "ResponsiblePerson": "罗森",
+                "Recorder": "商邱宏",
+                "InspectionAlstime": "2026-07-25T10:44:21+08:00",
+            },
+            {
+                "Id": "wrong-route",
+                "RouteNumber": "G214",
+                "ResponsiblePerson": "商邱宏",
+                "Recorder": "陈刚",
+                "InspectionAlstime": "2026-07-24T10:44:21+08:00",
+            },
+        ], 3, True
+
+    monkeypatch.setattr(patrol_module, "_fetch_patrol_record_rows_for_cache", fake_fetch_record_rows)
+    result = asyncio.run(
+        fetch_patrol_records_by_name_result(
+            {"route_code": "S41"},
+            TZ,
+            name="商邱宏",
+            token="cached-token",
+            token_expires_at="2026-07-22T22:00:00+08:00",
+            now=datetime.fromisoformat("2026-07-22T08:00:00+08:00"),
+        )
+    )
+
+    assert [record["id"] for record in result.records] == ["match-responsible", "match-recorder", "wrong-route"]
+    assert result.stats["total_rows"] == 3
+    assert result.stats["loaded_rows"] == 3
+    assert result.stats["route_matched_rows"] == 3
+    assert result.stats["matched_rows"] == 3
+    assert result.stats["cache_used"] == 0
+
+
+def test_patrol_record_query_reuses_local_cache_and_fetches_incrementally(tmp_path, monkeypatch):
+    calls: list[dict[str, object]] = []
+    remote_pages = [
+        [
+            {
+                "Id": "old-record",
+                "RouteNumber": "S41",
+                "ResponsiblePerson": "商邱宏",
+                "Recorder": "陈刚",
+                "InspectionAlstime": "2026-07-25T10:44:21+08:00",
+            }
+        ],
+        [
+            {
+                "Id": "new-record",
+                "RouteNumber": "S41",
+                "ResponsiblePerson": "商邱宏",
+                "Recorder": "陈刚",
+                "InspectionAlstime": "2026-07-26T10:44:21+08:00",
+            }
+        ],
+    ]
+
+    async def fake_fetch_record_rows(config, token, *, known_keys, limit, use_incremental, tz):
+        calls.append({"known_keys": set(known_keys), "use_incremental": use_incremental})
+        index = min(len(calls) - 1, len(remote_pages) - 1)
+        return remote_pages[index], len(remote_pages[index]), not use_incremental
+
+    monkeypatch.setattr(patrol_module, "_fetch_patrol_record_rows_for_cache", fake_fetch_record_rows)
+    cache_path = tmp_path / "patrol-warning-records-cache.json"
+
+    first = asyncio.run(
+        fetch_patrol_records_by_name_result(
+            {"warning_url": "https://example.test/mobile/warninginfo/findPage"},
+            TZ,
+            name="商邱宏",
+            token="cached-token",
+            token_expires_at="2026-07-22T22:00:00+08:00",
+            now=datetime.fromisoformat("2026-07-22T08:00:00+08:00"),
+            cache_path=cache_path,
+        )
+    )
+    second = asyncio.run(
+        fetch_patrol_records_by_name_result(
+            {"warning_url": "https://example.test/mobile/warninginfo/findPage"},
+            TZ,
+            name="商邱宏",
+            token="cached-token",
+            token_expires_at="2026-07-22T22:00:00+08:00",
+            now=datetime.fromisoformat("2026-07-22T08:00:00+08:00"),
+            cache_path=cache_path,
+        )
+    )
+
+    assert calls[0]["use_incremental"] is False
+    assert calls[1]["use_incremental"] is True
+    assert calls[1]["known_keys"]
+    assert [record["id"] for record in first.records] == ["old-record"]
+    assert [record["id"] for record in second.records] == ["new-record", "old-record"]
+    assert second.stats["cached_rows"] == 1
+    assert second.stats["new_rows"] == 1
+
+
+def test_patrol_record_query_uses_cache_when_login_fails(tmp_path, monkeypatch):
+    async def fake_fetch_record_rows(config, token, *, known_keys, limit, use_incremental, tz):
+        return [
+            {
+                "Id": "cached-record",
+                "RouteNumber": "S41",
+                "ResponsiblePerson": "商邱宏",
+                "Recorder": "陈刚",
+                "InspectionAlstime": "2026-07-25T10:44:21+08:00",
+            }
+        ], 1, True
+
+    async def fake_login(config):
+        raise patrol_module.PatrolWarningError("登录失败")
+
+    monkeypatch.setattr(patrol_module, "_fetch_patrol_record_rows_for_cache", fake_fetch_record_rows)
+    cache_path = tmp_path / "patrol-warning-records-cache.json"
+    asyncio.run(
+        fetch_patrol_records_by_name_result(
+            {"warning_url": "https://example.test/mobile/warninginfo/findPage"},
+            TZ,
+            name="商邱宏",
+            token="cached-token",
+            token_expires_at="2026-07-22T22:00:00+08:00",
+            now=datetime.fromisoformat("2026-07-22T08:00:00+08:00"),
+            cache_path=cache_path,
+        )
+    )
+    monkeypatch.setattr(patrol_module, "_login", fake_login)
+
+    result = asyncio.run(
+        fetch_patrol_records_by_name_result(
+            {"warning_url": "https://example.test/mobile/warninginfo/findPage"},
+            TZ,
+            name="商邱宏",
+            token="",
+            token_expires_at="",
+            now=datetime.fromisoformat("2026-07-23T08:00:00+08:00"),
+            cache_path=cache_path,
+        )
+    )
+
+    assert [record["id"] for record in result.records] == ["cached-record"]
+    assert result.stats["cache_used"] == 1
+    assert result.stats["fetched_rows"] == 0
 
 
 def test_warning_level_prefers_color_text_over_numeric_code():

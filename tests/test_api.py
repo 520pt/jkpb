@@ -71,6 +71,7 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     response = client.get("/")
 
     assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache, max-age=0, must-revalidate"
     html = response.text
     assert 'data-tab="today">今日提醒' in html
     assert '<section id="todayPage" class="tab-page">' in html
@@ -90,7 +91,7 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert "monitorWechatBindingPayload" in html
     assert "monitorWechatBindingText" in html
     assert "同步${wechatGatewayLabel()}群失败" in html
-    assert "功能通道已保存，但同步${wechatGatewayLabel()}群失败" in html
+    assert "微信交互配置已保存" in html
     assert 'tunnel_mechanical_wechat: "隧道机电录入"' in html
     assert 'tunnel_mechanical_wechat_modify: "隧道机电修改"' in html
     assert 'tunnel_mechanical_query_wechat: "隧道机电查询"' in html
@@ -101,13 +102,90 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'id="patrolLoginUrl"' in html
     assert 'id="patrolRouteCode" placeholder="S41"' in html
     assert 'id="patrolWarningQueryMeta"' in html
+    assert "正在等待后台查询" in html
+    assert "patrolWarningQueryDueRefreshAt" in html
+    assert "下次提醒：正在等待后台发送" in html
+    assert "await loadTodayReminders();" in html
     assert 'id="patrolSendContentMode"' in html
     assert '<option value="image">仅图片</option>' in html
     assert 'data-tab="tunnelMechanical">隧道机电' in html
+    assert 'data-tab="orangeWarning">橙色预警查询' in html
     assert 'data-tab="settings">配置中心' in html
     assert 'id="settingsOverview"' in html
-    assert "微信群交互配置" in html
+    assert "微信交互功能" in html
     assert 'id="tunnelMechanicalPage"' in html
+    assert 'id="orangeWarningPage"' in html
+    assert 'id="orangeWarningName"' in html
+    assert 'id="queryOrangeWarningBtn"' in html
+    assert 'duty-reminder:lastActiveMainTab' in html
+    assert 'function activateMainTab' in html
+    assert 'function renderOrangeWarningRecords' in html
+    assert 'function renderOrangeWarningFilteredRecords' in html
+    assert 'function renderOrangeWarningStats' in html
+    assert 'orange-warning-card-subline' in html
+    assert 'orange-warning-card-people' in html
+    assert '<div><strong>路线</strong><small>${escapeHtml(record.route_name || "-")}</small></div>' not in html
+    assert 'id="orangeWarningHero"' in html
+    assert html.index('id="orangeWarningHero"') < html.index('id="orangeWarningName"') < html.index('id="orangeWarningResults"')
+    assert 'id="orangeWarningHeroMeta"' in html
+    assert 'id="orangeWarningLayout"' in html
+    assert 'id="orangeWarningStartDate"' in html
+    assert 'id="orangeWarningEndDate"' in html
+    assert 'id="clearOrangeWarningDateBtn"' in html
+    assert 'id="exportOrangeWarningStatsTableBtn"' in html
+    assert 'id="exportOrangeWarningStatsImageBtn"' in html
+    assert 'id="orangeWarningStatsTable"' in html
+    assert 'id="orangeWarningStatsPagination"' in html
+    assert 'id="orangeWarningStatsMeta"' in html
+    assert 'function orangeWarningStatsGroups' in html
+    assert 'function orangeWarningStatsRows' in html
+    assert 'isGroupStart: highlighted && index === 0 && !previousHighlighted' in html
+    assert 'isGroupEnd: highlighted && index === group.records.length - 1' in html
+    assert 'endTimestamp: orangeWarningRecordEndTimestamp(record)' in html
+    assert 'next.timestamp - current.endTimestamp <= windowMs' in html
+    assert 'function exportOrangeWarningStatsImage' in html
+    assert 'function exportOrangeWarningStatsTable' in html
+    assert 'function orangeWarningDrawExportGroupBorder' in html
+    assert 'orangeWarningImageExportFilename' in html
+    assert 'orangeWarningTableExportFilename' in html
+    assert 'ctx.fillRect(x + borderWidth, y, Math.max(0, width - borderWidth * 2), borderWidth)' in html
+    assert 'orangeWarningDrawExportGroupBorder(ctx, margin, groupY, tableWidth, layout.height, { skipTop: skipTopBorder })' in html
+    assert 'orangeWarningRecordDirection(records[0]) === "双向"' in html
+    assert 'groups.forEach((group, groupIndex) => {' in html
+    assert 'const countStyles = [`font-weight:${highlighted ? "700" : "400"}`];' in html
+    assert 'if (row.isGroupStart) countStyles.push("border-top:2px solid #111827")' in html
+    assert 'const pageRows = orangeWarningStatsRows(pageRange.records);' in html
+    assert '巡查记录：${stats.recordCount}条 实际次数：${stats.mergedCount}次' in html
+    assert '<tr><th>次数</th><th>日期</th><th>时间</th><th>方向</th><th>巡查人</th><th>记录人</th></tr>' in html
+    assert 'orange-warning-stats-group-start' in html
+    assert 'orange-warning-stats-group-end' in html
+    assert 'orange-warning-stats-group-count' in html
+    assert 'orange-warning-stats-edge-top' in html
+    assert 'orange-warning-stats-edge-right' in html
+    assert 'orange-warning-stats-edge-bottom' in html
+    assert 'orange-warning-stats-edge-left' in html
+    assert 'orange-warning-stats-highlight-cell' not in html
+    assert 'row.skipCountCell && cellIndex === 0' not in html
+    assert 'border-top: 2px solid #111827' in html
+    assert 'border-bottom: 2px solid #111827' in html
+    assert 'overflow-wrap: anywhere' in html
+    assert 'line-break: anywhere' in html
+    assert 'function orangeWarningPersonNames' in html
+    assert 'orange-warning-person-name' in html
+    assert 'white-space: nowrap' in html
+    assert 'personNames: index >= 3' in html
+    assert 'word-break: break-all' in html
+    assert '<td${countClass} rowspan="${escapeHtml(row.countRowspan || 1)}">${escapeHtml(row.count)}</td>' in html
+    assert '$("exportOrangeWarningStatsTableBtn").addEventListener("click", exportOrangeWarningStatsTable)' in html
+    assert '$("exportOrangeWarningStatsImageBtn").addEventListener("click", exportOrangeWarningStatsImage)' in html
+    assert 'skipCountCell: index > 0' in html
+    assert '日期 / 时间 / 姓名' not in html
+    assert 'orange-warning-layout' in html
+    assert 'repeat(auto-fill, minmax(240px, 1fr))' in html
+    assert 'minmax(580px, 720px)' in html
+    assert 'table-layout: fixed' in html
+    assert 'ORANGE_WARNING_STATS_PAGE_SIZE' in html
+    assert 'updateOrangeWarningLayoutHeight' in html
     assert 'id="tunnelEntryPanel"' in html
     assert 'id="tunnelTemplatePanel"' in html
     assert 'data-tunnel-panel-target="tunnelEntryPanel"' in html
@@ -129,13 +207,40 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert "tunnel-asset-card" in html
     assert 'data-settings-target="featureChannelSettings"' in html
     assert 'id="featureChannelSettings"' in html
-    assert 'id="featureChannelRoomSelect"' in html
-    assert 'id="addFeatureChannelRoomBtn"' in html
-    assert 'id="featureChannelRoomList"' in html
+    assert 'id="wechatPatrolRecordTriggers"' in html
+    assert 'id="wechatPatrolRecordTemplate"' in html
+    assert 'id="wechatTunnelTemplateTriggers"' in html
+    assert 'id="wechatTunnelModifyTemplateTriggers"' in html
+    assert 'id="wechatInteractionMenuPreview"' in html
+    assert 'id="wechatInteractionNotificationRooms"' in html
+    assert 'id="wechatTunnelTemplate"' in html
+    assert 'id="wechatTunnelModifyTemplate"' in html
+    feature_section = html[
+        html.index('<section class="settings-panel wechat-interaction-panel" id="featureChannelSettings">') :
+        html.index('<section class="settings-panel reminder-card-panel" id="monitorSettings">')
+    ]
+    assert '<div class="side-block wide">' not in feature_section
+    assert feature_section.count('<div class="side-block">') >= 2
+    assert ".settings-panel.wechat-interaction-panel" in html
+    assert "grid-template-columns: minmax(340px, 1.1fr) minmax(320px, 0.9fr)" in html
+    assert "grid-template-columns: minmax(150px, 0.42fr) minmax(220px, 0.58fr)" in html
+    assert "min-height: 88px" in html
+    assert "grid-template-columns: minmax(300px, 1.08fr) minmax(280px, 0.92fr)" in html
+    assert "@media (max-width: 720px)" in html
+    assert ".wechat-interaction-editor .item { grid-template-columns: 1fr; }" in html
+    assert 'id="featureChannelRoomSelect"' not in html
+    assert 'id="addFeatureChannelRoomBtn"' not in html
+    assert 'id="featureChannelRoomList"' not in html
+    assert "启用微信群功能通道" not in html
+    assert "隧道机电查询/录入" not in html
+    assert "监控班和值班查询" not in html
+    assert "微信群排班导入" not in html
     assert 'id="notificationTargetRoomSelect"' in html
     assert 'id="addNotificationTargetRoomBtn"' in html
     assert 'id="notificationTargetRoomList"' in html
     assert 'id="saveFeatureChannelBtn"' in html
+    assert '"/api/wechat-interaction-config"' in html
+    assert '"/api/feature-channel-config"' not in html
     assert 'loadTunnelMechanicalTemplates' in html
     assert 'loadTunnelMechanicalConfig' in html
     assert "refreshPatrolWarningPanel" in html
@@ -2051,7 +2156,7 @@ def test_wechat_query_requires_token(tmp_path, monkeypatch):
     assert response.status_code == 401
 
 
-def test_feature_channel_config_hides_password_and_restricts_wechat_room(tmp_path, monkeypatch):
+def test_notification_wechat_targets_restrict_wechat_interaction_room(tmp_path, monkeypatch):
     calls: list[dict[str, object]] = []
 
     def fake_lightagent_web_request(repo, method, path, *, params=None, json_body=None):
@@ -2085,6 +2190,14 @@ def test_feature_channel_config_hides_password_and_restricts_wechat_room(tmp_pat
     monkeypatch.setattr(main_module, "_lightagent_web_request", fake_lightagent_web_request)
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
+    app.state.repo.save_notification_config(
+        sender_type="lightagent",
+        webhook_url="",
+        lightagent_targets=[
+            {"id": "wgr_feature", "name": "功能群"},
+            {"id": "wgr_second", "name": "第二功能群"},
+        ],
+    )
 
     save_response = client.post(
         "/api/feature-channel-config",
@@ -2130,6 +2243,7 @@ def test_feature_channel_config_hides_password_and_restricts_wechat_room(tmp_pat
     assert [room["id"] for room in config["wechat_group_rooms"]] == ["wgr_feature", "wgr_second"]
     assert second_room.status_code == 200
     assert wrong_room.status_code == 403
+    assert "通知渠道配置的个人微信群" in wrong_room.json()["detail"]
     assert "功能群" in wrong_room.json()["detail"]
 
 
@@ -2167,7 +2281,7 @@ def test_feature_channel_config_reports_lightagent_sync_failure_without_losing_s
     }
 
 
-def test_feature_channel_can_disable_tunnel_mechanical_query(tmp_path, monkeypatch):
+def test_feature_channel_legacy_permission_switches_do_not_disable_wechat_commands(tmp_path, monkeypatch):
     monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
@@ -2177,22 +2291,27 @@ def test_feature_channel_can_disable_tunnel_mechanical_query(tmp_path, monkeypat
             "enabled": True,
             "wechat_group_room_id": "wgr_feature",
             "allow_tunnel_mechanical": False,
-            "allow_duty_query": True,
-            "allow_roster_import": True,
+            "allow_duty_query": False,
+            "allow_roster_import": False,
         },
     )
 
     response = client.post(
         "/api/wechat-query",
         headers={"X-Duty-Query-Token": "unit-token"},
-        json={"text": "隧道机电", "stable_room_id": "wgr_feature"},
+        json={"text": "巡查记录", "stable_room_id": "wgr_feature"},
     )
 
-    assert response.status_code == 403
-    assert response.json()["detail"] == "该功能未在功能通道启用"
+    assert response.status_code == 200
+    assert response.json()["query_type"] == "patrol_record_template"
+    config = client.get("/api/feature-channel-config").json()["config"]
+    assert config["enabled"] is True
+    assert config["allow_tunnel_mechanical"] is True
+    assert config["allow_duty_query"] is True
+    assert config["allow_roster_import"] is True
 
 
-def test_feature_channel_can_be_disabled(tmp_path, monkeypatch):
+def test_feature_channel_legacy_enabled_switch_does_not_disable_wechat_commands(tmp_path, monkeypatch):
     monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
@@ -2210,10 +2329,78 @@ def test_feature_channel_can_be_disabled(tmp_path, monkeypatch):
     response = client.post(
         "/api/wechat-query",
         headers={"X-Duty-Query-Token": "unit-token"},
-        json={"text": "闅ч亾鏈虹數", "stable_room_id": "wgr_feature"},
+        json={"text": "巡查记录", "stable_room_id": "wgr_feature"},
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 200
+    assert response.json()["query_type"] == "patrol_record_template"
+    assert client.get("/api/feature-channel-config").json()["config"]["enabled"] is True
+
+
+def test_wechat_interaction_config_controls_triggers_and_templates(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    save_response = client.post(
+        "/api/wechat-interaction-config",
+        json={
+            "patrol_record_triggers": ["记录模板"],
+            "patrol_record_template": "查询商邱宏巡查记录 2026-07-01至2026-07-31",
+            "tunnel_template_triggers": ["录入模板"],
+            "tunnel_template": "自定义录入 日期{date} 负责人罗富耀 记录人商邱宏 天气晴",
+            "tunnel_modify_template_triggers": ["修改入口"],
+            "tunnel_modify_template": "自定义修改 日期{date} 负责人罗富耀 记录人商邱宏 天气晴 修改日期为{date}",
+        },
+    )
+    template_response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "记录模板", "stable_room_id": "wgr_any"},
+    )
+    old_trigger_response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "巡查记录", "stable_room_id": "wgr_any"},
+    )
+    tunnel_template_response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "录入模板", "stable_room_id": "wgr_any"},
+    )
+
+    assert save_response.status_code == 200
+    config = save_response.json()["config"]
+    assert config["patrol_record_triggers"] == ["记录模板"]
+    assert config["patrol_record_template"] == "查询商邱宏巡查记录 2026-07-01至2026-07-31"
+    assert config["defaults"]["patrol_record_template"] == "查询商邱宏巡查记录 2026-07-01至2026-07-31"
+    assert config["tunnel_template"] == "自定义录入 日期{date} 负责人罗富耀 记录人商邱宏 天气晴"
+    assert config["tunnel_modify_template"] == "自定义修改 日期{date} 负责人罗富耀 记录人商邱宏 天气晴 修改日期为{date}"
+    assert "监控查询菜单" in config["menu_preview"]
+    assert template_response.status_code == 200
+    assert template_response.json()["reply"] == "查询商邱宏巡查记录 2026-07-01至2026-07-31"
+    assert old_trigger_response.status_code == 200
+    assert old_trigger_response.json()["query_type"] == "patrol_record"
+    assert "没有识别到姓名" in old_trigger_response.json()["reply"]
+    assert tunnel_template_response.status_code == 200
+    assert tunnel_template_response.json()["query_type"] == "tunnel_mechanical_template"
+    assert tunnel_template_response.json()["reply"] == "自定义录入 日期2026-08-04 负责人罗富耀 记录人商邱宏 天气晴"
+
+    test_response = client.post("/api/wechat-interaction-config/test")
+    assert test_response.status_code == 200
+    test_body = test_response.json()
+    assert test_body["success"] is True
+    assert len(test_body["results"]) == 3
+    assert "修改入口" in test_body["summary"]
+    assert "自定义修改 日期2026-08-04" in test_body["summary"]
+    assert any(item["query_type"] == "tunnel_modify_template" for item in test_body["results"])
+
+    logs_response = client.get("/api/wechat-interaction-logs?limit=5")
+    assert logs_response.status_code == 200
+    logs = logs_response.json()["logs"]
+    assert logs
+    assert logs[0]["command_text"] in {"记录模板", "巡查记录", "模板", "修改模板", "修改入口"}
+    assert "reply_preview" in logs[0]
 
 
 def test_wechat_query_help_returns_numbered_menu(tmp_path, monkeypatch):
@@ -2237,6 +2424,8 @@ def test_wechat_query_help_returns_numbered_menu(tmp_path, monkeypatch):
     assert "1. 查询我的监控" in body["reply"]
     assert "7. 查询我的绑定" in body["reply"]
     assert "9. 查询2026-07-24机电" in body["reply"]
+    assert "发送“巡查记录”可获取巡查记录查询模板" in body["reply"]
+    assert "查询商邱宏巡查记录 2026-07-01至2026-07-31" in body["reply"]
     assert "回复序号即可执行" in body["reply"]
     assert "录入格式：" not in body["reply"]
     assert "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人商邱宏 天气晴" not in body["reply"]
@@ -2466,6 +2655,92 @@ def test_wechat_query_tunnel_mechanical_result_sends_image(tmp_path, monkeypatch
     assert date_body["checkTime"] == "2026-07-22"
     assert date_body["image_url"] == "/api/uploads/result-2026-07-22.png"
     assert captured == ["2026-07-23", "2026-07-22"]
+
+
+def test_wechat_query_patrol_record_template_and_date_range_image(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post("/api/personnel", json={"names": ["商邱宏"]})
+    client.post(
+        "/api/patrol-warning-config",
+        json={
+            "login_url": "https://example.test/login",
+            "warning_url": "https://example.test/mobile/warninginfo/findPage",
+            "username": "station-user",
+            "password": "secret",
+            "route_code": "S41",
+        },
+    )
+    captured: dict[str, object] = {}
+
+    async def fake_fetch(config, tz, *, name, token, token_expires_at, limit, cache_path=None):
+        captured.update({"name": name, "limit": limit, "cache_path": cache_path})
+        return SimpleNamespace(
+            token="new-token",
+            token_expires_at="2026-08-04T22:00:00+08:00",
+            records=[
+                {"id": "r-1", "start_time": "2026-07-01T08:01:00+08:00", "end_time": "2026-07-01T09:29:00+08:00", "direction": "上行", "responsible_person": "商邱宏", "recorder": "王德刚"},
+                {"id": "r-2", "start_time": "2026-07-01T09:30:00+08:00", "end_time": "2026-07-01T10:02:00+08:00", "direction": "下行", "responsible_person": "罗越", "recorder": "商邱宏"},
+                {"id": "r-3", "start_time": "2026-08-01T09:00:00+08:00", "end_time": "2026-08-01T10:00:00+08:00", "direction": "双向", "responsible_person": "商邱宏", "recorder": "王德刚"},
+            ],
+            stats={"matched_rows": 3},
+        )
+
+    monkeypatch.setattr(main_module, "fetch_patrol_records_by_name_result", fake_fetch)
+    template_response = client.post("/api/wechat-query", headers={"X-Duty-Query-Token": "unit-token"}, json={"text": "巡查记录"})
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "查询商邱宏巡查记录 2026-07-01至2026-07-31"},
+    )
+
+    assert template_response.status_code == 200
+    assert template_response.json()["query_type"] == "patrol_record_template"
+    assert template_response.json()["reply"] == "查询商邱宏巡查记录 2026-07-01至2026-07-31"
+    assert "巡查记录查询格式" not in template_response.json()["reply"]
+    assert "示例：" not in template_response.json()["reply"]
+    assert response.status_code == 200
+    body = response.json()
+    assert body["query_type"] == "patrol_record"
+    assert body["count"] == 2
+    assert "实际次数 1 次" in body["reply"]
+    assert body["start_date"] == "2026-07-01"
+    assert body["end_date"] == "2026-07-31"
+    assert body["image_url"].startswith("/api/uploads/patrol-record-")
+    assert (tmp_path / "uploads" / body["image_url"].rsplit("/", 1)[-1]).read_bytes().startswith(b"\x89PNG")
+    assert captured["name"] == "商邱宏"
+    assert captured["limit"] == 5000
+
+
+def test_wechat_bridge_sends_patrol_record_image(tmp_path, monkeypatch):
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    uploads = tmp_path / "uploads"
+    uploads.mkdir()
+    image_path = uploads / "patrol-record-test.png"
+    image_path.write_bytes(b"\x89PNG\r\n")
+    sent_text: list[str] = []
+    sent_image: list[str] = []
+
+    async def fake_build(repo_arg, query, *, uploads):
+        return {"success": True, "replies": ["查询完成"], "image_url": "/api/uploads/patrol-record-test.png"}
+
+    class DummyManager:
+        def send_text(self, room_id, text, *, mention_ids=None):
+            sent_text.append(text)
+
+        def send_image(self, room_id, path):
+            sent_image.append(path)
+
+    monkeypatch.setattr(main_module, "_build_wechat_query_response", fake_build)
+    monkeypatch.setattr(main_module, "get_wechat_bridge_manager", lambda: DummyManager())
+    main_module._handle_wechat_bridge_message(
+        repo,
+        uploads,
+        {"room_id": "room@@runtime", "stable_room_id": "wgr_feature", "text": "@闷葫芦 查询商邱宏巡查记录 2026-07-01至2026-07-31", "is_at": True},
+    )
+    assert sent_text == ["查询完成"]
+    assert sent_image == [str(image_path)]
 
 
 def test_wechat_bridge_group_command_requires_at_mention(tmp_path, monkeypatch):
@@ -3891,6 +4166,72 @@ def test_patrol_warning_config_preserves_password_and_hides_it(tmp_path):
     assert repo.get_patrol_warning_config()["password"] == "secret"
 
 
+def test_patrol_warning_config_reschedules_countdown_when_interval_changes(tmp_path, monkeypatch):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_patrol_warning_config(
+        enabled=True,
+        poll_interval_minutes=10,
+        login_url="https://example.test/login",
+        warning_url="https://example.test/warninginfo/findPage",
+        username="station-user",
+        password="secret",
+    )
+    repo.save_patrol_warning_state(
+        last_checked_at="2026-07-22T08:00:00+08:00",
+        next_check_at="2026-07-22T08:12:00+08:00",
+        failure_count=2,
+        backoff_until="2026-07-22T08:20:00+08:00",
+        last_error="HTTP 429",
+    )
+    monkeypatch.setattr(
+        main_module,
+        "next_poll_time",
+        lambda now, interval_minutes: now + timedelta(minutes=interval_minutes),
+    )
+
+    response = client.post(
+        "/api/patrol-warning-config",
+        json={
+            "enabled": True,
+            "login_url": "https://example.test/login",
+            "warning_url": "https://example.test/warninginfo/findPage",
+            "username": "station-user",
+            "password": "",
+            "poll_interval_minutes": 2,
+        },
+    )
+
+    assert response.status_code == 200
+    state = repo.get_patrol_warning_state()
+    assert state["next_check_at"]
+    assert state["next_check_at"] != "2026-07-22T08:12:00+08:00"
+    assert state["backoff_until"] == ""
+    assert state["failure_count"] == 0
+    assert state["last_error"] == ""
+
+    initial_state = repo.get_patrol_warning_state()
+    assert initial_state["next_check_at"]
+
+    disabled_response = client.post(
+        "/api/patrol-warning-config",
+        json={
+            "enabled": False,
+            "login_url": "https://example.test/login",
+            "warning_url": "https://example.test/warninginfo/findPage",
+            "username": "station-user",
+            "password": "",
+            "poll_interval_minutes": 2,
+        },
+    )
+
+    assert disabled_response.status_code == 200
+    state = repo.get_patrol_warning_state()
+    assert state["next_check_at"] == ""
+    assert state["backoff_until"] == ""
+
+
 def test_patrol_warning_state_hides_cached_token(tmp_path):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
@@ -3985,6 +4326,70 @@ def test_patrol_warning_config_test_uses_saved_password(tmp_path, monkeypatch):
     state = client.get("/api/patrol-warning-config").json()["state"]
     assert state["warning"]["key"] == "warning-1"
     assert state["warning_key"] == ""
+
+
+def test_patrol_warning_orange_records_query_uses_saved_config_and_token_cache(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def fake_fetch_patrol_records_by_name_result(config, tz, *, name, token, token_expires_at, limit, cache_path=None):
+        captured.update(
+            {
+                "config": config,
+                "name": name,
+                "token": token,
+                "token_expires_at": token_expires_at,
+                "limit": limit,
+                "cache_path": cache_path,
+            }
+        )
+        return SimpleNamespace(
+            token="new-token",
+            token_expires_at="2026-07-22T22:00:00+08:00",
+            records=[
+                {
+                    "id": "record-1",
+                    "route_code": "S41",
+                    "route_name": "南涧－宁洱",
+                    "responsible_person": "商邱宏",
+                    "recorder": "陈刚",
+                }
+            ],
+            stats={"total_rows": 1, "loaded_rows": 1, "route_matched_rows": 1, "matched_rows": 1},
+        )
+
+    monkeypatch.setattr(main_module, "fetch_patrol_records_by_name_result", fake_fetch_patrol_records_by_name_result)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/patrol-warning-config",
+        json={
+            "login_url": "https://example.test/login",
+            "warning_url": "https://example.test/mobile/warninginfo/findPage",
+            "username": "station-user",
+            "password": "secret",
+            "route_code": "S41",
+        },
+    )
+    app.state.repo.save_patrol_warning_state(token="cached-token", token_expires_at="2026-07-22T21:00:00+08:00")
+
+    response = client.get("/api/patrol-warning/orange-records", params={"name": "商邱宏", "limit": 1000})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["records"][0]["responsible_person"] == "商邱宏"
+    assert body["stats"]["matched_rows"] == 1
+    assert captured["config"]["password"] == "secret"
+    assert captured["name"] == "商邱宏"
+    assert captured["token"] == "cached-token"
+    assert captured["limit"] == 1000
+    assert str(captured["cache_path"]).endswith("patrol-warning-records-cache.json")
+    assert client.get("/api/patrol-warning-config").json()["state"]["token_configured"] is True
+
+    captured.clear()
+    response = client.get("/api/patrol-warning/orange-records", params={"name": "商邱宏"})
+
+    assert response.status_code == 200
+    assert captured["limit"] == 5000
 
 
 def test_patrol_warning_monitor_backs_off_after_fetch_failure(tmp_path, monkeypatch):
