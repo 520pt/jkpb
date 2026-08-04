@@ -135,7 +135,7 @@ def test_patrol_record_groups_pair_adjacent_records_across_midnight():
     assert _patrol_record_group_count(records) == 1
 
 
-def test_patrol_record_groups_keep_extra_nearby_and_same_direction_records_separate():
+def test_patrol_record_groups_merge_continuous_direction_records():
     records = [
         {
             "id": "r-up-1",
@@ -171,14 +171,12 @@ def test_patrol_record_groups_keep_extra_nearby_and_same_direction_records_separ
 
     groups = _record_groups(records)
 
-    assert [group["count"] for group in groups] == [1, 2, 3, 4]
+    assert [group["count"] for group in groups] == [1, 2]
     assert [[record["id"] for record in group["records"]] for group in groups] == [
-        ["r-up-1", "r-down-1"],
-        ["r-down-2"],
-        ["r-up-2"],
-        ["r-up-3"],
+        ["r-up-1", "r-down-1", "r-down-2"],
+        ["r-up-2", "r-up-3"],
     ]
-    assert _patrol_record_group_count(records) == 4
+    assert _patrol_record_group_count(records) == 2
 
 
 def test_patrol_record_groups_handle_multiple_pairs_and_singletons():

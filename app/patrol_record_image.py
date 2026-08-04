@@ -132,23 +132,21 @@ def _record_groups(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     groups: list[dict[str, Any]] = []
     index = 0
     while index < len(ordered):
-        current = ordered[index]
-        next_record = ordered[index + 1] if index + 1 < len(ordered) else None
-        # Consume at most one adjacent opposite-direction pair. Extra nearby
-        # records, including repeated directions, remain separate counts.
-        if _can_pair(current, next_record):
-            groups.append({"count": len(groups) + 1, "records": [current, next_record]})
-            index += 2
-        else:
-            groups.append({"count": len(groups) + 1, "records": [current]})
+        group_records = [ordered[index]]
+        index += 1
+        while index < len(ordered) and _can_join(group_records[-1], ordered[index]):
+            group_records.append(ordered[index])
             index += 1
+        groups.append({"count": len(groups) + 1, "records": group_records})
     return groups
 
 
-def _can_pair(current: dict[str, Any], following: dict[str, Any] | None) -> bool:
+def _can_join(current: dict[str, Any], following: dict[str, Any] | None) -> bool:
     if not following:
         return False
-    if {str(current.get("direction") or ""), str(following.get("direction") or "")} != {"上行", "下行"}:
+    if str(current.get("direction") or "") not in {"上行", "下行"}:
+        return False
+    if str(following.get("direction") or "") not in {"上行", "下行"}:
         return False
     current_start = _record_datetime(current, "start_time", "end_time")
     current_end = _record_datetime(current, "end_time", "start_time")

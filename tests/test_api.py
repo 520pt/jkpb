@@ -138,6 +138,7 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'id="orangeWarningStatsPagination"' in html
     assert 'id="orangeWarningStatsMeta"' in html
     assert 'function orangeWarningStatsGroups' in html
+    assert 'function orangeWarningCanJoinItems' in html
     assert 'function orangeWarningStatsRowsFromGroups' in html
     assert 'function orangeWarningStatsRows' in html
     assert 'isGroupStart: highlighted && index === 0 && !previousHighlighted' in html

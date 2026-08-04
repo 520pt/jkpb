@@ -6457,25 +6457,24 @@
       return items;
     }
 
-    function orangeWarningCanPairItems(current, next) {
+    function orangeWarningCanJoinItems(current, next) {
       const windowMs = ORANGE_WARNING_PAIR_WINDOW_MINUTES * 60 * 1000;
       return Boolean(
         next
+          && (current.direction === "上行" || current.direction === "下行")
+          && (next.direction === "上行" || next.direction === "下行")
           && current.timestamp
           && next.timestamp
           && current.endTimestamp
           && next.timestamp >= current.timestamp
           && next.timestamp - current.endTimestamp >= 0
           && next.timestamp - current.endTimestamp <= windowMs
-          && (
-            (current.direction === "上行" && next.direction === "下行")
-            || (current.direction === "下行" && next.direction === "上行")
-          )
       );
     }
 
     function orangeWarningSummarizeRecords(records) {
       const items = orangeWarningComparableRecords(records);
+      const groups = orangeWarningStatsGroups(records);
       const stats = {
         recordCount: items.length,
         upCount: 0,
@@ -6485,34 +6484,29 @@
         singleUpCount: 0,
         singleDownCount: 0,
         otherCount: 0,
-        mergedCount: 0,
+        mergedCount: groups.length,
       };
-      for (let index = 0; index < items.length; index += 1) {
-        const current = items[index];
+      items.forEach((current) => {
         if (current.direction === "双向") {
           stats.bidirectionalCount += 1;
-          stats.mergedCount += 1;
-          continue;
+          return;
         }
         if (current.direction !== "上行" && current.direction !== "下行") {
           stats.otherCount += 1;
-          stats.mergedCount += 1;
-          continue;
+          return;
         }
         if (current.direction === "上行") stats.upCount += 1;
         if (current.direction === "下行") stats.downCount += 1;
-        const next = items[index + 1];
-        const paired = orangeWarningCanPairItems(current, next);
-        if (paired) {
+      });
+      groups.forEach((group) => {
+        if ((group.records || []).length > 1) {
           stats.pairedCount += 1;
-          stats.mergedCount += 1;
-          index += 1;
-          continue;
+        } else if (group.records && group.records[0]) {
+          const direction = orangeWarningRecordDirection(group.records[0]);
+          if (direction === "上行") stats.singleUpCount += 1;
+          if (direction === "下行") stats.singleDownCount += 1;
         }
-        stats.mergedCount += 1;
-        if (current.direction === "上行") stats.singleUpCount += 1;
-        if (current.direction === "下行") stats.singleDownCount += 1;
-      }
+      });
       return stats;
     }
 
@@ -6522,19 +6516,13 @@
       let count = 0;
       for (let index = 0; index < items.length; index += 1) {
         const current = items[index];
-        const next = items[index + 1];
         count += 1;
-        // Merge one adjacent opposite-direction pair only; extra nearby or
-        // repeated-direction records remain separate actual counts.
-        if (
-          (current.direction === "上行" || current.direction === "下行")
-          && orangeWarningCanPairItems(current, next)
-        ) {
-          groups.push({ count, records: [current.record, next.record] });
+        const groupRecords = [current.record];
+        while (index + 1 < items.length && orangeWarningCanJoinItems(items[index], items[index + 1])) {
           index += 1;
-          continue;
+          groupRecords.push(items[index].record);
         }
-        groups.push({ count, records: [current.record] });
+        groups.push({ count, records: groupRecords });
       }
       return groups;
     }
