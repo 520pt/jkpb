@@ -2597,7 +2597,7 @@
           <div id="orangeWarningHero" class="orange-warning-search-hero">
             <div class="orange-warning-search-brand">橙色预警记录</div>
             <div class="orange-warning-search-box">
-              <input id="orangeWarningName" placeholder="输入姓名，例如 商邱宏" />
+              <input id="orangeWarningName" placeholder="输入姓名，例如 张三" />
               <button class="primary" id="queryOrangeWarningBtn" type="button">查询</button>
             </div>
             <div id="orangeWarningHeroMeta" class="orange-warning-search-meta">全部日期 · 结果会按多列卡片展示</div>
@@ -2757,7 +2757,7 @@
                       <textarea id="wechatPatrolRecordTriggers" rows="2" placeholder="巡查记录"></textarea>
                     </label>
                     <label>回复模板
-                      <textarea id="wechatPatrolRecordTemplate" rows="2" placeholder="查询商邱宏巡查记录 2026-07-01至2026-07-31"></textarea>
+                      <textarea id="wechatPatrolRecordTemplate" rows="2" placeholder="查询张三巡查记录 2026-07-01至2026-07-31"></textarea>
                     </label>
                   </div>
                   <div class="item">
@@ -2766,7 +2766,7 @@
                       <textarea id="wechatTunnelTemplateTriggers" rows="2" placeholder="模板"></textarea>
                     </label>
                     <label>回复模板
-                      <textarea id="wechatTunnelTemplate" rows="2" placeholder="隧道机电录入 日期{date} 负责人罗富耀 记录人商邱宏 天气晴"></textarea>
+                      <textarea id="wechatTunnelTemplate" rows="2" placeholder="隧道机电录入 日期{date} 负责人罗富耀 记录人张三 天气晴"></textarea>
                     </label>
                   </div>
                   <div class="item">
@@ -2775,7 +2775,7 @@
                       <textarea id="wechatTunnelModifyTemplateTriggers" rows="2" placeholder="修改模板"></textarea>
                     </label>
                     <label>回复模板
-                      <textarea id="wechatTunnelModifyTemplate" rows="2" placeholder="隧道机电修改 日期{date} 负责人罗富耀 记录人商邱宏 天气晴 修改日期为{date}"></textarea>
+                      <textarea id="wechatTunnelModifyTemplate" rows="2" placeholder="隧道机电修改 日期{date} 负责人罗富耀 记录人张三 天气晴 修改日期为{date}"></textarea>
                     </label>
                   </div>
                 </div>
@@ -5828,11 +5828,11 @@
       const defaults = state.featureChannelDefaults || {};
       return {
         patrol_record_triggers: defaults.patrol_record_triggers || ["巡查记录", "查询巡查记录", "查巡查记录", "巡查记录查询"],
-        patrol_record_template: defaults.patrol_record_template || "查询商邱宏巡查记录 2026-07-01至2026-07-31",
+        patrol_record_template: defaults.patrol_record_template || "查询张三巡查记录 2026-07-01至2026-07-31",
         tunnel_template_triggers: defaults.tunnel_template_triggers || ["模板"],
-        tunnel_template: defaults.tunnel_template || "隧道机电录入 日期{date} 负责人罗富耀 记录人商邱宏 天气晴",
+        tunnel_template: defaults.tunnel_template || "隧道机电录入 日期{date} 负责人罗富耀 记录人张三 天气晴",
         tunnel_modify_template_triggers: defaults.tunnel_modify_template_triggers || ["修改", "修改模板", "改模板"],
-        tunnel_modify_template: defaults.tunnel_modify_template || "隧道机电修改 日期{date} 负责人罗富耀 记录人商邱宏 天气晴 修改日期为{date}"
+        tunnel_modify_template: defaults.tunnel_modify_template || "隧道机电修改 日期{date} 负责人罗富耀 记录人张三 天气晴 修改日期为{date}"
       };
     }
 
@@ -5959,11 +5959,11 @@
       state.featureChannelRooms = normalizeFeatureChannelRooms(config.notification_rooms || []);
       if (config.menu_preview) $("wechatInteractionMenuPreview").textContent = config.menu_preview || "";
       textareaFromList("wechatPatrolRecordTriggers", config.patrol_record_triggers || ["巡查记录"]);
-      $("wechatPatrolRecordTemplate").value = config.patrol_record_template || "查询商邱宏巡查记录 2026-07-01至2026-07-31";
+      $("wechatPatrolRecordTemplate").value = config.patrol_record_template || "查询张三巡查记录 2026-07-01至2026-07-31";
       textareaFromList("wechatTunnelTemplateTriggers", config.tunnel_template_triggers || ["模板"]);
-      $("wechatTunnelTemplate").value = config.tunnel_template || "隧道机电录入 日期{date} 负责人罗富耀 记录人商邱宏 天气晴";
+      $("wechatTunnelTemplate").value = config.tunnel_template || "隧道机电录入 日期{date} 负责人罗富耀 记录人张三 天气晴";
       textareaFromList("wechatTunnelModifyTemplateTriggers", config.tunnel_modify_template_triggers || ["修改模板"]);
-      $("wechatTunnelModifyTemplate").value = config.tunnel_modify_template || "隧道机电修改 日期{date} 负责人罗富耀 记录人商邱宏 天气晴 修改日期为{date}";
+      $("wechatTunnelModifyTemplate").value = config.tunnel_modify_template || "隧道机电修改 日期{date} 负责人罗富耀 记录人张三 天气晴 修改日期为{date}";
       $("wechatInteractionNotificationRooms").textContent = state.featureChannelRooms.length
         ? state.featureChannelRooms.map((room) => cleanWechatVisibleName(room.name, room.id) || room.id).join("、")
         : "未在消息通知渠道配置个人微信群";

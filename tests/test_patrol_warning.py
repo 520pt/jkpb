@@ -63,7 +63,7 @@ def test_normalizes_patrol_record_fields_from_api_row():
             "InspectionAllDirection": "2",
             "StartingStake": 106.67,
             "EndStake": 137.42,
-            "ResponsiblePerson": "李文杰 商邱宏",
+            "ResponsiblePerson": "李文杰 张三",
             "Recorder": "陈刚",
             "InspectionAlstime": "2026-07-26T10:44:21+08:00",
             "InspectionAletime": "2026-07-26T11:02:00+08:00",
@@ -76,7 +76,7 @@ def test_normalizes_patrol_record_fields_from_api_row():
     assert record["route_code"] == "S41"
     assert record["direction"] == "下行"
     assert record["stake_range"] == "106.67 ~ 137.42"
-    assert record["responsible_person"] == "李文杰 商邱宏"
+    assert record["responsible_person"] == "李文杰 张三"
     assert record["recorder"] == "陈刚"
     assert record["status"] == "已完成"
 
@@ -89,7 +89,7 @@ def test_patrol_record_groups_pair_adjacent_end_and_start_times():
             "end_time": "2026-07-13T09:29:00+08:00",
             "direction": "上行",
             "responsible_person": "罗森",
-            "recorder": "商邱宏",
+            "recorder": "张三",
         },
         {
             "id": "r-2",
@@ -97,7 +97,7 @@ def test_patrol_record_groups_pair_adjacent_end_and_start_times():
             "end_time": "2026-07-13T10:02:00+08:00",
             "direction": "下行",
             "responsible_person": "罗森",
-            "recorder": "商邱宏",
+            "recorder": "张三",
         },
     ]
 
@@ -116,7 +116,7 @@ def test_patrol_record_groups_handle_multiple_pairs_and_singletons():
             "end_time": "2026-07-13T08:45:00+08:00",
             "direction": "上行",
             "responsible_person": "罗森",
-            "recorder": "商邱宏",
+            "recorder": "张三",
         },
         {
             "id": "r-2",
@@ -124,7 +124,7 @@ def test_patrol_record_groups_handle_multiple_pairs_and_singletons():
             "end_time": "2026-07-13T09:02:00+08:00",
             "direction": "下行",
             "responsible_person": "罗森",
-            "recorder": "商邱宏",
+            "recorder": "张三",
         },
         {
             "id": "r-3",
@@ -132,7 +132,7 @@ def test_patrol_record_groups_handle_multiple_pairs_and_singletons():
             "end_time": "2026-07-13T10:30:00+08:00",
             "direction": "双向",
             "responsible_person": "罗森",
-            "recorder": "商邱宏",
+            "recorder": "张三",
         },
         {
             "id": "r-4",
@@ -140,7 +140,7 @@ def test_patrol_record_groups_handle_multiple_pairs_and_singletons():
             "end_time": "2026-07-13T11:28:00+08:00",
             "direction": "上行",
             "responsible_person": "罗森",
-            "recorder": "商邱宏",
+            "recorder": "张三",
         },
         {
             "id": "r-5",
@@ -148,7 +148,7 @@ def test_patrol_record_groups_handle_multiple_pairs_and_singletons():
             "end_time": "2026-07-13T11:50:00+08:00",
             "direction": "下行",
             "responsible_person": "罗森",
-            "recorder": "商邱宏",
+            "recorder": "张三",
         },
     ]
 
@@ -170,7 +170,7 @@ def test_patrol_record_query_filters_route_and_name(monkeypatch):
             {
                 "Id": "match-responsible",
                 "RouteNumber": "S41",
-                "ResponsiblePerson": "李文杰 商邱宏",
+                "ResponsiblePerson": "李文杰 张三",
                 "Recorder": "陈刚",
                 "InspectionAlstime": "2026-07-26T10:44:21+08:00",
             },
@@ -178,13 +178,13 @@ def test_patrol_record_query_filters_route_and_name(monkeypatch):
                 "Id": "match-recorder",
                 "RouteNumber": "S41",
                 "ResponsiblePerson": "罗森",
-                "Recorder": "商邱宏",
+                "Recorder": "张三",
                 "InspectionAlstime": "2026-07-25T10:44:21+08:00",
             },
             {
                 "Id": "wrong-route",
                 "RouteNumber": "G214",
-                "ResponsiblePerson": "商邱宏",
+                "ResponsiblePerson": "张三",
                 "Recorder": "陈刚",
                 "InspectionAlstime": "2026-07-24T10:44:21+08:00",
             },
@@ -195,7 +195,7 @@ def test_patrol_record_query_filters_route_and_name(monkeypatch):
         fetch_patrol_records_by_name_result(
             {"route_code": "S41"},
             TZ,
-            name="商邱宏",
+            name="张三",
             token="cached-token",
             token_expires_at="2026-07-22T22:00:00+08:00",
             now=datetime.fromisoformat("2026-07-22T08:00:00+08:00"),
@@ -217,7 +217,7 @@ def test_patrol_record_query_reuses_local_cache_and_fetches_incrementally(tmp_pa
             {
                 "Id": "old-record",
                 "RouteNumber": "S41",
-                "ResponsiblePerson": "商邱宏",
+                "ResponsiblePerson": "张三",
                 "Recorder": "陈刚",
                 "InspectionAlstime": "2026-07-25T10:44:21+08:00",
             }
@@ -226,7 +226,7 @@ def test_patrol_record_query_reuses_local_cache_and_fetches_incrementally(tmp_pa
             {
                 "Id": "new-record",
                 "RouteNumber": "S41",
-                "ResponsiblePerson": "商邱宏",
+                "ResponsiblePerson": "张三",
                 "Recorder": "陈刚",
                 "InspectionAlstime": "2026-07-26T10:44:21+08:00",
             }
@@ -245,7 +245,7 @@ def test_patrol_record_query_reuses_local_cache_and_fetches_incrementally(tmp_pa
         fetch_patrol_records_by_name_result(
             {"warning_url": "https://example.test/mobile/warninginfo/findPage"},
             TZ,
-            name="商邱宏",
+            name="张三",
             token="cached-token",
             token_expires_at="2026-07-22T22:00:00+08:00",
             now=datetime.fromisoformat("2026-07-22T08:00:00+08:00"),
@@ -256,7 +256,7 @@ def test_patrol_record_query_reuses_local_cache_and_fetches_incrementally(tmp_pa
         fetch_patrol_records_by_name_result(
             {"warning_url": "https://example.test/mobile/warninginfo/findPage"},
             TZ,
-            name="商邱宏",
+            name="张三",
             token="cached-token",
             token_expires_at="2026-07-22T22:00:00+08:00",
             now=datetime.fromisoformat("2026-07-22T08:00:00+08:00"),
@@ -279,7 +279,7 @@ def test_patrol_record_query_uses_cache_when_login_fails(tmp_path, monkeypatch):
             {
                 "Id": "cached-record",
                 "RouteNumber": "S41",
-                "ResponsiblePerson": "商邱宏",
+                "ResponsiblePerson": "张三",
                 "Recorder": "陈刚",
                 "InspectionAlstime": "2026-07-25T10:44:21+08:00",
             }
@@ -294,7 +294,7 @@ def test_patrol_record_query_uses_cache_when_login_fails(tmp_path, monkeypatch):
         fetch_patrol_records_by_name_result(
             {"warning_url": "https://example.test/mobile/warninginfo/findPage"},
             TZ,
-            name="商邱宏",
+            name="张三",
             token="cached-token",
             token_expires_at="2026-07-22T22:00:00+08:00",
             now=datetime.fromisoformat("2026-07-22T08:00:00+08:00"),
@@ -307,7 +307,7 @@ def test_patrol_record_query_uses_cache_when_login_fails(tmp_path, monkeypatch):
         fetch_patrol_records_by_name_result(
             {"warning_url": "https://example.test/mobile/warninginfo/findPage"},
             TZ,
-            name="商邱宏",
+            name="张三",
             token="",
             token_expires_at="",
             now=datetime.fromisoformat("2026-07-23T08:00:00+08:00"),

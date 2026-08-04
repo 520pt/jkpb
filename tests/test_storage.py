@@ -504,20 +504,20 @@ def test_wechat_interaction_config_roundtrip(tmp_path: Path):
 
     repo.save_wechat_interaction_config(
         patrol_record_triggers=["巡查记录", "查巡查"],
-        patrol_record_template="查询商邱宏巡查记录 2026-07-01至2026-07-31",
+        patrol_record_template="查询张三巡查记录 2026-07-01至2026-07-31",
         tunnel_template_triggers=["模板", "录入模板"],
-        tunnel_template="隧道机电录入 日期{date} 负责人罗富耀 记录人商邱宏 天气晴",
+        tunnel_template="隧道机电录入 日期{date} 负责人罗富耀 记录人张三 天气晴",
         tunnel_modify_template_triggers=["修改模板", "改模板"],
-        tunnel_modify_template="隧道机电修改 日期{date} 负责人罗富耀 记录人商邱宏 天气晴 修改日期为{date}",
+        tunnel_modify_template="隧道机电修改 日期{date} 负责人罗富耀 记录人张三 天气晴 修改日期为{date}",
     )
 
     assert repo.get_wechat_interaction_config() == {
         "patrol_record_triggers": ["巡查记录", "查巡查"],
-        "patrol_record_template": "查询商邱宏巡查记录 2026-07-01至2026-07-31",
+        "patrol_record_template": "查询张三巡查记录 2026-07-01至2026-07-31",
         "tunnel_template_triggers": ["模板", "录入模板"],
-        "tunnel_template": "隧道机电录入 日期{date} 负责人罗富耀 记录人商邱宏 天气晴",
+        "tunnel_template": "隧道机电录入 日期{date} 负责人罗富耀 记录人张三 天气晴",
         "tunnel_modify_template_triggers": ["修改模板", "改模板"],
-        "tunnel_modify_template": "隧道机电修改 日期{date} 负责人罗富耀 记录人商邱宏 天气晴 修改日期为{date}",
+        "tunnel_modify_template": "隧道机电修改 日期{date} 负责人罗富耀 记录人张三 天气晴 修改日期为{date}",
     }
 
 
@@ -527,11 +527,11 @@ def test_wechat_interaction_logs_roundtrip(tmp_path: Path):
         room_id="room-1",
         room_name="测试群",
         sender_id="sender-1",
-        sender_name="商邱宏",
+        sender_name="张三",
         command_text="巡查记录",
         query_type="patrol_record_template",
         status="success",
-        reply_text="查询商邱宏巡查记录 2026-07-01至2026-07-31",
+        reply_text="查询张三巡查记录 2026-07-01至2026-07-31",
         error="",
     )
 
@@ -542,11 +542,11 @@ def test_wechat_interaction_logs_roundtrip(tmp_path: Path):
             "room_id": "room-1",
             "room_name": "测试群",
             "sender_id": "sender-1",
-            "sender_name": "商邱宏",
+            "sender_name": "张三",
             "command_text": "巡查记录",
             "query_type": "patrol_record_template",
             "status": "success",
-            "reply_text": "查询商邱宏巡查记录 2026-07-01至2026-07-31",
+            "reply_text": "查询张三巡查记录 2026-07-01至2026-07-31",
             "error": "",
             "created_at": logs[0]["created_at"],
         }

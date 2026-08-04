@@ -73,11 +73,11 @@ TUNNEL_MECHANICAL_KEEPALIVE_ENABLED = os.getenv("TUNNEL_MECHANICAL_KEEPALIVE_ENA
 TUNNEL_MECHANICAL_KEEPALIVE_INTERVAL_MINUTES = max(5, int(os.getenv("TUNNEL_MECHANICAL_KEEPALIVE_INTERVAL_MINUTES", "30") or 30))
 TUNNEL_MECHANICAL_KEEPALIVE_REFRESH_BEFORE_MINUTES = max(5, int(os.getenv("TUNNEL_MECHANICAL_KEEPALIVE_REFRESH_BEFORE_MINUTES", "30") or 30))
 DEFAULT_PATROL_RECORD_TRIGGERS = ["巡查记录", "查询巡查记录", "查巡查记录", "巡查记录查询"]
-DEFAULT_PATROL_RECORD_TEMPLATE = "查询商邱宏巡查记录 2026-07-01至2026-07-31"
+DEFAULT_PATROL_RECORD_TEMPLATE = "查询张三巡查记录 2026-07-01至2026-07-31"
 DEFAULT_TUNNEL_TEMPLATE_TRIGGERS = ["模板"]
 DEFAULT_TUNNEL_MODIFY_TEMPLATE_TRIGGERS = ["修改", "修改模板", "改模板"]
-DEFAULT_TUNNEL_TEMPLATE = "隧道机电录入 日期{date} 负责人罗富耀 记录人商邱宏 天气晴"
-DEFAULT_TUNNEL_MODIFY_TEMPLATE = "隧道机电修改 日期{date} 负责人罗富耀 记录人商邱宏 天气晴 修改日期为{date}"
+DEFAULT_TUNNEL_TEMPLATE = "隧道机电录入 日期{date} 负责人罗富耀 记录人张三 天气晴"
+DEFAULT_TUNNEL_MODIFY_TEMPLATE = "隧道机电修改 日期{date} 负责人罗富耀 记录人张三 天气晴 修改日期为{date}"
 DEFAULT_WECHAT_INTERACTION_CONFIG = {
     "patrol_record_triggers": DEFAULT_PATROL_RECORD_TRIGGERS,
     "patrol_record_template": DEFAULT_PATROL_RECORD_TEMPLATE,
@@ -2556,7 +2556,7 @@ async def _build_wechat_patrol_record_response(
         return {
             "success": False,
             "query_type": "patrol_record",
-            "reply": "没有识别到姓名，请按格式发送：查询商邱宏巡查记录 2026-07-01至2026-07-31",
+            "reply": "没有识别到姓名，请按格式发送：查询张三巡查记录 2026-07-01至2026-07-31",
         }
     if date_range is None:
         return {
@@ -3176,7 +3176,7 @@ def _tunnel_mechanical_wechat_template_reply(
         "修改记录：\n"
         "- 发送“修改模板”获取可复制修改模板\n"
         f"- {_tunnel_mechanical_wechat_modify_template_line(template, target_date, repo=repo)}\n"
-        "- 也可以修改天气、负责人、记录人，例如：修改天气为多云、负责人改为罗富耀、记录人改为商邱宏\n"
+        "- 也可以修改天气、负责人、记录人，例如：修改天气为多云、负责人改为罗富耀、记录人改为张三\n"
         f"登录失效时会自动重新登录；验证码识别失败会自动重试。"
         f"{asset_line}"
         f"{people_line}"
@@ -3656,7 +3656,7 @@ def _wechat_query_help_text() -> str:
         "10. 查看隧道机电录入格式\n"
         "直接回复序号即可执行。\n"
         "发送“巡查记录”可获取巡查记录查询模板。\n"
-        "示例：查询商邱宏巡查记录 2026-07-01至2026-07-31\n"
+        "示例：查询张三巡查记录 2026-07-01至2026-07-31\n"
         "发送“模板”可单独获取隧道机电录入模板。\n"
         "发送“修改模板”可单独获取隧道机电修改模板。\n"
         "发送“机电”可查看隧道机电菜单。\n"
@@ -3671,7 +3671,7 @@ def _wechat_query_unbound_response(query: WechatQueryRequest) -> dict[str, Any]:
     return {
         "success": False,
         "query_type": "unbound",
-        "reply": "还没有识别到“我”对应的人员。可以直接回复“绑定姓名”，例如：绑定商邱宏；也可以改发“查询商邱宏监控”按姓名查询。" + suffix,
+        "reply": "还没有识别到“我”对应的人员。可以直接回复“绑定姓名”，例如：绑定张三；也可以改发“查询张三监控”按姓名查询。" + suffix,
     }
 
 

@@ -2346,11 +2346,11 @@ def test_wechat_interaction_config_controls_triggers_and_templates(tmp_path, mon
         "/api/wechat-interaction-config",
         json={
             "patrol_record_triggers": ["记录模板"],
-            "patrol_record_template": "查询商邱宏巡查记录 2026-07-01至2026-07-31",
+            "patrol_record_template": "查询张三巡查记录 2026-07-01至2026-07-31",
             "tunnel_template_triggers": ["录入模板"],
-            "tunnel_template": "自定义录入 日期{date} 负责人罗富耀 记录人商邱宏 天气晴",
+            "tunnel_template": "自定义录入 日期{date} 负责人罗富耀 记录人张三 天气晴",
             "tunnel_modify_template_triggers": ["修改入口"],
-            "tunnel_modify_template": "自定义修改 日期{date} 负责人罗富耀 记录人商邱宏 天气晴 修改日期为{date}",
+            "tunnel_modify_template": "自定义修改 日期{date} 负责人罗富耀 记录人张三 天气晴 修改日期为{date}",
         },
     )
     template_response = client.post(
@@ -2372,19 +2372,19 @@ def test_wechat_interaction_config_controls_triggers_and_templates(tmp_path, mon
     assert save_response.status_code == 200
     config = save_response.json()["config"]
     assert config["patrol_record_triggers"] == ["记录模板"]
-    assert config["patrol_record_template"] == "查询商邱宏巡查记录 2026-07-01至2026-07-31"
-    assert config["defaults"]["patrol_record_template"] == "查询商邱宏巡查记录 2026-07-01至2026-07-31"
-    assert config["tunnel_template"] == "自定义录入 日期{date} 负责人罗富耀 记录人商邱宏 天气晴"
-    assert config["tunnel_modify_template"] == "自定义修改 日期{date} 负责人罗富耀 记录人商邱宏 天气晴 修改日期为{date}"
+    assert config["patrol_record_template"] == "查询张三巡查记录 2026-07-01至2026-07-31"
+    assert config["defaults"]["patrol_record_template"] == "查询张三巡查记录 2026-07-01至2026-07-31"
+    assert config["tunnel_template"] == "自定义录入 日期{date} 负责人罗富耀 记录人张三 天气晴"
+    assert config["tunnel_modify_template"] == "自定义修改 日期{date} 负责人罗富耀 记录人张三 天气晴 修改日期为{date}"
     assert "监控查询菜单" in config["menu_preview"]
     assert template_response.status_code == 200
-    assert template_response.json()["reply"] == "查询商邱宏巡查记录 2026-07-01至2026-07-31"
+    assert template_response.json()["reply"] == "查询张三巡查记录 2026-07-01至2026-07-31"
     assert old_trigger_response.status_code == 200
     assert old_trigger_response.json()["query_type"] == "patrol_record"
     assert "没有识别到姓名" in old_trigger_response.json()["reply"]
     assert tunnel_template_response.status_code == 200
     assert tunnel_template_response.json()["query_type"] == "tunnel_mechanical_template"
-    assert tunnel_template_response.json()["reply"] == "自定义录入 日期2026-08-04 负责人罗富耀 记录人商邱宏 天气晴"
+    assert tunnel_template_response.json()["reply"] == "自定义录入 日期2026-08-04 负责人罗富耀 记录人张三 天气晴"
 
     test_response = client.post("/api/wechat-interaction-config/test")
     assert test_response.status_code == 200
@@ -2425,15 +2425,15 @@ def test_wechat_query_help_returns_numbered_menu(tmp_path, monkeypatch):
     assert "7. 查询我的绑定" in body["reply"]
     assert "9. 查询2026-07-24机电" in body["reply"]
     assert "发送“巡查记录”可获取巡查记录查询模板" in body["reply"]
-    assert "查询商邱宏巡查记录 2026-07-01至2026-07-31" in body["reply"]
+    assert "查询张三巡查记录 2026-07-01至2026-07-31" in body["reply"]
     assert "回复序号即可执行" in body["reply"]
     assert "录入格式：" not in body["reply"]
-    assert "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人商邱宏 天气晴" not in body["reply"]
+    assert "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人张三 天气晴" not in body["reply"]
     assert body["replies"] == [
         body["reply"],
-        "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人商邱宏 天气晴",
+        "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人张三 天气晴",
     ]
-    assert body["template"] == "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人商邱宏 天气晴"
+    assert body["template"] == "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人张三 天气晴"
 
 
 def test_wechat_query_numbered_menu_selection_runs_command(tmp_path, monkeypatch):
@@ -2489,8 +2489,8 @@ def test_wechat_query_tunnel_mechanical_returns_fill_template(tmp_path, monkeypa
     assert body["query_type"] == "tunnel_mechanical_template"
     assert "隧道机电功能" in body["reply"]
     assert "查询今日机电" in body["reply"]
-    assert body["template"] == "隧道机电录入 日期2026-07-23 负责人罗富耀 记录人商邱宏 天气晴"
-    assert body["replies"][-1] == "隧道机电录入 日期2026-07-23 负责人罗富耀 记录人商邱宏 天气晴"
+    assert body["template"] == "隧道机电录入 日期2026-07-23 负责人罗富耀 记录人张三 天气晴"
+    assert body["replies"][-1] == "隧道机电录入 日期2026-07-23 负责人罗富耀 记录人张三 天气晴"
     assert "当前模板资产：1 条" in body["reply"]
 
 
@@ -2511,9 +2511,9 @@ def test_wechat_query_template_shortcut_returns_tunnel_mechanical_template(tmp_p
     body = response.json()
     assert body["success"] is True
     assert body["query_type"] == "tunnel_mechanical_template"
-    assert body["reply"] == "隧道机电录入 日期2026-07-25 负责人罗富耀 记录人商邱宏 天气晴"
-    assert body["replies"] == ["隧道机电录入 日期2026-07-25 负责人罗富耀 记录人商邱宏 天气晴"]
-    assert body["template"] == "隧道机电录入 日期2026-07-25 负责人罗富耀 记录人商邱宏 天气晴"
+    assert body["reply"] == "隧道机电录入 日期2026-07-25 负责人罗富耀 记录人张三 天气晴"
+    assert body["replies"] == ["隧道机电录入 日期2026-07-25 负责人罗富耀 记录人张三 天气晴"]
+    assert body["template"] == "隧道机电录入 日期2026-07-25 负责人罗富耀 记录人张三 天气晴"
 
 
 def test_wechat_query_modify_shortcut_returns_tunnel_mechanical_modify_template(tmp_path, monkeypatch):
@@ -2534,9 +2534,9 @@ def test_wechat_query_modify_shortcut_returns_tunnel_mechanical_modify_template(
         body = response.json()
         assert body["success"] is True
         assert body["query_type"] == "tunnel_mechanical_modify_template"
-        assert body["reply"] == "隧道机电修改 日期2026-07-25 负责人罗富耀 记录人商邱宏 天气晴 修改日期为2026-07-25"
-        assert body["replies"] == ["隧道机电修改 日期2026-07-25 负责人罗富耀 记录人商邱宏 天气晴 修改日期为2026-07-25"]
-        assert body["template"] == "隧道机电修改 日期2026-07-25 负责人罗富耀 记录人商邱宏 天气晴 修改日期为2026-07-25"
+        assert body["reply"] == "隧道机电修改 日期2026-07-25 负责人罗富耀 记录人张三 天气晴 修改日期为2026-07-25"
+        assert body["replies"] == ["隧道机电修改 日期2026-07-25 负责人罗富耀 记录人张三 天气晴 修改日期为2026-07-25"]
+        assert body["template"] == "隧道机电修改 日期2026-07-25 负责人罗富耀 记录人张三 天气晴 修改日期为2026-07-25"
 
 
 def test_wechat_query_tunnel_mechanical_shortcut_returns_menu(tmp_path, monkeypatch):
@@ -2558,7 +2558,7 @@ def test_wechat_query_tunnel_mechanical_shortcut_returns_menu(tmp_path, monkeypa
     assert body["query_type"] == "tunnel_mechanical_template"
     assert "发送“模板”获取可复制录入模板" in body["reply"]
     assert "修改记录" in body["reply"]
-    assert body["replies"][1] == "隧道机电录入 日期2026-07-25 负责人罗富耀 记录人商邱宏 天气晴"
+    assert body["replies"][1] == "隧道机电录入 日期2026-07-25 负责人罗富耀 记录人张三 天气晴"
 
 
 def test_wechat_query_tunnel_mechanical_format_command_sends_copyable_template_separately(tmp_path, monkeypatch):
@@ -2584,7 +2584,7 @@ def test_wechat_query_tunnel_mechanical_format_command_sends_copyable_template_s
     assert body["success"] is True
     assert body["query_type"] == "tunnel_mechanical_template"
     assert body["replies"][0].startswith("隧道机电功能")
-    assert body["replies"][1] == "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人商邱宏 天气晴"
+    assert body["replies"][1] == "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人张三 天气晴"
 
 
 def test_wechat_query_tunnel_mechanical_accepts_bot_name_starting_with_at(tmp_path, monkeypatch):
@@ -2661,7 +2661,7 @@ def test_wechat_query_patrol_record_template_and_date_range_image(tmp_path, monk
     monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
-    client.post("/api/personnel", json={"names": ["商邱宏"]})
+    client.post("/api/personnel", json={"names": ["张三"]})
     client.post(
         "/api/patrol-warning-config",
         json={
@@ -2680,9 +2680,9 @@ def test_wechat_query_patrol_record_template_and_date_range_image(tmp_path, monk
             token="new-token",
             token_expires_at="2026-08-04T22:00:00+08:00",
             records=[
-                {"id": "r-1", "start_time": "2026-07-01T08:01:00+08:00", "end_time": "2026-07-01T09:29:00+08:00", "direction": "上行", "responsible_person": "商邱宏", "recorder": "王德刚"},
-                {"id": "r-2", "start_time": "2026-07-01T09:30:00+08:00", "end_time": "2026-07-01T10:02:00+08:00", "direction": "下行", "responsible_person": "罗越", "recorder": "商邱宏"},
-                {"id": "r-3", "start_time": "2026-08-01T09:00:00+08:00", "end_time": "2026-08-01T10:00:00+08:00", "direction": "双向", "responsible_person": "商邱宏", "recorder": "王德刚"},
+                {"id": "r-1", "start_time": "2026-07-01T08:01:00+08:00", "end_time": "2026-07-01T09:29:00+08:00", "direction": "上行", "responsible_person": "张三", "recorder": "王德刚"},
+                {"id": "r-2", "start_time": "2026-07-01T09:30:00+08:00", "end_time": "2026-07-01T10:02:00+08:00", "direction": "下行", "responsible_person": "罗越", "recorder": "张三"},
+                {"id": "r-3", "start_time": "2026-08-01T09:00:00+08:00", "end_time": "2026-08-01T10:00:00+08:00", "direction": "双向", "responsible_person": "张三", "recorder": "王德刚"},
             ],
             stats={"matched_rows": 3},
         )
@@ -2692,12 +2692,12 @@ def test_wechat_query_patrol_record_template_and_date_range_image(tmp_path, monk
     response = client.post(
         "/api/wechat-query",
         headers={"X-Duty-Query-Token": "unit-token"},
-        json={"text": "查询商邱宏巡查记录 2026-07-01至2026-07-31"},
+        json={"text": "查询张三巡查记录 2026-07-01至2026-07-31"},
     )
 
     assert template_response.status_code == 200
     assert template_response.json()["query_type"] == "patrol_record_template"
-    assert template_response.json()["reply"] == "查询商邱宏巡查记录 2026-07-01至2026-07-31"
+    assert template_response.json()["reply"] == "查询张三巡查记录 2026-07-01至2026-07-31"
     assert "巡查记录查询格式" not in template_response.json()["reply"]
     assert "示例：" not in template_response.json()["reply"]
     assert response.status_code == 200
@@ -2709,7 +2709,7 @@ def test_wechat_query_patrol_record_template_and_date_range_image(tmp_path, monk
     assert body["end_date"] == "2026-07-31"
     assert body["image_url"].startswith("/api/uploads/patrol-record-")
     assert (tmp_path / "uploads" / body["image_url"].rsplit("/", 1)[-1]).read_bytes().startswith(b"\x89PNG")
-    assert captured["name"] == "商邱宏"
+    assert captured["name"] == "张三"
     assert captured["limit"] == 5000
 
 
@@ -2737,7 +2737,7 @@ def test_wechat_bridge_sends_patrol_record_image(tmp_path, monkeypatch):
     main_module._handle_wechat_bridge_message(
         repo,
         uploads,
-        {"room_id": "room@@runtime", "stable_room_id": "wgr_feature", "text": "@闷葫芦 查询商邱宏巡查记录 2026-07-01至2026-07-31", "is_at": True},
+        {"room_id": "room@@runtime", "stable_room_id": "wgr_feature", "text": "@闷葫芦 查询张三巡查记录 2026-07-01至2026-07-31", "is_at": True},
     )
     assert sent_text == ["查询完成"]
     assert sent_image == [str(image_path)]
@@ -2808,7 +2808,7 @@ def test_wechat_bridge_group_command_requires_at_mention(tmp_path, monkeypatch):
             "sender_id": "wgm_member",
             "stable_member_id": "wgm_member",
             "runtime_sender_id": "@member",
-            "text": "@闷葫芦 绑定商邱宏",
+            "text": "@闷葫芦 绑定张三",
             "is_at": True,
         },
     )
@@ -2840,7 +2840,7 @@ def test_wechat_bridge_group_command_requires_at_mention(tmp_path, monkeypatch):
     assert calls == [
         "@闷葫芦 查询今日机电",
         "@闷葫芦 8",
-        "@闷葫芦 绑定商邱宏",
+        "@闷葫芦 绑定张三",
         "查询今日机电@闷葫芦",
         "查询@闷葫芦",
     ]
@@ -2857,7 +2857,7 @@ def test_wechat_bridge_sends_multiple_text_replies(tmp_path, monkeypatch):
             "success": True,
             "replies": [
                 "隧道机电功能",
-                "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人商邱宏 天气晴",
+                "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人张三 天气晴",
             ],
             "reply": "fallback should not be sent when replies exist",
         }
@@ -2887,13 +2887,13 @@ def test_wechat_bridge_sends_multiple_text_replies(tmp_path, monkeypatch):
 
     assert sent == [
         ("wgr_feature", "隧道机电功能"),
-        ("wgr_feature", "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人商邱宏 天气晴"),
+        ("wgr_feature", "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人张三 天气晴"),
     ]
 
 
 def test_wechat_bridge_bind_command_replies_success(tmp_path, monkeypatch):
     repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
-    repo.save_personnel_names(["商邱宏"])
+    repo.save_personnel_names(["张三"])
     uploads = tmp_path / "uploads"
     uploads.mkdir()
     sent: list[tuple[str, str]] = []
@@ -2917,15 +2917,15 @@ def test_wechat_bridge_bind_command_replies_success(tmp_path, monkeypatch):
             "sender_id": "wgm_stable_member",
             "stable_member_id": "wgm_stable_member",
             "runtime_sender_id": "@runtime-member",
-            "sender_name": "商邱宏微信",
-            "text": "@闷葫芦 绑定商邱宏",
+            "sender_name": "张三微信",
+            "text": "@闷葫芦 绑定张三",
             "is_at": True,
         },
     )
 
     assert sent and sent[0][0] == "wgr_feature"
-    assert "绑定成功：商邱宏" in sent[0][1]
-    bound = next(person for person in repo.list_personnel() if person["name"] == "商邱宏")
+    assert "绑定成功：张三" in sent[0][1]
+    bound = next(person for person in repo.list_personnel() if person["name"] == "张三")
     assert bound["wechat_group_member_id"] == "wgm_stable_member"
     assert bound["wechat_group_runtime_sender_id"] == "@runtime-member"
 
@@ -3823,17 +3823,17 @@ def test_wechat_query_matches_saved_stable_member_id(tmp_path, monkeypatch):
     client.post(
         "/api/personnel",
         json={
-            "names": ["商邱宏"],
+            "names": ["张三"],
             "people": [
                 {
-                    "name": "商邱宏",
+                    "name": "张三",
                     "wechat_group_member_id": "wgm_stable_member",
-                    "wechat_group_member_name": "商邱宏微信",
+                    "wechat_group_member_name": "张三微信",
                 }
             ],
         },
     )
-    client.post("/api/people", json={"name": "商邱宏", "daily_time": "07:40", "before_shift_minutes": 10, "enabled": True})
+    client.post("/api/people", json={"name": "张三", "daily_time": "07:40", "before_shift_minutes": 10, "enabled": True})
 
     response = client.post(
         "/api/wechat-query",
@@ -3845,7 +3845,7 @@ def test_wechat_query_matches_saved_stable_member_id(tmp_path, monkeypatch):
     body = response.json()
     assert body["success"] is True
     assert body["query_type"] == "binding"
-    assert body["person_name"] == "商邱宏"
+    assert body["person_name"] == "张三"
 
 
 def test_wechat_binding_query_is_not_treated_as_bind_command(tmp_path, monkeypatch):
@@ -3855,12 +3855,12 @@ def test_wechat_binding_query_is_not_treated_as_bind_command(tmp_path, monkeypat
     client.post(
         "/api/personnel",
         json={
-            "names": ["商邱宏"],
+            "names": ["张三"],
             "people": [
                 {
-                    "name": "商邱宏",
+                    "name": "张三",
                     "wechat_group_runtime_sender_id": "@runtime-member",
-                    "wechat_group_member_name": "商邱宏微信",
+                    "wechat_group_member_name": "张三微信",
                 }
             ],
         },
@@ -3876,14 +3876,14 @@ def test_wechat_binding_query_is_not_treated_as_bind_command(tmp_path, monkeypat
     body = response.json()
     assert body["success"] is True
     assert body["query_type"] == "binding"
-    assert body["person_name"] == "商邱宏"
+    assert body["person_name"] == "张三"
 
 
 def test_wechat_query_can_bind_current_sender_to_person_name(tmp_path, monkeypatch):
     monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
-    client.post("/api/personnel", json={"names": ["旧人员", "商邱宏"]})
+    client.post("/api/personnel", json={"names": ["旧人员", "张三"]})
     repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
     repo.save_personnel_contacts(
         [
@@ -3900,14 +3900,14 @@ def test_wechat_query_can_bind_current_sender_to_person_name(tmp_path, monkeypat
         "/api/wechat-query",
         headers={"X-Duty-Query-Token": "unit-token"},
         json={
-            "text": "绑定商邱宏",
+            "text": "绑定张三",
             "room_id": "room@@runtime",
             "stable_room_id": "wgr_feature",
             "room_name": "功能群",
             "sender_id": "wgm_stable_member",
             "stable_member_id": "wgm_stable_member",
             "runtime_sender_id": "@runtime-member",
-            "sender_name": "商邱宏微信",
+            "sender_name": "张三微信",
         },
     )
 
@@ -3915,15 +3915,15 @@ def test_wechat_query_can_bind_current_sender_to_person_name(tmp_path, monkeypat
     body = response.json()
     assert body["success"] is True
     assert body["query_type"] == "binding_update"
-    assert body["person_name"] == "商邱宏"
+    assert body["person_name"] == "张三"
     people = DutyRepository(tmp_path / "data" / "duty-reminder.db").list_personnel()
     assert next(person for person in people if person["name"] == "旧人员") == {"name": "旧人员", "mention_mobile": ""}
-    bound = next(person for person in people if person["name"] == "商邱宏")
+    bound = next(person for person in people if person["name"] == "张三")
     assert bound["wechat_group_room_id"] == "wgr_feature"
     assert bound["wechat_group_room_name"] == "功能群"
     assert bound["wechat_group_member_id"] == "wgm_stable_member"
     assert bound["wechat_group_runtime_sender_id"] == "@runtime-member"
-    assert bound["wechat_group_member_name"] == "商邱宏微信"
+    assert bound["wechat_group_member_name"] == "张三微信"
 
 
 def test_wechat_query_accepts_natural_date_shift_question(tmp_path, monkeypatch):
@@ -4350,7 +4350,7 @@ def test_patrol_warning_orange_records_query_uses_saved_config_and_token_cache(t
                     "id": "record-1",
                     "route_code": "S41",
                     "route_name": "南涧－宁洱",
-                    "responsible_person": "商邱宏",
+                    "responsible_person": "张三",
                     "recorder": "陈刚",
                 }
             ],
@@ -4372,21 +4372,21 @@ def test_patrol_warning_orange_records_query_uses_saved_config_and_token_cache(t
     )
     app.state.repo.save_patrol_warning_state(token="cached-token", token_expires_at="2026-07-22T21:00:00+08:00")
 
-    response = client.get("/api/patrol-warning/orange-records", params={"name": "商邱宏", "limit": 1000})
+    response = client.get("/api/patrol-warning/orange-records", params={"name": "张三", "limit": 1000})
 
     assert response.status_code == 200
     body = response.json()
-    assert body["records"][0]["responsible_person"] == "商邱宏"
+    assert body["records"][0]["responsible_person"] == "张三"
     assert body["stats"]["matched_rows"] == 1
     assert captured["config"]["password"] == "secret"
-    assert captured["name"] == "商邱宏"
+    assert captured["name"] == "张三"
     assert captured["token"] == "cached-token"
     assert captured["limit"] == 1000
     assert str(captured["cache_path"]).endswith("patrol-warning-records-cache.json")
     assert client.get("/api/patrol-warning-config").json()["state"]["token_configured"] is True
 
     captured.clear()
-    response = client.get("/api/patrol-warning/orange-records", params={"name": "商邱宏"})
+    response = client.get("/api/patrol-warning/orange-records", params={"name": "张三"})
 
     assert response.status_code == 200
     assert captured["limit"] == 5000
