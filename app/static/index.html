@@ -6539,25 +6539,28 @@
       return groups;
     }
 
-    function orangeWarningStatsRows(records) {
-      const groups = orangeWarningStatsGroups(records);
+    function orangeWarningStatsRowsFromGroups(groups) {
       const rows = [];
-      groups.forEach((group, groupIndex) => {
+      (groups || []).forEach((group, groupIndex) => {
         const highlighted = orangeWarningIsHighlightedStatsGroup(group);
         const previousHighlighted = groupIndex > 0 && orangeWarningIsHighlightedStatsGroup(groups[groupIndex - 1]);
-        group.records.forEach((record, index) => {
+        (group.records || []).forEach((record, index) => {
           rows.push({
             count: group.count,
             record,
-            countRowspan: index === 0 ? group.records.length : 0,
+            countRowspan: index === 0 ? (group.records || []).length : 0,
             skipCountCell: index > 0,
             highlighted,
             isGroupStart: highlighted && index === 0 && !previousHighlighted,
-            isGroupEnd: highlighted && index === group.records.length - 1,
+            isGroupEnd: highlighted && index === (group.records || []).length - 1,
           });
         });
       });
       return rows;
+    }
+
+    function orangeWarningStatsRows(records) {
+      return orangeWarningStatsRowsFromGroups(orangeWarningStatsGroups(records));
     }
 
     function orangeWarningIsHighlightedStatsGroup(group) {
@@ -6681,7 +6684,7 @@
           <button type="button" data-orange-page="next" ${pageRange.currentPage >= pageRange.pageCount ? "disabled" : ""}>下一页</button>
         `;
       }
-      const pageRows = orangeWarningStatsRows(pageRange.records);
+      const pageRows = orangeWarningStatsRowsFromGroups(pageRange.records);
       if (!pageRows.length) {
         table.innerHTML = '<tr><td colspan="6">暂无记录</td></tr>';
         return;

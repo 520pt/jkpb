@@ -138,9 +138,10 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'id="orangeWarningStatsPagination"' in html
     assert 'id="orangeWarningStatsMeta"' in html
     assert 'function orangeWarningStatsGroups' in html
+    assert 'function orangeWarningStatsRowsFromGroups' in html
     assert 'function orangeWarningStatsRows' in html
     assert 'isGroupStart: highlighted && index === 0 && !previousHighlighted' in html
-    assert 'isGroupEnd: highlighted && index === group.records.length - 1' in html
+    assert 'isGroupEnd: highlighted && index === (group.records || []).length - 1' in html
     assert 'endTimestamp: orangeWarningRecordEndTimestamp(record)' in html
     assert 'next.timestamp - current.endTimestamp <= windowMs' in html
     assert 'function exportOrangeWarningStatsImage' in html
@@ -151,10 +152,12 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'ctx.fillRect(x + borderWidth, y, Math.max(0, width - borderWidth * 2), borderWidth)' in html
     assert 'orangeWarningDrawExportGroupBorder(ctx, margin, groupY, tableWidth, layout.height, { skipTop: skipTopBorder })' in html
     assert 'orangeWarningRecordDirection(records[0]) === "双向"' in html
-    assert 'groups.forEach((group, groupIndex) => {' in html
+    assert '(groups || []).forEach((group, groupIndex) => {' in html
     assert 'const countStyles = [`font-weight:${highlighted ? "700" : "400"}`];' in html
     assert 'if (row.isGroupStart) countStyles.push("border-top:2px solid #111827")' in html
-    assert 'const pageRows = orangeWarningStatsRows(pageRange.records);' in html
+    assert 'return orangeWarningStatsRowsFromGroups(orangeWarningStatsGroups(records));' in html
+    assert 'const pageRows = orangeWarningStatsRowsFromGroups(pageRange.records);' in html
+    assert 'const pageRows = orangeWarningStatsRows(pageRange.records);' not in html
     assert '巡查记录：${stats.recordCount}条 实际次数：${stats.mergedCount}次' in html
     assert '<tr><th>次数</th><th>日期</th><th>时间</th><th>方向</th><th>巡查人</th><th>记录人</th></tr>' in html
     assert 'orange-warning-stats-group-start' in html
