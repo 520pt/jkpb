@@ -8,7 +8,6 @@ import re
 from PIL import Image, ImageDraw, ImageFont
 
 from app.daily_duty_image import _font
-from app.patrol_warning import _patrol_record_person_signature
 
 
 WIDTH = 1280
@@ -134,10 +133,10 @@ def _record_groups(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     index = 0
     while index < len(ordered):
         group_records = [ordered[index]]
-        index += 1
-        while index < len(ordered) and _can_join(group_records[-1], ordered[index]):
-            group_records.append(ordered[index])
+        if index + 1 < len(ordered) and _can_join(ordered[index], ordered[index + 1]):
             index += 1
+            group_records.append(ordered[index])
+        index += 1
         groups.append({"count": len(groups) + 1, "records": group_records})
     return groups
 
@@ -151,7 +150,7 @@ def _can_join(current: dict[str, Any], following: dict[str, Any] | None) -> bool
         return False
     if str(following.get("direction") or "") not in {"上行", "下行"}:
         return False
-    if not str(current.get("end_time") or "").strip() and _patrol_record_person_signature(current) != _patrol_record_person_signature(following):
+    if str(current.get("direction") or "") == str(following.get("direction") or ""):
         return False
     current_start = _record_datetime(current, "start_time", "end_time")
     current_end = _record_datetime(current, "end_time", "start_time")

@@ -135,7 +135,7 @@ def test_patrol_record_groups_pair_adjacent_records_across_midnight():
     assert _patrol_record_group_count(records) == 1
 
 
-def test_patrol_record_groups_merge_continuous_direction_records():
+def test_patrol_record_groups_only_merge_one_adjacent_opposite_pair():
     records = [
         {
             "id": "r-up-1",
@@ -171,12 +171,14 @@ def test_patrol_record_groups_merge_continuous_direction_records():
 
     groups = _record_groups(records)
 
-    assert [group["count"] for group in groups] == [1, 2]
+    assert [group["count"] for group in groups] == [1, 2, 3, 4]
     assert [[record["id"] for record in group["records"]] for group in groups] == [
-        ["r-up-1", "r-down-1", "r-down-2"],
-        ["r-up-2", "r-up-3"],
+        ["r-up-1", "r-down-1"],
+        ["r-down-2"],
+        ["r-up-2"],
+        ["r-up-3"],
     ]
-    assert _patrol_record_group_count(records) == 2
+    assert _patrol_record_group_count(records) == 4
 
 
 def test_patrol_record_groups_do_not_merge_different_routes():
@@ -245,7 +247,7 @@ def test_patrol_record_cache_merge_deduplicates_same_temporal_record_with_reorde
     assert merged[0]["id"] == "new-dup"
 
 
-def test_patrol_record_groups_only_join_missing_end_when_people_match():
+def test_patrol_record_groups_pair_does_not_depend_on_people_fields():
     same_people = [
         {
             "id": "missing-end",
@@ -281,8 +283,8 @@ def test_patrol_record_groups_only_join_missing_end_when_people_match():
 
     assert len(_record_groups(same_people)) == 1
     assert _patrol_record_group_count(same_people) == 1
-    assert len(_record_groups(different_people)) == 2
-    assert _patrol_record_group_count(different_people) == 2
+    assert len(_record_groups(different_people)) == 1
+    assert _patrol_record_group_count(different_people) == 1
 
 
 def test_patrol_record_groups_handle_multiple_pairs_and_singletons():

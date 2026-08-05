@@ -6465,8 +6465,7 @@
             === String(next.record && next.record.route_code || "").trim().toUpperCase()
           && (current.direction === "上行" || current.direction === "下行")
           && (next.direction === "上行" || next.direction === "下行")
-          && (String(current.record && current.record.end_time || "").trim()
-            || orangeWarningRecordPersonSignature(current.record) === orangeWarningRecordPersonSignature(next.record))
+          && current.direction !== next.direction
           && current.timestamp
           && next.timestamp
           && current.endTimestamp
@@ -6522,7 +6521,7 @@
         const current = items[index];
         count += 1;
         const groupRecords = [current.record];
-        while (index + 1 < items.length && orangeWarningCanJoinItems(items[index], items[index + 1])) {
+        if (index + 1 < items.length && orangeWarningCanJoinItems(items[index], items[index + 1])) {
           index += 1;
           groupRecords.push(items[index].record);
         }
@@ -6565,14 +6564,6 @@
       const text = String(value || "").trim();
       if (!text || text === "-") return ["-"];
       return text.split(/[，,、；;\/\s·]+/).map((name) => name.trim()).filter(Boolean);
-    }
-
-    function orangeWarningRecordPersonSignature(record) {
-      const names = [
-        ...orangeWarningPersonNames(record && record.responsible_person),
-        ...orangeWarningPersonNames(record && record.recorder),
-      ].filter((name) => name && name !== "-");
-      return Array.from(new Set(names)).sort().join("|");
     }
 
     function orangeWarningPersonCellHtml(value) {
@@ -6663,9 +6654,9 @@
         meta.textContent = `${orangeWarningRangeText()} · 第 ${pageRange.currentPage}/${pageRange.pageCount} 页`;
       }
       if (summary) summary.textContent = `巡查记录：${stats.recordCount}条 实际次数：${stats.mergedCount}次`;
-      if (footnote) {
-        footnote.textContent = `说明：上下行按上一条结束到下一条开始相邻 ${ORANGE_WARNING_PAIR_WINDOW_MINUTES} 分钟内按 1 次计，双向单独按 1 次计。`;
-      }
+        if (footnote) {
+          footnote.textContent = `说明：同一路线相邻 ${ORANGE_WARNING_PAIR_WINDOW_MINUTES} 分钟内的一组上行+下行按 1 次计；同方向不合并，连续第三条另计，双向单独按 1 次计。`;
+        }
       if (!table) return;
       if (!displayGroups.length) {
         table.innerHTML = '<tr><td colspan="6">暂无记录</td></tr>';

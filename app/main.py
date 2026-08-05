@@ -40,7 +40,6 @@ from app.patrol_warning import (
     failure_backoff_until,
     next_poll_time,
     warning_from_dict,
-    _patrol_record_person_signature,
 )
 from app.patrol_warning_image import render_patrol_warning_image
 from app.patrol_record_image import render_patrol_record_image
@@ -2729,9 +2728,9 @@ def _patrol_record_group_count(records: list[dict[str, Any]]) -> int:
     index = 0
     while index < len(ordered):
         count += 1
-        index += 1
-        while index < len(ordered) and _patrol_records_can_join(ordered[index - 1], ordered[index]):
+        if index + 1 < len(ordered) and _patrol_records_can_join(ordered[index], ordered[index + 1]):
             index += 1
+        index += 1
     return count
 
 
@@ -2742,7 +2741,7 @@ def _patrol_records_can_join(current: dict[str, Any], following: dict[str, Any])
         return False
     if str(following.get("direction") or "") not in {"上行", "下行"}:
         return False
-    if not str(current.get("end_time") or "").strip() and _patrol_record_person_signature(current) != _patrol_record_person_signature(following):
+    if str(current.get("direction") or "") == str(following.get("direction") or ""):
         return False
     current_start = _patrol_record_datetime(current, "start_time", "end_time")
     current_end = _patrol_record_datetime(current, "end_time", "start_time")
