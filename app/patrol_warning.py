@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -158,6 +158,7 @@ async def fetch_patrol_records_by_name_result(
     tz: ZoneInfo,
     *,
     name: str,
+    known_names: Sequence[str] | None = None,
     token: str = "",
     token_expires_at: str = "",
     now: datetime | None = None,
@@ -223,7 +224,7 @@ async def fetch_patrol_records_by_name_result(
         for index, row in enumerate(rows)
         if (record := normalize_patrol_record(row, tz, index=index))
     ]
-    normalized = _merge_patrol_record_cache(cache, fetched)
+    normalized = _merge_patrol_record_cache(cache, fetched, known_names=known_names)
     if fetched or (cache and remote_exhausted):
         _save_patrol_record_cache(cache_path, config, normalized, total_rows=total_rows)
     configured_route = str(config.get("route_code") or "").strip().upper()
@@ -232,7 +233,7 @@ async def fetch_patrol_records_by_name_result(
         for record in normalized
         if not configured_route or str(record.get("route_code") or "").strip().upper() == configured_route
     ]
-    matched = [record for record in route_records if _patrol_record_name_matches(record, query_name)]
+    matched = [record for record in route_records if _patrol_record_name_matches(record, query_name, known_names=known_names)]
     matched.sort(key=lambda record: (record.get("start_timestamp") or 0, str(record.get("id") or "")), reverse=True)
     loaded_rows = len(normalized)
     return FetchPatrolRecordResult(
@@ -742,14 +743,19 @@ def _save_patrol_record_cache(
     temp.replace(path)
 
 
-def _merge_patrol_record_cache(cached: list[dict[str, Any]], fetched: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _merge_patrol_record_cache(
+    cached: list[dict[str, Any]],
+    fetched: list[dict[str, Any]],
+    *,
+    known_names: Sequence[str] | None = None,
+) -> list[dict[str, Any]]:
     merged: dict[str, dict[str, Any]] = {}
     for record in cached:
-        key = _patrol_record_merge_key(record)
+        key = _patrol_record_merge_key(record, known_names=known_names)
         if key:
             merged[key] = record
     for record in fetched:
-        key = _patrol_record_merge_key(record)
+        key = _patrol_record_merge_key(record, known_names=known_names)
         if key:
             merged[key] = record
     records = list(merged.values())
@@ -786,7 +792,7 @@ def _patrol_record_cache_key(record: dict[str, Any]) -> str:
     return "fp:" + hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
-def _patrol_record_merge_key(record: dict[str, Any]) -> str:
+def _patrol_record_merge_key(record: dict[str, Any], *, known_names: Sequence[str] | None = None) -> str:
     route_code = str(record.get("route_code") or "").strip().upper()
     route_name = str(record.get("route_name") or "").strip().upper()
     start_time = str(record.get("start_time") or "").strip()
@@ -794,7 +800,7 @@ def _patrol_record_merge_key(record: dict[str, Any]) -> str:
     direction = str(record.get("direction") or "").strip()
     start_stake = str(record.get("start_stake") or "").strip()
     end_stake = str(record.get("end_stake") or "").strip()
-    person_signature = _patrol_record_person_signature(record)
+    person_signature = _patrol_record_person_signature(record, known_names=known_names)
     parts = [
         route_code or route_name,
         start_time,
@@ -809,20 +815,51 @@ def _patrol_record_merge_key(record: dict[str, Any]) -> str:
     return _patrol_record_cache_key(record)
 
 
-def _patrol_record_person_signature(record: dict[str, Any]) -> str:
+def _patrol_record_person_signature(record: dict[str, Any], *, known_names: Sequence[str] | None = None) -> str:
     parts: list[str] = []
     for field in ("responsible_person", "recorder"):
-        parts.extend(_patrol_record_person_tokens(record.get(field)))
+        parts.extend(_patrol_record_person_tokens(record.get(field), known_names=known_names))
     if not parts:
         return ""
     return "|".join(sorted(set(parts)))
 
 
-def _patrol_record_person_tokens(value: Any) -> list[str]:
+def _patrol_record_person_tokens(value: Any, *, known_names: Sequence[str] | None = None) -> list[str]:
     text = str(value or "").strip()
     if not text:
         return []
-    return [part.strip() for part in re.split(r"[\s,，、；;\/·]+", text) if part.strip()]
+    base_parts = [part.strip() for part in re.split(r"[\s,，、；;\/·]+", text) if part.strip()]
+    if not known_names:
+        return base_parts
+    names = [str(name or "").strip() for name in known_names if str(name or "").strip()]
+    if not names:
+        return base_parts
+    names = sorted(dict.fromkeys(names), key=len, reverse=True)
+    expanded: list[str] = []
+    for part in base_parts:
+        expanded.extend(_split_compact_person_names(part, names))
+    return expanded
+
+
+def _split_compact_person_names(text: str, known_names: Sequence[str]) -> list[str]:
+    compact = str(text or "").strip()
+    if not compact:
+        return []
+    if compact in known_names:
+        return [compact]
+    index = 0
+    parts: list[str] = []
+    while index < len(compact):
+        matched = ""
+        for name in known_names:
+            if compact.startswith(name, index):
+                matched = name
+                break
+        if not matched:
+            return [compact]
+        parts.append(matched)
+        index += len(matched)
+    return parts
 
 
 def _request_headers(config: dict[str, Any]) -> dict[str, str]:
@@ -875,7 +912,7 @@ def _patrol_record_route_matches(record: dict[str, Any], route_code: str) -> boo
     return any(str(value).strip().upper() == route_code for value in candidates if value)
 
 
-def _patrol_record_name_matches(record: dict[str, Any], name: str) -> bool:
+def _patrol_record_name_matches(record: dict[str, Any], name: str, *, known_names: Sequence[str] | None = None) -> bool:
     target = _compact_match_text(name)
     if not target:
         return False
@@ -883,6 +920,10 @@ def _patrol_record_name_matches(record: dict[str, Any], name: str) -> bool:
         record.get("responsible_person"),
         record.get("recorder"),
     ]
+    for value in fields:
+        tokens = _patrol_record_person_tokens(value, known_names=known_names)
+        if any(_compact_match_text(token) == target for token in tokens):
+            return True
     return any(target in _compact_match_text(value) for value in fields)
 
 

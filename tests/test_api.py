@@ -2697,7 +2697,7 @@ def test_wechat_query_patrol_record_template_and_date_range_image(tmp_path, monk
     )
     captured: dict[str, object] = {}
 
-    async def fake_fetch(config, tz, *, name, token, token_expires_at, limit, cache_path=None):
+    async def fake_fetch(config, tz, *, name, token, token_expires_at, limit, cache_path=None, known_names=None):
         captured.update({"name": name, "limit": limit, "cache_path": cache_path})
         return SimpleNamespace(
             token="new-token",
@@ -4354,7 +4354,7 @@ def test_patrol_warning_config_test_uses_saved_password(tmp_path, monkeypatch):
 def test_patrol_warning_orange_records_query_uses_saved_config_and_token_cache(tmp_path, monkeypatch):
     captured: dict[str, object] = {}
 
-    async def fake_fetch_patrol_records_by_name_result(config, tz, *, name, token, token_expires_at, limit, cache_path=None):
+    async def fake_fetch_patrol_records_by_name_result(config, tz, *, name, token, token_expires_at, limit, cache_path=None, known_names=None):
         captured.update(
             {
                 "config": config,

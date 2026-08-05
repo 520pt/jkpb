@@ -2606,6 +2606,7 @@ async def _build_wechat_patrol_record_response(
             config,
             TZ,
             name=name,
+            known_names=_wechat_query_known_person_names(repo),
             token=str(state.get("token") or ""),
             token_expires_at=str(state.get("token_expires_at") or ""),
             limit=5000,

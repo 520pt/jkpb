@@ -247,6 +247,48 @@ def test_patrol_record_cache_merge_deduplicates_same_temporal_record_with_reorde
     assert merged[0]["id"] == "new-dup"
 
 
+def test_patrol_record_cache_merge_deduplicates_glued_person_names():
+    cached = [
+        {
+            "id": "old-glued",
+            "route_code": "S41",
+            "route_name": "南涧－宁洱",
+            "direction": "上行",
+            "responsible_person": "赵光振罗越",
+            "recorder": "罗富耀",
+            "start_stake": "106.67",
+            "end_stake": "137.42",
+            "start_time": "2026-07-14T00:31:55+08:00",
+            "end_time": "2026-07-14T01:27:04+08:00",
+            "start_timestamp": 1783960315,
+        }
+    ]
+    fetched = [
+        {
+            "id": "new-glued",
+            "route_code": "S41",
+            "route_name": "南涧－宁洱",
+            "direction": "上行",
+            "responsible_person": "罗越赵光振",
+            "recorder": "罗富耀",
+            "start_stake": "106.67",
+            "end_stake": "137.42",
+            "start_time": "2026-07-14T00:31:55+08:00",
+            "end_time": "2026-07-14T01:27:04+08:00",
+            "start_timestamp": 1783960315,
+        }
+    ]
+
+    merged = patrol_module._merge_patrol_record_cache(
+        cached,
+        fetched,
+        known_names=["赵光振", "罗越", "罗富耀"],
+    )
+
+    assert len(merged) == 1
+    assert merged[0]["id"] == "new-glued"
+
+
 def test_patrol_record_groups_pair_does_not_depend_on_people_fields():
     same_people = [
         {
@@ -285,6 +327,24 @@ def test_patrol_record_groups_pair_does_not_depend_on_people_fields():
     assert _patrol_record_group_count(same_people) == 1
     assert len(_record_groups(different_people)) == 1
     assert _patrol_record_group_count(different_people) == 1
+
+
+def test_patrol_record_name_matches_glued_names_with_known_names():
+    record = {
+        "responsible_person": "赵光振罗越",
+        "recorder": "罗富耀",
+    }
+
+    assert patrol_module._patrol_record_name_matches(
+        record,
+        "罗越",
+        known_names=["赵光振", "罗越", "罗富耀"],
+    )
+    assert patrol_module._patrol_record_name_matches(
+        record,
+        "赵光振",
+        known_names=["赵光振", "罗越", "罗富耀"],
+    )
 
 
 def test_patrol_record_groups_handle_multiple_pairs_and_singletons():
