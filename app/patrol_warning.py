@@ -226,7 +226,13 @@ async def fetch_patrol_records_by_name_result(
     normalized = _merge_patrol_record_cache(cache, fetched)
     if fetched or (cache and remote_exhausted):
         _save_patrol_record_cache(cache_path, config, normalized, total_rows=total_rows)
-    matched = [record for record in normalized if _patrol_record_name_matches(record, query_name)]
+    configured_route = str(config.get("route_code") or "").strip().upper()
+    route_records = [
+        record
+        for record in normalized
+        if not configured_route or str(record.get("route_code") or "").strip().upper() == configured_route
+    ]
+    matched = [record for record in route_records if _patrol_record_name_matches(record, query_name)]
     matched.sort(key=lambda record: (record.get("start_timestamp") or 0, str(record.get("id") or "")), reverse=True)
     loaded_rows = len(normalized)
     return FetchPatrolRecordResult(
@@ -239,7 +245,7 @@ async def fetch_patrol_records_by_name_result(
             "new_rows": max(0, loaded_rows - len(cache)),
             "cache_used": 1 if cache else 0,
             "remote_exhausted": 1 if remote_exhausted else 0,
-            "route_matched_rows": loaded_rows,
+            "route_matched_rows": len(route_records),
             "matched_rows": len(matched),
         },
         token=current_token,
@@ -739,11 +745,11 @@ def _save_patrol_record_cache(
 def _merge_patrol_record_cache(cached: list[dict[str, Any]], fetched: list[dict[str, Any]]) -> list[dict[str, Any]]:
     merged: dict[str, dict[str, Any]] = {}
     for record in cached:
-        key = _patrol_record_cache_key(record)
+        key = _patrol_record_merge_key(record)
         if key:
             merged[key] = record
     for record in fetched:
-        key = _patrol_record_cache_key(record)
+        key = _patrol_record_merge_key(record)
         if key:
             merged[key] = record
     records = list(merged.values())
@@ -778,6 +784,45 @@ def _patrol_record_cache_key(record: dict[str, Any]) -> str:
         str(record.get("end_stake") or ""),
     ]
     return "fp:" + hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+
+
+def _patrol_record_merge_key(record: dict[str, Any]) -> str:
+    route_code = str(record.get("route_code") or "").strip().upper()
+    route_name = str(record.get("route_name") or "").strip().upper()
+    start_time = str(record.get("start_time") or "").strip()
+    end_time = str(record.get("end_time") or "").strip()
+    direction = str(record.get("direction") or "").strip()
+    start_stake = str(record.get("start_stake") or "").strip()
+    end_stake = str(record.get("end_stake") or "").strip()
+    person_signature = _patrol_record_person_signature(record)
+    parts = [
+        route_code or route_name,
+        start_time,
+        end_time,
+        direction,
+        start_stake,
+        end_stake,
+        person_signature,
+    ]
+    if any(parts):
+        return "mk:" + hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+    return _patrol_record_cache_key(record)
+
+
+def _patrol_record_person_signature(record: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for field in ("responsible_person", "recorder"):
+        parts.extend(_patrol_record_person_tokens(record.get(field)))
+    if not parts:
+        return ""
+    return "|".join(sorted(set(parts)))
+
+
+def _patrol_record_person_tokens(value: Any) -> list[str]:
+    text = str(value or "").strip()
+    if not text:
+        return []
+    return [part.strip() for part in re.split(r"[\s,，、；;\/·]+", text) if part.strip()]
 
 
 def _request_headers(config: dict[str, Any]) -> dict[str, str]:

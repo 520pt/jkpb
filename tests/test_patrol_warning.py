@@ -179,6 +179,112 @@ def test_patrol_record_groups_merge_continuous_direction_records():
     assert _patrol_record_group_count(records) == 2
 
 
+def test_patrol_record_groups_do_not_merge_different_routes():
+    records = [
+        {
+            "id": "s41-up",
+            "route_code": "S41",
+            "start_time": "2026-07-16T10:00:00+08:00",
+            "end_time": "2026-07-16T10:30:00+08:00",
+            "direction": "上行",
+        },
+        {
+            "id": "g5615-down",
+            "route_code": "G5615",
+            "start_time": "2026-07-16T10:31:00+08:00",
+            "end_time": "2026-07-16T11:00:00+08:00",
+            "direction": "下行",
+        },
+    ]
+
+    groups = _record_groups(records)
+
+    assert len(groups) == 2
+    assert [[record["id"] for record in group["records"]] for group in groups] == [
+        ["s41-up"],
+        ["g5615-down"],
+    ]
+    assert _patrol_record_group_count(records) == 2
+
+
+def test_patrol_record_cache_merge_deduplicates_same_temporal_record_with_reordered_people():
+    cached = [
+        {
+            "id": "old-dup",
+            "route_code": "S90",
+            "route_name": "沿边高速",
+            "direction": "双向",
+            "responsible_person": "季佳伦 陈泓霖 尹昇",
+            "recorder": "季佳伦",
+            "start_stake": "722.7",
+            "end_stake": "756.4",
+            "start_time": "2026-07-14T00:31:55+08:00",
+            "end_time": "2026-07-14T01:27:04+08:00",
+            "start_timestamp": 1783960315,
+        }
+    ]
+    fetched = [
+        {
+            "id": "new-dup",
+            "route_code": "S90",
+            "route_name": "沿边高速",
+            "direction": "双向",
+            "responsible_person": "陈泓霖 季佳伦 尹昇",
+            "recorder": "陈泓霖",
+            "start_stake": "722.7",
+            "end_stake": "756.4",
+            "start_time": "2026-07-14T00:31:55+08:00",
+            "end_time": "2026-07-14T01:27:04+08:00",
+            "start_timestamp": 1783960315,
+        }
+    ]
+
+    merged = patrol_module._merge_patrol_record_cache(cached, fetched)
+
+    assert len(merged) == 1
+    assert merged[0]["id"] == "new-dup"
+
+
+def test_patrol_record_groups_only_join_missing_end_when_people_match():
+    same_people = [
+        {
+            "id": "missing-end",
+            "route_code": "S90",
+            "start_time": "2026-08-04T19:42:23+08:00",
+            "end_time": "",
+            "direction": "下行",
+            "responsible_person": "徐志凯 罗忠宇",
+            "recorder": "岩明",
+        },
+        {
+            "id": "same-people-next",
+            "route_code": "S90",
+            "start_time": "2026-08-04T19:45:23+08:00",
+            "end_time": "2026-08-04T20:10:00+08:00",
+            "direction": "上行",
+            "responsible_person": "岩明 徐志凯",
+            "recorder": "罗忠宇",
+        },
+    ]
+    different_people = [
+        same_people[0],
+        {
+            "id": "different-people-next",
+            "route_code": "S90",
+            "start_time": "2026-08-04T19:45:23+08:00",
+            "end_time": "2026-08-04T20:10:00+08:00",
+            "direction": "上行",
+            "responsible_person": "黄丕云",
+            "recorder": "徐世城 熊志红",
+        },
+    ]
+
+    assert len(_record_groups(same_people)) == 1
+    assert _patrol_record_group_count(same_people) == 1
+    assert len(_record_groups(different_people)) == 2
+    assert _patrol_record_group_count(different_people) == 2
+
+
 def test_patrol_record_groups_handle_multiple_pairs_and_singletons():
     records = [
         {
@@ -273,11 +379,11 @@ def test_patrol_record_query_filters_route_and_name(monkeypatch):
         )
     )
 
-    assert [record["id"] for record in result.records] == ["match-responsible", "match-recorder", "wrong-route"]
+    assert [record["id"] for record in result.records] == ["match-responsible", "match-recorder"]
     assert result.stats["total_rows"] == 3
     assert result.stats["loaded_rows"] == 3
-    assert result.stats["route_matched_rows"] == 3
-    assert result.stats["matched_rows"] == 3
+    assert result.stats["route_matched_rows"] == 2
+    assert result.stats["matched_rows"] == 2
     assert result.stats["cache_used"] == 0
 
 

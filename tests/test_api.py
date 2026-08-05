@@ -139,6 +139,7 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'id="orangeWarningStatsMeta"' in html
     assert 'function orangeWarningStatsGroups' in html
     assert 'function orangeWarningCanJoinItems' in html
+    assert 'current.record && current.record.route_code' in html
     assert 'function orangeWarningStatsRowsFromGroups' in html
     assert 'function orangeWarningStatsRows' in html
     assert 'isGroupStart: highlighted && index === 0 && !previousHighlighted' in html
@@ -2344,6 +2345,7 @@ def test_feature_channel_legacy_enabled_switch_does_not_disable_wechat_commands(
 
 def test_wechat_interaction_config_controls_triggers_and_templates(tmp_path, monkeypatch):
     monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2026, 8, 4))
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
 
@@ -2377,13 +2379,13 @@ def test_wechat_interaction_config_controls_triggers_and_templates(tmp_path, mon
     assert save_response.status_code == 200
     config = save_response.json()["config"]
     assert config["patrol_record_triggers"] == ["记录模板"]
-    assert config["patrol_record_template"] == "查询张三巡查记录 2026-07-01至2026-07-31"
-    assert config["defaults"]["patrol_record_template"] == "查询张三巡查记录 2026-07-01至2026-07-31"
+    assert config["patrol_record_template"] == "查询商邱宏巡查记录 2026-07-01至2026-07-31"
+    assert config["defaults"]["patrol_record_template"] == "查询商邱宏巡查记录 2026-07-01至2026-07-31"
     assert config["tunnel_template"] == "自定义录入 日期{date} 负责人罗富耀 记录人张三 天气晴"
     assert config["tunnel_modify_template"] == "自定义修改 日期{date} 负责人罗富耀 记录人张三 天气晴 修改日期为{date}"
     assert "监控查询菜单" in config["menu_preview"]
     assert template_response.status_code == 200
-    assert template_response.json()["reply"] == "查询张三巡查记录 2026-07-01至2026-07-31"
+    assert template_response.json()["reply"] == "查询商邱宏巡查记录 2026-07-01至2026-07-31"
     assert old_trigger_response.status_code == 200
     assert old_trigger_response.json()["query_type"] == "patrol_record"
     assert "没有识别到姓名" in old_trigger_response.json()["reply"]
@@ -2398,6 +2400,22 @@ def test_wechat_interaction_config_controls_triggers_and_templates(tmp_path, mon
     assert len(test_body["results"]) == 3
     assert "修改入口" in test_body["summary"]
     assert "自定义修改 日期2026-08-04" in test_body["summary"]
+
+    legacy_save_response = client.post(
+        "/api/wechat-interaction-config",
+        json={
+            "patrol_record_triggers": ["巡查记录"],
+            "patrol_record_template": "查询张三巡查记录 2026-07-01至2026-07-31",
+            "tunnel_template_triggers": ["模板"],
+            "tunnel_template": "隧道机电录入 日期{date} 负责人罗富耀 记录人张三 天气晴",
+            "tunnel_modify_template_triggers": ["修改模板"],
+            "tunnel_modify_template": "隧道机电修改 日期{date} 负责人罗富耀 记录人张三 天气晴 修改日期为{date}",
+        },
+    )
+    legacy_config = legacy_save_response.json()["config"]
+    assert legacy_config["patrol_record_template"] == "查询商邱宏巡查记录 2026-07-01至2026-07-31"
+    assert legacy_config["tunnel_template"] == "隧道机电录入 日期{date} 负责人罗富耀 记录人商邱宏 天气晴"
+    assert legacy_config["tunnel_modify_template"] == "隧道机电修改 日期{date} 负责人罗富耀 记录人商邱宏 天气晴 修改日期为{date}"
     assert any(item["query_type"] == "tunnel_modify_template" for item in test_body["results"])
 
     logs_response = client.get("/api/wechat-interaction-logs?limit=5")
@@ -2430,15 +2448,15 @@ def test_wechat_query_help_returns_numbered_menu(tmp_path, monkeypatch):
     assert "7. 查询我的绑定" in body["reply"]
     assert "9. 查询2026-07-24机电" in body["reply"]
     assert "发送“巡查记录”可获取巡查记录查询模板" in body["reply"]
-    assert "查询张三巡查记录 2026-07-01至2026-07-31" in body["reply"]
+    assert "查询商邱宏巡查记录 2026-07-01至2026-07-31" in body["reply"]
     assert "回复序号即可执行" in body["reply"]
     assert "录入格式：" not in body["reply"]
-    assert "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人张三 天气晴" not in body["reply"]
+    assert "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人商邱宏 天气晴" not in body["reply"]
     assert body["replies"] == [
         body["reply"],
-        "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人张三 天气晴",
+        "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人商邱宏 天气晴",
     ]
-    assert body["template"] == "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人张三 天气晴"
+    assert body["template"] == "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人商邱宏 天气晴"
 
 
 def test_wechat_query_numbered_menu_selection_runs_command(tmp_path, monkeypatch):
@@ -2494,8 +2512,8 @@ def test_wechat_query_tunnel_mechanical_returns_fill_template(tmp_path, monkeypa
     assert body["query_type"] == "tunnel_mechanical_template"
     assert "隧道机电功能" in body["reply"]
     assert "查询今日机电" in body["reply"]
-    assert body["template"] == "隧道机电录入 日期2026-07-23 负责人罗富耀 记录人张三 天气晴"
-    assert body["replies"][-1] == "隧道机电录入 日期2026-07-23 负责人罗富耀 记录人张三 天气晴"
+    assert body["template"] == "隧道机电录入 日期2026-07-23 负责人罗富耀 记录人商邱宏 天气晴"
+    assert body["replies"][-1] == "隧道机电录入 日期2026-07-23 负责人罗富耀 记录人商邱宏 天气晴"
     assert "当前模板资产：1 条" in body["reply"]
 
 
@@ -2516,9 +2534,9 @@ def test_wechat_query_template_shortcut_returns_tunnel_mechanical_template(tmp_p
     body = response.json()
     assert body["success"] is True
     assert body["query_type"] == "tunnel_mechanical_template"
-    assert body["reply"] == "隧道机电录入 日期2026-07-25 负责人罗富耀 记录人张三 天气晴"
-    assert body["replies"] == ["隧道机电录入 日期2026-07-25 负责人罗富耀 记录人张三 天气晴"]
-    assert body["template"] == "隧道机电录入 日期2026-07-25 负责人罗富耀 记录人张三 天气晴"
+    assert body["reply"] == "隧道机电录入 日期2026-07-25 负责人罗富耀 记录人商邱宏 天气晴"
+    assert body["replies"] == ["隧道机电录入 日期2026-07-25 负责人罗富耀 记录人商邱宏 天气晴"]
+    assert body["template"] == "隧道机电录入 日期2026-07-25 负责人罗富耀 记录人商邱宏 天气晴"
 
 
 def test_wechat_query_modify_shortcut_returns_tunnel_mechanical_modify_template(tmp_path, monkeypatch):
@@ -2539,9 +2557,9 @@ def test_wechat_query_modify_shortcut_returns_tunnel_mechanical_modify_template(
         body = response.json()
         assert body["success"] is True
         assert body["query_type"] == "tunnel_mechanical_modify_template"
-        assert body["reply"] == "隧道机电修改 日期2026-07-25 负责人罗富耀 记录人张三 天气晴 修改日期为2026-07-25"
-        assert body["replies"] == ["隧道机电修改 日期2026-07-25 负责人罗富耀 记录人张三 天气晴 修改日期为2026-07-25"]
-        assert body["template"] == "隧道机电修改 日期2026-07-25 负责人罗富耀 记录人张三 天气晴 修改日期为2026-07-25"
+        assert body["reply"] == "隧道机电修改 日期2026-07-25 负责人罗富耀 记录人商邱宏 天气晴 修改日期为2026-07-25"
+        assert body["replies"] == ["隧道机电修改 日期2026-07-25 负责人罗富耀 记录人商邱宏 天气晴 修改日期为2026-07-25"]
+        assert body["template"] == "隧道机电修改 日期2026-07-25 负责人罗富耀 记录人商邱宏 天气晴 修改日期为2026-07-25"
 
 
 def test_wechat_query_tunnel_mechanical_shortcut_returns_menu(tmp_path, monkeypatch):
@@ -2563,7 +2581,7 @@ def test_wechat_query_tunnel_mechanical_shortcut_returns_menu(tmp_path, monkeypa
     assert body["query_type"] == "tunnel_mechanical_template"
     assert "发送“模板”获取可复制录入模板" in body["reply"]
     assert "修改记录" in body["reply"]
-    assert body["replies"][1] == "隧道机电录入 日期2026-07-25 负责人罗富耀 记录人张三 天气晴"
+    assert body["replies"][1] == "隧道机电录入 日期2026-07-25 负责人罗富耀 记录人商邱宏 天气晴"
 
 
 def test_wechat_query_tunnel_mechanical_format_command_sends_copyable_template_separately(tmp_path, monkeypatch):
@@ -2589,7 +2607,7 @@ def test_wechat_query_tunnel_mechanical_format_command_sends_copyable_template_s
     assert body["success"] is True
     assert body["query_type"] == "tunnel_mechanical_template"
     assert body["replies"][0].startswith("隧道机电功能")
-    assert body["replies"][1] == "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人张三 天气晴"
+    assert body["replies"][1] == "隧道机电录入 日期2026-07-24 负责人罗富耀 记录人商邱宏 天气晴"
 
 
 def test_wechat_query_tunnel_mechanical_accepts_bot_name_starting_with_at(tmp_path, monkeypatch):
@@ -2702,7 +2720,7 @@ def test_wechat_query_patrol_record_template_and_date_range_image(tmp_path, monk
 
     assert template_response.status_code == 200
     assert template_response.json()["query_type"] == "patrol_record_template"
-    assert template_response.json()["reply"] == "查询张三巡查记录 2026-07-01至2026-07-31"
+    assert template_response.json()["reply"] == "查询商邱宏巡查记录 2026-07-01至2026-07-31"
     assert "巡查记录查询格式" not in template_response.json()["reply"]
     assert "示例：" not in template_response.json()["reply"]
     assert response.status_code == 200

@@ -8,6 +8,7 @@ import re
 from PIL import Image, ImageDraw, ImageFont
 
 from app.daily_duty_image import _font
+from app.patrol_warning import _patrol_record_person_signature
 
 
 WIDTH = 1280
@@ -144,9 +145,13 @@ def _record_groups(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _can_join(current: dict[str, Any], following: dict[str, Any] | None) -> bool:
     if not following:
         return False
+    if str(current.get("route_code") or "").strip().upper() != str(following.get("route_code") or "").strip().upper():
+        return False
     if str(current.get("direction") or "") not in {"上行", "下行"}:
         return False
     if str(following.get("direction") or "") not in {"上行", "下行"}:
+        return False
+    if not str(current.get("end_time") or "").strip() and _patrol_record_person_signature(current) != _patrol_record_person_signature(following):
         return False
     current_start = _record_datetime(current, "start_time", "end_time")
     current_end = _record_datetime(current, "end_time", "start_time")

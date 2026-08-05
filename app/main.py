@@ -40,6 +40,7 @@ from app.patrol_warning import (
     failure_backoff_until,
     next_poll_time,
     warning_from_dict,
+    _patrol_record_person_signature,
 )
 from app.patrol_warning_image import render_patrol_warning_image
 from app.patrol_record_image import render_patrol_record_image
@@ -73,11 +74,14 @@ TUNNEL_MECHANICAL_KEEPALIVE_ENABLED = os.getenv("TUNNEL_MECHANICAL_KEEPALIVE_ENA
 TUNNEL_MECHANICAL_KEEPALIVE_INTERVAL_MINUTES = max(5, int(os.getenv("TUNNEL_MECHANICAL_KEEPALIVE_INTERVAL_MINUTES", "30") or 30))
 TUNNEL_MECHANICAL_KEEPALIVE_REFRESH_BEFORE_MINUTES = max(5, int(os.getenv("TUNNEL_MECHANICAL_KEEPALIVE_REFRESH_BEFORE_MINUTES", "30") or 30))
 DEFAULT_PATROL_RECORD_TRIGGERS = ["巡查记录", "查询巡查记录", "查巡查记录", "巡查记录查询"]
-DEFAULT_PATROL_RECORD_TEMPLATE = "查询张三巡查记录 2026-07-01至2026-07-31"
+LEGACY_PATROL_RECORD_TEMPLATE = "查询张三巡查记录 2026-07-01至2026-07-31"
+DEFAULT_PATROL_RECORD_TEMPLATE = "查询商邱宏巡查记录 2026-07-01至2026-07-31"
 DEFAULT_TUNNEL_TEMPLATE_TRIGGERS = ["模板"]
 DEFAULT_TUNNEL_MODIFY_TEMPLATE_TRIGGERS = ["修改", "修改模板", "改模板"]
-DEFAULT_TUNNEL_TEMPLATE = "隧道机电录入 日期{date} 负责人罗富耀 记录人张三 天气晴"
-DEFAULT_TUNNEL_MODIFY_TEMPLATE = "隧道机电修改 日期{date} 负责人罗富耀 记录人张三 天气晴 修改日期为{date}"
+LEGACY_TUNNEL_TEMPLATE = "隧道机电录入 日期{date} 负责人罗富耀 记录人张三 天气晴"
+LEGACY_TUNNEL_MODIFY_TEMPLATE = "隧道机电修改 日期{date} 负责人罗富耀 记录人张三 天气晴 修改日期为{date}"
+DEFAULT_TUNNEL_TEMPLATE = "隧道机电录入 日期{date} 负责人罗富耀 记录人商邱宏 天气晴"
+DEFAULT_TUNNEL_MODIFY_TEMPLATE = "隧道机电修改 日期{date} 负责人罗富耀 记录人商邱宏 天气晴 修改日期为{date}"
 DEFAULT_WECHAT_INTERACTION_CONFIG = {
     "patrol_record_triggers": DEFAULT_PATROL_RECORD_TRIGGERS,
     "patrol_record_template": DEFAULT_PATROL_RECORD_TEMPLATE,
@@ -1124,11 +1128,23 @@ def create_app(
     def save_wechat_interaction_config(request: WechatInteractionConfigRequest):
         repo.save_wechat_interaction_config(
             patrol_record_triggers=_normalize_wechat_trigger_list(request.patrol_record_triggers, DEFAULT_PATROL_RECORD_TRIGGERS),
-            patrol_record_template=(request.patrol_record_template.strip() or DEFAULT_PATROL_RECORD_TEMPLATE),
+            patrol_record_template=_normalize_wechat_template_text(
+                request.patrol_record_template,
+                DEFAULT_PATROL_RECORD_TEMPLATE,
+                LEGACY_PATROL_RECORD_TEMPLATE,
+            ),
             tunnel_template_triggers=_normalize_wechat_trigger_list(request.tunnel_template_triggers, DEFAULT_TUNNEL_TEMPLATE_TRIGGERS),
-            tunnel_template=(request.tunnel_template.strip() or DEFAULT_TUNNEL_TEMPLATE),
+            tunnel_template=_normalize_wechat_template_text(
+                request.tunnel_template,
+                DEFAULT_TUNNEL_TEMPLATE,
+                LEGACY_TUNNEL_TEMPLATE,
+            ),
             tunnel_modify_template_triggers=_normalize_wechat_trigger_list(request.tunnel_modify_template_triggers, DEFAULT_TUNNEL_MODIFY_TEMPLATE_TRIGGERS),
-            tunnel_modify_template=(request.tunnel_modify_template.strip() or DEFAULT_TUNNEL_MODIFY_TEMPLATE),
+            tunnel_modify_template=_normalize_wechat_template_text(
+                request.tunnel_modify_template,
+                DEFAULT_TUNNEL_MODIFY_TEMPLATE,
+                LEGACY_TUNNEL_MODIFY_TEMPLATE,
+            ),
         )
         return {"success": True, "config": _public_wechat_interaction_config(repo)}
 
@@ -1753,15 +1769,34 @@ def _normalize_wechat_trigger_list(values: Any, defaults: list[str]) -> list[str
     return list(defaults)
 
 
+def _normalize_wechat_template_text(value: Any, default: str, *legacy_defaults: str) -> str:
+    text = str(value or "").strip()
+    if not text or text in set(legacy_defaults):
+        return default
+    return text
+
+
 def _wechat_interaction_config(repo: DutyRepository) -> dict[str, Any]:
     raw = repo.get_wechat_interaction_config()
     return {
         "patrol_record_triggers": _normalize_wechat_trigger_list(raw.get("patrol_record_triggers"), DEFAULT_PATROL_RECORD_TRIGGERS),
-        "patrol_record_template": str(raw.get("patrol_record_template") or DEFAULT_PATROL_RECORD_TEMPLATE).strip() or DEFAULT_PATROL_RECORD_TEMPLATE,
+        "patrol_record_template": _normalize_wechat_template_text(
+            raw.get("patrol_record_template"),
+            DEFAULT_PATROL_RECORD_TEMPLATE,
+            LEGACY_PATROL_RECORD_TEMPLATE,
+        ),
         "tunnel_template_triggers": _normalize_wechat_trigger_list(raw.get("tunnel_template_triggers"), DEFAULT_TUNNEL_TEMPLATE_TRIGGERS),
-        "tunnel_template": str(raw.get("tunnel_template") or DEFAULT_TUNNEL_TEMPLATE).strip() or DEFAULT_TUNNEL_TEMPLATE,
+        "tunnel_template": _normalize_wechat_template_text(
+            raw.get("tunnel_template"),
+            DEFAULT_TUNNEL_TEMPLATE,
+            LEGACY_TUNNEL_TEMPLATE,
+        ),
         "tunnel_modify_template_triggers": _normalize_wechat_trigger_list(raw.get("tunnel_modify_template_triggers"), DEFAULT_TUNNEL_MODIFY_TEMPLATE_TRIGGERS),
-        "tunnel_modify_template": str(raw.get("tunnel_modify_template") or DEFAULT_TUNNEL_MODIFY_TEMPLATE).strip() or DEFAULT_TUNNEL_MODIFY_TEMPLATE,
+        "tunnel_modify_template": _normalize_wechat_template_text(
+            raw.get("tunnel_modify_template"),
+            DEFAULT_TUNNEL_MODIFY_TEMPLATE,
+            LEGACY_TUNNEL_MODIFY_TEMPLATE,
+        ),
     }
 
 
@@ -2556,7 +2591,7 @@ async def _build_wechat_patrol_record_response(
         return {
             "success": False,
             "query_type": "patrol_record",
-            "reply": "没有识别到姓名，请按格式发送：查询张三巡查记录 2026-07-01至2026-07-31",
+            "reply": f"没有识别到姓名，请按格式发送：{DEFAULT_PATROL_RECORD_TEMPLATE}",
         }
     if date_range is None:
         return {
@@ -2701,9 +2736,13 @@ def _patrol_record_group_count(records: list[dict[str, Any]]) -> int:
 
 
 def _patrol_records_can_join(current: dict[str, Any], following: dict[str, Any]) -> bool:
+    if str(current.get("route_code") or "").strip().upper() != str(following.get("route_code") or "").strip().upper():
+        return False
     if str(current.get("direction") or "") not in {"上行", "下行"}:
         return False
     if str(following.get("direction") or "") not in {"上行", "下行"}:
+        return False
+    if not str(current.get("end_time") or "").strip() and _patrol_record_person_signature(current) != _patrol_record_person_signature(following):
         return False
     current_start = _patrol_record_datetime(current, "start_time", "end_time")
     current_end = _patrol_record_datetime(current, "end_time", "start_time")
@@ -3175,7 +3214,7 @@ def _tunnel_mechanical_wechat_template_reply(
         "修改记录：\n"
         "- 发送“修改模板”获取可复制修改模板\n"
         f"- {_tunnel_mechanical_wechat_modify_template_line(template, target_date, repo=repo)}\n"
-        "- 也可以修改天气、负责人、记录人，例如：修改天气为多云、负责人改为罗富耀、记录人改为张三\n"
+        "- 也可以修改天气、负责人、记录人，例如：修改天气为多云、负责人改为罗富耀、记录人改为商邱宏\n"
         f"登录失效时会自动重新登录；验证码识别失败会自动重试。"
         f"{asset_line}"
         f"{people_line}"
@@ -3655,7 +3694,7 @@ def _wechat_query_help_text() -> str:
         "10. 查看隧道机电录入格式\n"
         "直接回复序号即可执行。\n"
         "发送“巡查记录”可获取巡查记录查询模板。\n"
-        "示例：查询张三巡查记录 2026-07-01至2026-07-31\n"
+        f"示例：{DEFAULT_PATROL_RECORD_TEMPLATE}\n"
         "发送“模板”可单独获取隧道机电录入模板。\n"
         "发送“修改模板”可单独获取隧道机电修改模板。\n"
         "发送“机电”可查看隧道机电菜单。\n"
