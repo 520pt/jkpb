@@ -214,7 +214,7 @@
     }
     .orange-warning-layout {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(580px, 720px);
+      grid-template-columns: minmax(0, 1fr) minmax(620px, 800px);
       gap: 18px;
       align-items: stretch;
       min-height: 0;
@@ -384,11 +384,19 @@
     }
     .orange-warning-stats-table {
       width: 100%;
+      min-width: 760px;
       border-collapse: separate;
       border-spacing: 0;
       table-layout: fixed;
       font-size: 12px;
     }
+    .orange-warning-stats-col-count { width: 6%; }
+    .orange-warning-stats-col-date { width: 13%; }
+    .orange-warning-stats-col-time { width: 16%; }
+    .orange-warning-stats-col-direction { width: 8%; }
+    .orange-warning-stats-col-stake { width: 15%; }
+    .orange-warning-stats-col-person { width: 21%; }
+    .orange-warning-stats-col-recorder { width: 21%; }
     .orange-warning-stats-table th,
     .orange-warning-stats-table td {
       padding: 8px 4px;
@@ -397,10 +405,16 @@
       text-align: center;
       vertical-align: middle;
       max-width: 0;
+      white-space: nowrap;
+      overflow-wrap: normal;
+      word-break: normal;
+      line-break: auto;
+    }
+    .orange-warning-stats-table th:nth-child(6),
+    .orange-warning-stats-table td:nth-child(6),
+    .orange-warning-stats-table th:nth-child(7),
+    .orange-warning-stats-table td:nth-child(7) {
       white-space: normal;
-      overflow-wrap: anywhere;
-      word-break: break-word;
-      line-break: anywhere;
     }
     .orange-warning-person-list {
       display: flex;
@@ -420,28 +434,6 @@
       white-space: nowrap;
       word-break: keep-all;
       overflow-wrap: normal;
-    }
-    .orange-warning-stats-table th:nth-child(1),
-    .orange-warning-stats-table td:nth-child(1) {
-      width: 44px;
-    }
-    .orange-warning-stats-table th:nth-child(2),
-    .orange-warning-stats-table td:nth-child(2) {
-      width: 90px;
-    }
-    .orange-warning-stats-table th:nth-child(3),
-    .orange-warning-stats-table td:nth-child(3) {
-      width: 120px;
-    }
-    .orange-warning-stats-table th:nth-child(4),
-    .orange-warning-stats-table td:nth-child(4) {
-      width: 54px;
-    }
-    .orange-warning-stats-table th:nth-child(5),
-    .orange-warning-stats-table td:nth-child(5),
-    .orange-warning-stats-table th:nth-child(6),
-    .orange-warning-stats-table td:nth-child(6) {
-      width: 64px;
     }
     .orange-warning-stats-table td.orange-warning-stats-group-count {
       font-weight: 700;
@@ -2625,6 +2617,15 @@
             <div id="orangeWarningStatsMeta" class="orange-warning-stats-meta">第 1/1 页</div>
             <div class="orange-warning-stats-table-wrap">
               <table class="orange-warning-stats-table">
+                <colgroup>
+                  <col class="orange-warning-stats-col-count" />
+                  <col class="orange-warning-stats-col-date" />
+                  <col class="orange-warning-stats-col-time" />
+                  <col class="orange-warning-stats-col-direction" />
+                  <col class="orange-warning-stats-col-stake" />
+                  <col class="orange-warning-stats-col-person" />
+                  <col class="orange-warning-stats-col-recorder" />
+                </colgroup>
                 <tbody id="orangeWarningStatsTable"></tbody>
               </table>
             </div>
@@ -6398,6 +6399,10 @@
       return String(record && record.direction ? record.direction : "").trim();
     }
 
+    function orangeWarningRecordStakeRange(record) {
+      return String(record && record.stake_range ? record.stake_range : "").trim();
+    }
+
     function orangeWarningRecordTimeValue(record, field, fallbackField) {
       const value = String(record && (record[field] || record[fallbackField]) ? (record[field] || record[fallbackField]) : "").trim();
       if (!value) return 0;
@@ -6463,9 +6468,6 @@
         next
           && String(current.record && current.record.route_code || "").trim().toUpperCase()
             === String(next.record && next.record.route_code || "").trim().toUpperCase()
-          && (current.direction === "上行" || current.direction === "下行")
-          && (next.direction === "上行" || next.direction === "下行")
-          && current.direction !== next.direction
           && current.timestamp
           && next.timestamp
           && current.endTimestamp
@@ -6521,7 +6523,7 @@
         const current = items[index];
         count += 1;
         const groupRecords = [current.record];
-        if (index + 1 < items.length && orangeWarningCanJoinItems(items[index], items[index + 1])) {
+        while (index + 1 < items.length && orangeWarningCanJoinItems(items[index], items[index + 1])) {
           index += 1;
           groupRecords.push(items[index].record);
         }
@@ -6556,8 +6558,7 @@
 
     function orangeWarningIsHighlightedStatsGroup(group) {
       const records = group && Array.isArray(group.records) ? group.records : [];
-      if (records.length > 1) return true;
-      return orangeWarningRecordDirection(records[0]) === "双向";
+      return records.length > 0;
     }
 
     function orangeWarningPersonNames(value) {
@@ -6655,11 +6656,11 @@
       }
       if (summary) summary.textContent = `巡查记录：${stats.recordCount}条 实际次数：${stats.mergedCount}次`;
         if (footnote) {
-          footnote.textContent = `说明：同一路线相邻 ${ORANGE_WARNING_PAIR_WINDOW_MINUTES} 分钟内的一组上行+下行按 1 次计；同方向不合并，连续第三条另计，双向单独按 1 次计。`;
+          footnote.textContent = `说明：同一路线相邻 ${ORANGE_WARNING_PAIR_WINDOW_MINUTES} 分钟内的连续记录按 1 次计；方向不影响合并，超过窗口或不同路线另计。`;
         }
       if (!table) return;
       if (!displayGroups.length) {
-        table.innerHTML = '<tr><td colspan="6">暂无记录</td></tr>';
+        table.innerHTML = '<tr><td colspan="7">暂无记录</td></tr>';
         if (pagination) pagination.innerHTML = "";
         return;
       }
@@ -6677,11 +6678,11 @@
       }
       const pageRows = orangeWarningStatsRowsFromGroups(pageRange.records);
       if (!pageRows.length) {
-        table.innerHTML = '<tr><td colspan="6">暂无记录</td></tr>';
+        table.innerHTML = '<tr><td colspan="7">暂无记录</td></tr>';
         return;
       }
       table.innerHTML = `
-        <tr><th>次数</th><th>日期</th><th>时间</th><th>方向</th><th>巡查人</th><th>记录人</th></tr>
+        <tr><th>次数</th><th>日期</th><th>时间</th><th>方向</th><th>桩号</th><th>巡查人</th><th>记录人</th></tr>
         ${pageRows.map((row) => {
           const record = row.record || {};
           const isHighlighted = Boolean(row.highlighted);
@@ -6699,7 +6700,7 @@
             const classes = [];
             if (isGroupStart) classes.push("orange-warning-stats-edge-top");
             if (isGroupEnd) classes.push("orange-warning-stats-edge-bottom");
-            if (isHighlighted && cellIndex === 4) classes.push("orange-warning-stats-edge-right");
+            if (isHighlighted && cellIndex === 5) classes.push("orange-warning-stats-edge-right");
             return classes.length ? ` class="${classes.join(" ")}"` : "";
           };
           return `
@@ -6708,8 +6709,9 @@
               <td${dataCellClass(0)}>${escapeHtml(orangeWarningRecordDate(record) || "-")}</td>
               <td${dataCellClass(1)}>${escapeHtml(orangeWarningRecordTime(record) || "-")}</td>
               <td${dataCellClass(2)}>${escapeHtml(orangeWarningRecordDirection(record) || "-")}</td>
-              <td${dataCellClass(3)}>${orangeWarningPersonCellHtml(record.responsible_person || "-")}</td>
-              <td${dataCellClass(4)}>${orangeWarningPersonCellHtml(record.recorder || "-")}</td>
+              <td${dataCellClass(3)}>${escapeHtml(orangeWarningRecordStakeRange(record) || "-")}</td>
+              <td${dataCellClass(4)}>${orangeWarningPersonCellHtml(record.responsible_person || "-")}</td>
+              <td${dataCellClass(5)}>${orangeWarningPersonCellHtml(record.recorder || "-")}</td>
             </tr>
           `;
         }).join("")}
@@ -6839,12 +6841,13 @@
           orangeWarningRecordDate(record) || "-",
           orangeWarningRecordTime(record) || "-",
           orangeWarningRecordDirection(record) || "-",
+          orangeWarningRecordStakeRange(record) || "-",
           orangeWarningPersonCellHtml(record.responsible_person || "-"),
           orangeWarningPersonCellHtml(record.recorder || "-"),
         ];
         values.forEach((value, cellIndex) => {
           const edgeStyle = `${topStyle}${bottomStyle}${cellIndex === values.length - 1 ? rightStyle : ""}`;
-          const cellValue = cellIndex >= 3 ? value : escapeHtml(value);
+          const cellValue = cellIndex >= 4 ? value : escapeHtml(value);
           cells.push(`<td style="${edgeStyle}">${cellValue}</td>`);
         });
         return `<tr>${cells.join("")}</tr>`;
@@ -6873,10 +6876,11 @@
                 <col style="width:112px" />
                 <col style="width:160px" />
                 <col style="width:68px" />
+                <col style="width:120px" />
                 <col style="width:210px" />
                 <col style="width:210px" />
               </colgroup>
-              <tr><th>次数</th><th>日期</th><th>时间</th><th>方向</th><th>巡查人</th><th>记录人</th></tr>
+              <tr><th>次数</th><th>日期</th><th>时间</th><th>方向</th><th>桩号</th><th>巡查人</th><th>记录人</th></tr>
               ${htmlRows}
             </table>
           </body>
@@ -6913,7 +6917,7 @@
       const verticalPadding = sampleStyle
         ? (parseFloat(sampleStyle.paddingTop) || 8) + (parseFloat(sampleStyle.paddingBottom) || 8)
         : 16;
-      const columns = ["次数", "日期", "时间", "方向", "巡查人", "记录人"].map((title, index) => ({
+      const columns = ["次数", "日期", "时间", "方向", "桩号", "巡查人", "记录人"].map((title, index) => ({
         title,
         width: headerCells[index] ? headerCells[index].getBoundingClientRect().width : 114,
       }));
@@ -6930,6 +6934,7 @@
           orangeWarningRecordDate(record) || "-",
           orangeWarningRecordTime(record) || "-",
           orangeWarningRecordDirection(record) || "-",
+          orangeWarningRecordStakeRange(record) || "-",
           record.responsible_person || "-",
           record.recorder || "-",
         ]);
@@ -6939,7 +6944,7 @@
             verticalPadding,
             lineHeight: defaultLineHeight,
             minHeight: Math.max(33, verticalPadding + defaultLineHeight),
-            personNames: index >= 3,
+            personNames: index >= 4,
           }))
         ));
         return { group, rows, rowHeights, height: rowHeights.reduce((sum, height) => sum + height, 0) };
@@ -7023,7 +7028,7 @@
               fontSize: defaultFontSize,
               lineHeight: defaultLineHeight,
               horizontalPadding,
-              personNames: cellIndex >= 3,
+              personNames: cellIndex >= 4,
             });
             cellX += column.width;
           });

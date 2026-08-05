@@ -142,6 +142,7 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'current.record && current.record.route_code' in html
     assert 'function orangeWarningStatsRowsFromGroups' in html
     assert 'function orangeWarningStatsRows' in html
+    assert 'while (index + 1 < items.length && orangeWarningCanJoinItems(items[index], items[index + 1]))' in html
     assert 'isGroupStart: highlighted && index === 0 && !previousHighlighted' in html
     assert 'isGroupEnd: highlighted && index === (group.records || []).length - 1' in html
     assert 'endTimestamp: orangeWarningRecordEndTimestamp(record)' in html
@@ -154,7 +155,7 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'orangeWarningTableExportFilename' in html
     assert 'ctx.fillRect(x + borderWidth, y, Math.max(0, width - borderWidth * 2), borderWidth)' in html
     assert 'orangeWarningDrawExportGroupBorder(ctx, margin, groupY, tableWidth, layout.height, { skipTop: skipTopBorder })' in html
-    assert 'orangeWarningRecordDirection(records[0]) === "双向"' in html
+    assert 'return records.length > 0;' in html
     assert '(groups || []).forEach((group, groupIndex) => {' in html
     assert 'const countStyles = [`font-weight:${highlighted ? "700" : "400"}`];' in html
     assert 'if (row.isGroupStart) countStyles.push("border-top:2px solid #111827")' in html
@@ -162,7 +163,12 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'const pageRows = orangeWarningStatsRowsFromGroups(pageRange.records);' in html
     assert 'const pageRows = orangeWarningStatsRows(pageRange.records);' not in html
     assert '巡查记录：${stats.recordCount}条 实际次数：${stats.mergedCount}次' in html
-    assert '<tr><th>次数</th><th>日期</th><th>时间</th><th>方向</th><th>巡查人</th><th>记录人</th></tr>' in html
+    assert '<tr><th>次数</th><th>日期</th><th>时间</th><th>方向</th><th>桩号</th><th>巡查人</th><th>记录人</th></tr>' in html
+    assert '<col class="orange-warning-stats-col-stake" />' in html
+    assert '<col class="orange-warning-stats-col-recorder" />' in html
+    assert '.orange-warning-stats-table th:nth-child(7)' in html
+    assert 'grid-template-columns: minmax(0, 1fr) minmax(620px, 800px)' in html
+    assert 'min-width: 760px' in html
     assert 'orange-warning-stats-group-start' in html
     assert 'orange-warning-stats-group-end' in html
     assert 'orange-warning-stats-group-count' in html
@@ -174,21 +180,22 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'row.skipCountCell && cellIndex === 0' not in html
     assert 'border-top: 2px solid #111827' in html
     assert 'border-bottom: 2px solid #111827' in html
-    assert 'overflow-wrap: anywhere' in html
-    assert 'line-break: anywhere' in html
+    assert 'line-break: auto' in html
     assert 'function orangeWarningPersonNames' in html
     assert 'orange-warning-person-name' in html
     assert 'white-space: nowrap' in html
-    assert 'personNames: index >= 3' in html
+    assert 'personNames: index >= 4' in html
     assert 'word-break: break-all' in html
     assert '<td${countClass} rowspan="${escapeHtml(row.countRowspan || 1)}">${escapeHtml(row.count)}</td>' in html
+    assert 'return records.length > 0;' in html
+    assert '连续记录按 1 次计；方向不影响合并' in html
     assert '$("exportOrangeWarningStatsTableBtn").addEventListener("click", exportOrangeWarningStatsTable)' in html
     assert '$("exportOrangeWarningStatsImageBtn").addEventListener("click", exportOrangeWarningStatsImage)' in html
     assert 'skipCountCell: index > 0' in html
     assert '日期 / 时间 / 姓名' not in html
     assert 'orange-warning-layout' in html
     assert 'repeat(auto-fill, minmax(240px, 1fr))' in html
-    assert 'minmax(580px, 720px)' in html
+    assert 'grid-template-columns: minmax(0, 1fr) minmax(620px, 800px)' in html
     assert 'table-layout: fixed' in html
     assert 'ORANGE_WARNING_STATS_PAGE_SIZE' in html
     assert 'updateOrangeWarningLayoutHeight' in html

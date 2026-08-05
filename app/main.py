@@ -2729,20 +2729,16 @@ def _patrol_record_group_count(records: list[dict[str, Any]]) -> int:
     index = 0
     while index < len(ordered):
         count += 1
-        if index + 1 < len(ordered) and _patrol_records_can_join(ordered[index], ordered[index + 1]):
+        current = ordered[index]
+        while index + 1 < len(ordered) and _patrol_records_can_join(current, ordered[index + 1]):
             index += 1
+            current = ordered[index]
         index += 1
     return count
 
 
 def _patrol_records_can_join(current: dict[str, Any], following: dict[str, Any]) -> bool:
     if str(current.get("route_code") or "").strip().upper() != str(following.get("route_code") or "").strip().upper():
-        return False
-    if str(current.get("direction") or "") not in {"上行", "下行"}:
-        return False
-    if str(following.get("direction") or "") not in {"上行", "下行"}:
-        return False
-    if str(current.get("direction") or "") == str(following.get("direction") or ""):
         return False
     current_start = _patrol_record_datetime(current, "start_time", "end_time")
     current_end = _patrol_record_datetime(current, "end_time", "start_time")

@@ -135,7 +135,7 @@ def test_patrol_record_groups_pair_adjacent_records_across_midnight():
     assert _patrol_record_group_count(records) == 1
 
 
-def test_patrol_record_groups_only_merge_one_adjacent_opposite_pair():
+def test_patrol_record_groups_merge_continuous_same_route_cluster():
     records = [
         {
             "id": "r-up-1",
@@ -171,14 +171,12 @@ def test_patrol_record_groups_only_merge_one_adjacent_opposite_pair():
 
     groups = _record_groups(records)
 
-    assert [group["count"] for group in groups] == [1, 2, 3, 4]
+    assert [group["count"] for group in groups] == [1, 2]
     assert [[record["id"] for record in group["records"]] for group in groups] == [
-        ["r-up-1", "r-down-1"],
-        ["r-down-2"],
-        ["r-up-2"],
-        ["r-up-3"],
+        ["r-up-1", "r-down-1", "r-down-2"],
+        ["r-up-2", "r-up-3"],
     ]
-    assert _patrol_record_group_count(records) == 4
+    assert _patrol_record_group_count(records) == 2
 
 
 def test_patrol_record_groups_do_not_merge_different_routes():
@@ -367,7 +365,7 @@ def test_patrol_record_groups_handle_multiple_pairs_and_singletons():
         },
         {
             "id": "r-3",
-            "start_time": "2026-07-13T10:00:00+08:00",
+            "start_time": "2026-07-13T10:10:00+08:00",
             "end_time": "2026-07-13T10:30:00+08:00",
             "direction": "双向",
             "responsible_person": "罗森",
@@ -375,16 +373,16 @@ def test_patrol_record_groups_handle_multiple_pairs_and_singletons():
         },
         {
             "id": "r-4",
-            "start_time": "2026-07-13T11:00:00+08:00",
-            "end_time": "2026-07-13T11:28:00+08:00",
+            "start_time": "2026-07-13T10:30:30+08:00",
+            "end_time": "2026-07-13T10:55:00+08:00",
             "direction": "上行",
             "responsible_person": "罗森",
             "recorder": "张三",
         },
         {
             "id": "r-5",
-            "start_time": "2026-07-13T11:28:40+08:00",
-            "end_time": "2026-07-13T11:50:00+08:00",
+            "start_time": "2026-07-13T12:35:00+08:00",
+            "end_time": "2026-07-13T12:50:00+08:00",
             "direction": "下行",
             "responsible_person": "罗森",
             "recorder": "张三",
@@ -397,8 +395,8 @@ def test_patrol_record_groups_handle_multiple_pairs_and_singletons():
     assert [group["count"] for group in groups] == [1, 2, 3]
     assert [[record["id"] for record in group["records"]] for group in groups] == [
         ["r-1", "r-2"],
-        ["r-3"],
-        ["r-4", "r-5"],
+        ["r-3", "r-4"],
+        ["r-5"],
     ]
     assert _patrol_record_group_count(records) == 3
 

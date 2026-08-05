@@ -36,8 +36,9 @@ def render_patrol_record_image(
         ("日期", 150),
         ("时间", 190),
         ("方向", 100),
-        ("巡查人", 350),
-        ("记录人", 350),
+        ("桩号", 120),
+        ("巡查人", 290),
+        ("记录人", 290),
     ]
     table_width = sum(width for _, width in columns)
     row_padding_y = 13
@@ -50,7 +51,7 @@ def render_patrol_record_image(
         for record in group["records"]:
             values = _record_values(record)
             line_counts = [
-                len(_wrap_text(values[index], width - 24, fonts["body"], preserve_name_groups=index >= 3))
+                len(_wrap_text(values[index], width - 24, fonts["body"], preserve_name_groups=index >= 4))
                 for index, (_, width) in enumerate(columns[1:])
             ]
             row_heights.append(max(52, max(line_counts, default=1) * row_line_height + row_padding_y * 2))
@@ -86,7 +87,7 @@ def render_patrol_record_image(
     y = table_y + header_height
     for layout_index, layout in enumerate(row_layouts):
         group = layout["group"]
-        highlighted = len(group["records"]) > 1 or group["records"][0].get("direction") == "双向"
+        highlighted = _is_highlighted(group)
         group_y = y
         group_height = layout["height"]
         draw.rectangle((table_x, group_y, table_x + columns[0][1], group_y + group_height), fill="#ffffff")
@@ -104,7 +105,7 @@ def render_patrol_record_image(
                     (cell_x, row_y, cell_x + width, row_y + row_height),
                     value,
                     fonts["body"],
-                    preserve_name_groups=value_index >= 3,
+                    preserve_name_groups=value_index >= 4,
                 )
                 cell_x += width
             row_y += row_height
@@ -133,9 +134,11 @@ def _record_groups(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     index = 0
     while index < len(ordered):
         group_records = [ordered[index]]
-        if index + 1 < len(ordered) and _can_join(ordered[index], ordered[index + 1]):
+        current = ordered[index]
+        while index + 1 < len(ordered) and _can_join(current, ordered[index + 1]):
             index += 1
-            group_records.append(ordered[index])
+            current = ordered[index]
+            group_records.append(current)
         index += 1
         groups.append({"count": len(groups) + 1, "records": group_records})
     return groups
@@ -145,12 +148,6 @@ def _can_join(current: dict[str, Any], following: dict[str, Any] | None) -> bool
     if not following:
         return False
     if str(current.get("route_code") or "").strip().upper() != str(following.get("route_code") or "").strip().upper():
-        return False
-    if str(current.get("direction") or "") not in {"上行", "下行"}:
-        return False
-    if str(following.get("direction") or "") not in {"上行", "下行"}:
-        return False
-    if str(current.get("direction") or "") == str(following.get("direction") or ""):
         return False
     current_start = _record_datetime(current, "start_time", "end_time")
     current_end = _record_datetime(current, "end_time", "start_time")
@@ -173,7 +170,7 @@ def _record_datetime(record: dict[str, Any], field: str, fallback_field: str) ->
 
 def _is_highlighted(group: dict[str, Any]) -> bool:
     records = group.get("records") or []
-    return len(records) > 1 or (records and records[0].get("direction") == "双向")
+    return bool(records)
 
 
 def _record_values(record: dict[str, Any]) -> list[str]:
@@ -184,6 +181,7 @@ def _record_values(record: dict[str, Any]) -> list[str]:
         str(record.get("start_time") or "")[:10] or "-",
         time_text,
         str(record.get("direction") or "-") or "-",
+        str(record.get("stake_range") or "-") or "-",
         str(record.get("responsible_person") or "-") or "-",
         str(record.get("recorder") or "-") or "-",
     ]
