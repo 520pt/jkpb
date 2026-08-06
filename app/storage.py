@@ -1668,6 +1668,11 @@ class DutyRepository:
         except sqlite3.IntegrityError:
             return False
 
+    def delete_sent_once(self, reminder_key: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute("DELETE FROM sent_reminders WHERE reminder_key = ?", (reminder_key,))
+        return cursor.rowcount > 0
+
     def save_send_record(
         self,
         *,

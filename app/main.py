@@ -185,6 +185,18 @@ class WechatInteractionConfigRequest(BaseModel):
     tunnel_modify_template: str = ""
 
 
+class WechatInteractionTestRequest(BaseModel):
+    text: str = ""
+    room_id: str = ""
+    stable_room_id: str = ""
+    room_name: str = ""
+    sender_id: str = ""
+    runtime_sender_id: str = ""
+    stable_member_id: str = ""
+    sender_name: str = ""
+    target_date: date | None = None
+
+
 class PreviewRequest(BaseModel):
     target_date: date | None = None
 
@@ -1174,6 +1186,36 @@ def create_app(
             for item in results
         )
         return {"success": True, "result": primary_result, "results": results, "summary": summary}
+
+    @app.post("/api/wechat-interaction-config/simulate")
+    async def simulate_wechat_interaction(request: WechatInteractionTestRequest):
+        room_id = str(request.stable_room_id or request.room_id or "").strip()
+        config_room_ids = _notification_wechat_target_room_ids(repo)
+        if config_room_ids and room_id and room_id not in config_room_ids:
+            room_name = _notification_wechat_target_room_label(repo) or "未命名微信群"
+            raise HTTPException(status_code=403, detail=f"当前微信群不是通知渠道配置的个人微信群：{room_name}")
+        if not room_id:
+            room_id = next(iter(config_room_ids), "")
+        query = WechatQueryRequest(
+            text=request.text,
+            room_id=str(request.room_id or room_id),
+            stable_room_id=room_id,
+            room_name=request.room_name,
+            sender_id=request.sender_id,
+            runtime_sender_id=request.runtime_sender_id,
+            stable_member_id=request.stable_member_id or request.sender_id,
+            sender_name=request.sender_name,
+            target_date=request.target_date,
+        )
+        result = await _build_wechat_query_response_with_log(repo, query, uploads=uploads)
+        image_path = _wechat_query_result_image_path(result, uploads)
+        return {
+            "success": True,
+            "result": result,
+            "image_url": str(result.get("image_url") or result.get("result_image_url") or ""),
+            "image_full_url": _public_app_url(str(result.get("image_url") or result.get("result_image_url") or "")),
+            "image_exists": bool(image_path and image_path.exists()),
+        }
 
     @app.get("/api/wechat-interaction-logs")
     def get_wechat_interaction_logs(limit: int = 20):
@@ -6898,6 +6940,7 @@ async def _send_due_reminders(repo: DutyRepository) -> None:
                 content=event.content,
             )
         except Exception as exc:
+            repo.delete_sent_once(reminder_key)
             repo.save_send_record(
                 kind=event.kind,
                 target=event.person_name,
@@ -6961,4 +7004,4 @@ def _wecom_client_from_env() -> WeComClient | None:
     return WeComClient(corp_id=corp_id, corp_secret=corp_secret, agent_id=int(agent_id))
 
 
-app = create_app(start_scheduler=os.getenv("ENABLE_SCHEDULER", "true").lower() == "true")
+app = create_app()

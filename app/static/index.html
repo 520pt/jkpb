@@ -2802,6 +2802,49 @@
                   <button type="button" id="testFeatureChannelBtn">测试模板回复</button>
                 </div>
                 <div class="item">
+                  <strong>手动模拟微信发送</strong>
+                  <small>不通过微信直接把文本丢给同一套交互逻辑，适合测试群名、成员名、绑定和图片回复。</small>
+                </div>
+                <label>模拟消息内容
+                  <textarea id="wechatInteractionTestText" rows="3" placeholder="查询商邱宏巡查记录 2026-07-01至2026-07-31"></textarea>
+                </label>
+                <div class="field-grid">
+                  <label>模拟微信群
+                    <select id="wechatInteractionTestRoomId"></select>
+                  </label>
+                  <label>群名称
+                    <input id="wechatInteractionTestRoomName" placeholder="功能群" />
+                  </label>
+                </div>
+                <div class="field-grid">
+                  <label>发送者 ID
+                    <input id="wechatInteractionTestSenderId" placeholder="@member-1" />
+                  </label>
+                  <label>发送者名称
+                    <input id="wechatInteractionTestSenderName" placeholder="张三" />
+                  </label>
+                </div>
+                <div class="field-grid">
+                  <label>运行时发送者 ID
+                    <input id="wechatInteractionTestRuntimeSenderId" placeholder="@member-1" />
+                  </label>
+                  <label>目标日期
+                    <input id="wechatInteractionTestTargetDate" type="date" />
+                  </label>
+                </div>
+                <div class="field-grid">
+                  <label>稳定成员 ID
+                    <input id="wechatInteractionTestStableMemberId" placeholder="wgm_xxx" />
+                  </label>
+                  <div class="settings-actions" style="align-self:end;">
+                    <button class="primary" type="button" id="simulateWechatInteractionBtn">发送测试</button>
+                  </div>
+                </div>
+                <label>模拟结果
+                  <pre id="wechatInteractionTestResult" class="tunnel-result-box"></pre>
+                </label>
+                <img id="wechatInteractionTestImage" class="warning-image-preview hidden" alt="微信交互测试图片预览" />
+                <div class="item">
                   <strong>命中日志</strong>
                   <small>最近微信交互命中、模板触发和测试结果。</small>
                 </div>
@@ -3124,6 +3167,7 @@
       featureChannelDefaults: null,
       featureChannelRooms: [],
       featureChannelLogs: [],
+      featureChannelTestResult: null,
       todayReminderEvents: [],
       todayReminderGroupStatuses: [],
       todayReminderDate: "",
@@ -5837,6 +5881,61 @@
       };
     }
 
+    function populateWechatInteractionTestRooms(rooms) {
+      const select = $("wechatInteractionTestRoomId");
+      if (!select) return;
+      const items = normalizeFeatureChannelRooms(rooms || []);
+      const previous = select.value;
+      select.innerHTML = `<option value="">默认首个微信群</option>` + items.map((room) => {
+        const label = cleanWechatVisibleName(room.name, room.id) || room.id;
+        return `<option value="${escapeHtml(room.id)}"${room.id === previous ? " selected" : ""}>${escapeHtml(label)}</option>`;
+      }).join("");
+      if (!select.value && items[0]) select.value = items[0].id;
+    }
+
+    function wechatInteractionTestPayload() {
+      const roomId = $("wechatInteractionTestRoomId").value.trim();
+      return {
+        text: $("wechatInteractionTestText").value.trim(),
+        room_id: roomId,
+        stable_room_id: roomId,
+        room_name: $("wechatInteractionTestRoomName").value.trim(),
+        sender_id: $("wechatInteractionTestSenderId").value.trim(),
+        runtime_sender_id: $("wechatInteractionTestRuntimeSenderId").value.trim(),
+        stable_member_id: $("wechatInteractionTestStableMemberId").value.trim(),
+        sender_name: $("wechatInteractionTestSenderName").value.trim(),
+        target_date: $("wechatInteractionTestTargetDate").value || null
+      };
+    }
+
+    function renderWechatInteractionTestResult(result) {
+      const box = $("wechatInteractionTestResult");
+      const image = $("wechatInteractionTestImage");
+      if (!box || !image) return;
+      const payload = result && result.result ? result.result : result;
+      if (!payload) {
+        box.textContent = "";
+        image.classList.add("hidden");
+        image.removeAttribute("src");
+        return;
+      }
+      const lines = [];
+      lines.push(`query_type: ${payload.query_type || "-"}`);
+      lines.push(`success: ${payload.success ? "true" : "false"}`);
+      if (payload.reply) lines.push(`reply: ${payload.reply}`);
+      if (payload.replies && payload.replies.length) lines.push(`replies:\n- ${payload.replies.join("\n- ")}`);
+      if (payload.image_url) lines.push(`image_url: ${payload.image_url}`);
+      box.textContent = lines.join("\n");
+      const imageUrl = result.image_full_url || payload.image_full_url || payload.image_url || "";
+      if (imageUrl) {
+        image.src = imageUrl;
+        image.classList.remove("hidden");
+      } else {
+        image.classList.add("hidden");
+        image.removeAttribute("src");
+      }
+    }
+
     async function copyFeatureChannelMenu() {
       const text = $("wechatInteractionMenuPreview").textContent.trim();
       if (!text) throw new Error("菜单为空");
@@ -5958,6 +6057,7 @@
       config = config || {};
       state.featureChannelDefaults = config.defaults || state.featureChannelDefaults || featureChannelDefaultPayload();
       state.featureChannelRooms = normalizeFeatureChannelRooms(config.notification_rooms || []);
+      populateWechatInteractionTestRooms(state.featureChannelRooms);
       if (config.menu_preview) $("wechatInteractionMenuPreview").textContent = config.menu_preview || "";
       textareaFromList("wechatPatrolRecordTriggers", config.patrol_record_triggers || ["巡查记录"]);
       $("wechatPatrolRecordTemplate").value = config.patrol_record_template || "查询商邱宏巡查记录 2026-07-01至2026-07-31";
@@ -5969,6 +6069,7 @@
         ? state.featureChannelRooms.map((room) => cleanWechatVisibleName(room.name, room.id) || room.id).join("、")
         : "未在消息通知渠道配置个人微信群";
       renderFeatureChannelLogs(state.featureChannelLogs || []);
+      renderWechatInteractionTestResult(state.featureChannelTestResult);
       renderSettingsOverview();
     }
 
@@ -6029,6 +6130,29 @@
         await loadFeatureChannelLogs();
       } catch (error) {
         $("featureChannelStatus").textContent = `微信交互测试失败：${error.message || error}`;
+        $("featureChannelStatus").className = "status error";
+      }
+    });
+    $("simulateWechatInteractionBtn").addEventListener("click", async () => {
+      try {
+        const payload = wechatInteractionTestPayload();
+        if (!payload.text) throw new Error("请先填写模拟消息内容");
+        $("featureChannelStatus").textContent = "正在模拟微信发送...";
+        $("featureChannelStatus").className = "status";
+        const response = await fetch("/api/wechat-interaction-config/simulate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const body = await response.json();
+        if (!response.ok || !body.success) throw new Error(body.detail || "模拟发送失败");
+        state.featureChannelTestResult = body.result || null;
+        renderWechatInteractionTestResult(body);
+        $("featureChannelStatus").textContent = body.result && body.result.reply ? `模拟完成：${body.result.reply}` : "模拟发送完成";
+        $("featureChannelStatus").className = "status ok";
+        await loadFeatureChannelLogs();
+      } catch (error) {
+        $("featureChannelStatus").textContent = `模拟发送失败：${error.message || error}`;
         $("featureChannelStatus").className = "status error";
       }
     });
@@ -7506,7 +7630,7 @@
         const notificationLabel = body.notification_sender_type === "lightagent" ? wechatGatewayLabel() : "企业微信群机器人";
         const cards = [
           ["北京时间", formatIsoMinute(body.now_beijing), body.timezone || ""],
-          ["定时任务", yesNo(body.scheduler_enabled), body.scheduler_enabled ? "会自动发送到期提醒" : "当前不会自动发送"],
+          ["后台调度", yesNo(body.scheduler_enabled), body.scheduler_enabled ? "已启动，提醒是否发送看各项启用开关" : "仅测试模式关闭"],
           ["通知通道", body.notification_configured ? "已配置" : "未配置", body.notification_configured ? notificationLabel : "请先配置通知发送通道"],
           ["中文字体", body.cjk_font_ready ? "正常" : "缺失", body.cjk_font_ready ? "今日在岗图片中文可渲染" : "Docker 需安装中文字体"],
           ["排班表", `${body.roster_month_count || 0} 个月`, "已确认导入"],

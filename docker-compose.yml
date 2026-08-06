@@ -10,7 +10,6 @@ services:
       TZ: "${TZ:-Asia/Shanghai}"
       DATA_DIR: "${DATA_DIR:-/app/data}"
       UPLOAD_DIR: "${UPLOAD_DIR:-/app/uploads}"
-      ENABLE_SCHEDULER: "${ENABLE_SCHEDULER:-true}"
       ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
       ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
       MAX_UPLOAD_MB: "${MAX_UPLOAD_MB:-10}"

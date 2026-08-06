@@ -1,4 +1,5 @@
 import asyncio
+from zoneinfo import ZoneInfo
 import os
 import re
 from datetime import date, datetime, timedelta
@@ -12,6 +13,8 @@ import app.main as main_module
 from app.main import create_app
 from app.patrol_warning import warning_from_dict
 from app.storage import DutyRepository
+
+TZ = ZoneInfo("Asia/Shanghai")
 from tests.test_template_parser import _write_synthetic_roster
 
 
@@ -2431,6 +2434,82 @@ def test_wechat_interaction_config_controls_triggers_and_templates(tmp_path, mon
     assert logs
     assert logs[0]["command_text"] in {"记录模板", "巡查记录", "模板", "修改模板", "修改入口"}
     assert "reply_preview" in logs[0]
+
+
+def test_wechat_interaction_config_simulate_reuses_query_chain_and_logs(tmp_path, monkeypatch):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/notification-config",
+        json={
+            "sender_type": "lightagent",
+            "lightagent_url": "https://lightagent.test/api/push/send",
+            "lightagent_token": "push-token",
+            "lightagent_targets": [{"id": "room-1", "name": "功能群"}],
+        },
+    )
+
+    captured: dict[str, object] = {}
+
+    async def fake_build_wechat_query_response(repo_arg, query, *, uploads):
+        captured["text"] = query.text
+        captured["room_id"] = query.room_id
+        captured["stable_room_id"] = query.stable_room_id
+        captured["room_name"] = query.room_name
+        captured["sender_id"] = query.sender_id
+        captured["runtime_sender_id"] = query.runtime_sender_id
+        captured["stable_member_id"] = query.stable_member_id
+        captured["sender_name"] = query.sender_name
+        captured["target_date"] = query.target_date.isoformat() if query.target_date else ""
+        return {
+            "success": True,
+            "query_type": "patrol_record",
+            "reply": "查询完成",
+            "replies": ["查询完成"],
+            "image_url": "/api/uploads/patrol-record-test.png",
+        }
+
+    monkeypatch.setattr(main_module, "_build_wechat_query_response", fake_build_wechat_query_response)
+
+    response = client.post(
+        "/api/wechat-interaction-config/simulate",
+        json={
+            "text": "查询商邱宏巡查记录 2026-07-01至2026-07-31",
+            "room_id": "room-1",
+            "stable_room_id": "room-1",
+            "room_name": "功能群",
+            "sender_id": "@member-1",
+            "runtime_sender_id": "@member-1",
+            "stable_member_id": "wgm-1",
+            "sender_name": "张三",
+            "target_date": "2026-08-04",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["result"]["reply"] == "查询完成"
+    assert body["result"]["query_type"] == "patrol_record"
+    assert body["image_url"] == "/api/uploads/patrol-record-test.png"
+    assert body["image_exists"] is False
+    assert body["image_full_url"] == "/api/uploads/patrol-record-test.png"
+    assert captured == {
+        "text": "查询商邱宏巡查记录 2026-07-01至2026-07-31",
+        "room_id": "room-1",
+        "stable_room_id": "room-1",
+        "room_name": "功能群",
+        "sender_id": "@member-1",
+        "runtime_sender_id": "@member-1",
+        "stable_member_id": "wgm-1",
+        "sender_name": "张三",
+        "target_date": "2026-08-04",
+    }
+    logs = client.get("/api/wechat-interaction-logs?limit=1").json()["logs"]
+    assert logs and logs[0]["command_text"] == "查询商邱宏巡查记录 2026-07-01至2026-07-31"
+    assert logs[0]["room_id"] == "room-1"
+    assert logs[0]["room_name"] == "功能群"
+    assert logs[0]["sender_id"] == "@member-1"
 
 
 def test_wechat_query_help_returns_numbered_menu(tmp_path, monkeypatch):
@@ -5421,6 +5500,62 @@ def test_due_monitored_reminder_uses_saved_wechat_member_for_personal_wechat(tmp
     assert records[0]["kind"] == "daily"
     assert records[0]["target"] == "Alice"
     assert records[0]["status"] == "success"
+
+
+def test_due_reminder_retry_after_send_failure(tmp_path, monkeypatch):
+    sent: list[str] = []
+
+    class FrozenDateTime(datetime):
+        current = datetime(2025, 9, 16, 7, 50, 5, tzinfo=TZ)
+
+        @classmethod
+        def now(cls, tz=None):
+            return cls.current
+
+    class FlakyWebhookClient:
+        def __init__(self):
+            self.calls = 0
+
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            self.calls += 1
+            sent.append(content)
+            if self.calls == 1:
+                raise RuntimeError("network down")
+
+        async def send_image(self, image_bytes: bytes):
+            raise AssertionError("not expected")
+
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(webhook_url="https://example.test/cgi-bin/webhook/send?key=unit-test")
+    repo.save_daily_duty_config(enabled=False)
+    repo.save_roster_month(
+        2025,
+        9,
+        [{"name": "示例甲", "days": {"16": "中"}}],
+        "uploads/month.png",
+    )
+    repo.save_monitored_person(
+        name="示例甲",
+        mention_mobile="10000000000",
+        daily_time="07:50",
+        before_shift_minutes=0,
+        enabled=True,
+    )
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    flaky_client = FlakyWebhookClient()
+    monkeypatch.setattr(main_module, "_wecom_webhook_client_from_repo", lambda repo: flaky_client)
+
+    asyncio.run(main_module._send_due_reminders(repo))
+    assert len(sent) == 1
+    assert repo.list_send_records()[0]["status"] == "failed"
+
+    FrozenDateTime.current = datetime(2025, 9, 16, 7, 50, 5, tzinfo=TZ)
+    asyncio.run(main_module._send_due_reminders(repo))
+
+    records = repo.list_send_records()
+    assert len(sent) == 2
+    assert records[0]["status"] == "success"
+    assert records[1]["status"] == "failed"
 
 
 def test_due_custom_reminder_sends_with_saved_personnel_mobile(tmp_path, monkeypatch):
