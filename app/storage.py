@@ -49,11 +49,17 @@ DEFAULT_PATROL_WARNING_END_TEMPLATE = (
     "距离预警结束后{window_hours}小时内{patrol_frequency_clause}，倒计时结束还有 {remaining_hours} 小时。"
 )
 NOTIFICATION_SENDER_TYPES = {"wecom_webhook", "lightagent"}
+NOTIFICATION_MENTION_MODES = {"none", "all", "person", "custom"}
 
 
 def _normalize_notification_sender_type(value: str) -> str:
     normalized = str(value or "wecom_webhook").strip().lower()
     return normalized if normalized in NOTIFICATION_SENDER_TYPES else "wecom_webhook"
+
+
+def _normalize_notification_mention_mode(value: str) -> str:
+    normalized = str(value or "person").strip().lower()
+    return normalized if normalized in NOTIFICATION_MENTION_MODES else "person"
 
 
 def _normalize_patrol_send_content_mode(value: str) -> str:
@@ -156,6 +162,8 @@ class DutyRepository:
                     lightagent_token TEXT NOT NULL DEFAULT '',
                     lightagent_target TEXT NOT NULL DEFAULT '',
                     lightagent_targets_json TEXT NOT NULL DEFAULT '[]',
+                    mention_mode TEXT NOT NULL DEFAULT 'person',
+                    mention_targets TEXT NOT NULL DEFAULT '',
                     message_template TEXT NOT NULL DEFAULT '',
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
@@ -335,6 +343,10 @@ class DutyRepository:
                 conn.execute("ALTER TABLE notification_config ADD COLUMN lightagent_target TEXT NOT NULL DEFAULT ''")
             if "lightagent_targets_json" not in config_columns:
                 conn.execute("ALTER TABLE notification_config ADD COLUMN lightagent_targets_json TEXT NOT NULL DEFAULT '[]'")
+            if "mention_mode" not in config_columns:
+                conn.execute("ALTER TABLE notification_config ADD COLUMN mention_mode TEXT NOT NULL DEFAULT 'person'")
+            if "mention_targets" not in config_columns:
+                conn.execute("ALTER TABLE notification_config ADD COLUMN mention_targets TEXT NOT NULL DEFAULT ''")
             feature_columns = {row["name"] for row in conn.execute("PRAGMA table_info(feature_channel_config)").fetchall()}
             for column, definition in {
                 "enabled": "INTEGER NOT NULL DEFAULT 1",
@@ -962,6 +974,8 @@ class DutyRepository:
         lightagent_token: str = "",
         lightagent_target: str = "",
         lightagent_targets: list[dict[str, str]] | None = None,
+        mention_mode: str = "person",
+        mention_targets: str = "",
     ) -> None:
         targets = _normalize_feature_channel_rooms(lightagent_targets or [])
         if not targets and str(lightagent_target or "").strip():
@@ -971,8 +985,8 @@ class DutyRepository:
             conn.execute(
                 """
                 INSERT INTO notification_config
-                    (id, sender_type, webhook_url, lightagent_url, lightagent_token, lightagent_target, lightagent_targets_json, message_template)
-                VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+                    (id, sender_type, webhook_url, lightagent_url, lightagent_token, lightagent_target, lightagent_targets_json, mention_mode, mention_targets, message_template)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     sender_type = excluded.sender_type,
                     webhook_url = excluded.webhook_url,
@@ -980,6 +994,8 @@ class DutyRepository:
                     lightagent_token = excluded.lightagent_token,
                     lightagent_target = excluded.lightagent_target,
                     lightagent_targets_json = excluded.lightagent_targets_json,
+                    mention_mode = excluded.mention_mode,
+                    mention_targets = excluded.mention_targets,
                     message_template = excluded.message_template,
                     updated_at = CURRENT_TIMESTAMP
                 """,
@@ -990,6 +1006,8 @@ class DutyRepository:
                     lightagent_token,
                     primary_target,
                     json.dumps(targets, ensure_ascii=False),
+                    _normalize_notification_mention_mode(mention_mode),
+                    mention_targets.strip(),
                     message_template or DEFAULT_MESSAGE_TEMPLATE,
                 ),
             )
@@ -998,7 +1016,7 @@ class DutyRepository:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT sender_type, webhook_url, lightagent_url, lightagent_token, lightagent_target, lightagent_targets_json, message_template
+                SELECT sender_type, webhook_url, lightagent_url, lightagent_token, lightagent_target, lightagent_targets_json, mention_mode, mention_targets, message_template
                 FROM notification_config
                 WHERE id = 1
                 """
@@ -1011,6 +1029,8 @@ class DutyRepository:
                 "lightagent_token": "",
                 "lightagent_target": "",
                 "lightagent_targets": [],
+                "mention_mode": "person",
+                "mention_targets": "",
                 "message_template": DEFAULT_MESSAGE_TEMPLATE,
             }
         targets = _normalize_feature_channel_rooms(_loads_json(row["lightagent_targets_json"], []))
@@ -1023,6 +1043,8 @@ class DutyRepository:
             "lightagent_token": row["lightagent_token"],
             "lightagent_target": row["lightagent_target"],
             "lightagent_targets": targets,
+            "mention_mode": _normalize_notification_mention_mode(row["mention_mode"]),
+            "mention_targets": row["mention_targets"],
             "message_template": row["message_template"] or DEFAULT_MESSAGE_TEMPLATE,
         }
 

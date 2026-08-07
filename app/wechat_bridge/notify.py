@@ -28,7 +28,7 @@ class WechatBridgeNotifyClient:
         sent = 0
         for target in self.targets:
             try:
-                self.manager.send_text(target, content, mention_ids=mentioned_mobile_list or [])
+                self.manager.send_text(target, content)
                 sent += 1
             except Exception as exc:
                 failures.append(f"{target}: {exc}")

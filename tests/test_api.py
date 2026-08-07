@@ -84,8 +84,9 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'id="driverNameInput" list="personnelNameOptions" placeholder="选择或输入姓名"' in html
     assert 'data-edit-person="${escapeHtml(person.name)}"' in html
     assert 'data-delete-person="${escapeHtml(person.name)}"' in html
-    assert 'id="testMobile" placeholder="10000000000"' in html
-    assert 'id="monitorMobileField">@ 手机号 <input id="mentionMobile" placeholder="10000000000"' in html
+    assert 'id="notificationMentionMode"' in html
+    assert 'id="notificationMentionTargets"' in html
+    assert 'id="notificationTestPersonName" list="personnelNameOptions" placeholder="示例甲"' in html
     assert 'class="field-grid hidden" id="monitorWechatFields"' in html
     assert 'id="monitorWechatMember"' in html
     assert 'id="monitorWechatMemberId" readonly placeholder="未绑定"' in html
@@ -222,7 +223,10 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'id="testTunnelMechanicalLoginBtn"' in html
     assert "tunnel-asset-card" in html
     assert 'data-settings-target="featureChannelSettings"' in html
+    assert 'data-settings-target="wechatSimulationSettings"' in html
     assert 'id="featureChannelSettings"' in html
+    assert 'id="wechatSimulationSettings"' in html
+    assert html.index('data-settings-target="featureChannelSettings"') < html.index('data-settings-target="wechatSimulationSettings"')
     assert 'id="wechatPatrolRecordTriggers"' in html
     assert 'id="wechatPatrolRecordTemplate"' in html
     assert 'id="wechatTunnelTemplateTriggers"' in html
@@ -231,10 +235,28 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'id="wechatInteractionNotificationRooms"' in html
     assert 'id="wechatTunnelTemplate"' in html
     assert 'id="wechatTunnelModifyTemplate"' in html
+    assert 'function latestSavedRoster(rosters)' in html
+    assert 'state.selectedSavedRoster = latest ? savedRosterKey(latest) : "";' in html
+    assert 'saved-today-monitor-cell' in html
+    assert 'saved-today-monitor-name' in html
+    assert 'saved-today-monitor-row-path' in html
+    assert 'saved-today-monitor-col-path' in html
+    assert 'saved-today-monitor-join-prev' in html
+    assert 'todayMonitorRowIndexes' in html
+    assert 'monitorShiftCodes.has' in html
+    assert 'id="wechatInteractionTestText"' in html
+    assert 'id="wechatInteractionTestStatus"' in html
     feature_section = html[
         html.index('<section class="settings-panel wechat-interaction-panel" id="featureChannelSettings">') :
+        html.index('<section class="settings-panel single" id="wechatSimulationSettings">')
+    ]
+    simulation_section = html[
+        html.index('<section class="settings-panel single" id="wechatSimulationSettings">') :
         html.index('<section class="settings-panel reminder-card-panel" id="monitorSettings">')
     ]
+    assert '手动模拟微信发送' not in feature_section
+    assert 'id="wechatInteractionTestText"' not in feature_section
+    assert 'id="wechatInteractionTestText"' in simulation_section
     assert '<div class="side-block wide">' not in feature_section
     assert feature_section.count('<div class="side-block">') >= 2
     assert ".settings-panel.wechat-interaction-panel" in html
@@ -1571,8 +1593,8 @@ def test_lightagent_notification_config_hides_secret_fields_and_tests_send(tmp_p
         "target": "",
         "targets": ["room-1", "room-2"],
         "token": "push-token",
-        "content": "示例甲 2025-09-16 中班",
-        "mobiles": ["@wechat-member-1"],
+        "content": "@示例甲\n示例甲 2025-09-16 中班",
+        "mobiles": [],
     }
 
 
@@ -1615,7 +1637,7 @@ def test_notification_channel_switch_preserves_wecom_but_only_lightagent_sends(t
             "lightagent_targets": [{"id": "room-1", "name": "通知群"}],
         },
     )
-    test_response = client.post("/api/notification-config/test", json={"test_wechat_member_id": "@member-1"})
+    test_response = client.post("/api/notification-config/test", json={"person_name": "示例甲"})
     config = repo.get_notification_config()
 
     assert response.status_code == 200
@@ -1625,7 +1647,8 @@ def test_notification_channel_switch_preserves_wecom_but_only_lightagent_sends(t
     assert response.json()["config"]["lightagent_active"] is True
     assert test_response.status_code == 200
     assert sent["targets"] == ["room-1"]
-    assert sent["mentions"] == ["@member-1"]
+    assert sent["mentions"] == []
+    assert sent["content"].startswith("@示例甲\n")
 
 
 def test_notification_channel_switch_preserves_lightagent_but_only_wecom_sends(tmp_path, monkeypatch):
@@ -1665,6 +1688,8 @@ def test_notification_channel_switch_preserves_lightagent_but_only_wecom_sends(t
             "lightagent_url": "",
             "lightagent_token": "",
             "lightagent_targets": [],
+            "mention_mode": "custom",
+            "mention_targets": "10000000000",
         },
     )
     test_response = client.post("/api/notification-config/test", json={"test_mobile": "10000000000"})
@@ -2018,8 +2043,8 @@ def test_saved_wechat_bridge_notification_channel_is_not_overridden_by_wecom_env
     assert test_response.status_code == 200
     assert sent == {
         "targets": ["wgr_notice"],
-        "content": "示例甲",
-        "mentions": ["@member-runtime"],
+        "content": "@示例甲\n示例甲",
+        "mentions": [],
     }
 
 
@@ -4220,7 +4245,11 @@ def test_saving_notification_config_with_blank_webhook_preserves_existing_value(
     client = TestClient(app)
     client.post(
         "/api/notification-config",
-        json={"webhook_url": "https://example.test/cgi-bin/webhook/send?key=unit-test"},
+        json={
+            "webhook_url": "https://example.test/cgi-bin/webhook/send?key=unit-test",
+            "mention_mode": "custom",
+            "mention_targets": "10000000000",
+        },
     )
 
     response = client.post("/api/notification-config", json={"webhook_url": "", "message_template": "new {name}"})
@@ -4723,7 +4752,11 @@ def test_patrol_warning_monitor_uses_specific_mentions_and_template(tmp_path, mo
         )
 
     repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
-    repo.save_notification_config(webhook_url="https://example.test/cgi-bin/webhook/send?key=unit-test")
+    repo.save_notification_config(
+        webhook_url="https://example.test/cgi-bin/webhook/send?key=unit-test",
+        mention_mode="custom",
+        mention_targets="13800138000, 13900139000",
+    )
     repo.save_patrol_warning_config(
         enabled=True,
         login_url="https://example.test/login",
@@ -4827,11 +4860,13 @@ def test_notification_config_test_sends_template_message(tmp_path, monkeypatch):
         "/api/notification-config",
         json={
             "webhook_url": "https://example.test/cgi-bin/webhook/send?key=unit-test",
+            "mention_mode": "custom",
+            "mention_targets": "10000000000",
             "message_template": "{name} {date}（{time_range})是你的{shift_label}",
         },
     )
 
-    response = client.post("/api/notification-config/test", json={"test_mobile": "10000000000"})
+    response = client.post("/api/notification-config/test", json={"person_name": "示例甲"})
 
     assert response.status_code == 200
     assert response.json()["success"] is True
@@ -4858,10 +4893,14 @@ def test_notification_config_test_returns_json_error_when_send_fails(tmp_path, m
     client = TestClient(app)
     client.post(
         "/api/notification-config",
-        json={"webhook_url": "https://example.test/cgi-bin/webhook/send?key=unit-test"},
+        json={
+            "webhook_url": "https://example.test/cgi-bin/webhook/send?key=unit-test",
+            "mention_mode": "custom",
+            "mention_targets": "10000000000",
+        },
     )
 
-    response = client.post("/api/notification-config/test", json={"test_mobile": "10000000000"})
+    response = client.post("/api/notification-config/test", json={"person_name": "示例甲"})
 
     assert response.status_code == 502
     assert response.json()["detail"] == "测试发送失败：network down"
@@ -4894,11 +4933,12 @@ def test_personal_wechat_notification_test_records_member_name(tmp_path, monkeyp
 
     response = client.post(
         "/api/notification-config/test",
-        json={"test_wechat_member_id": "@member-runtime", "test_wechat_member_name": "王路飞 · @member-runtime"},
+        json={"person_name": "王路飞"},
     )
 
     assert response.status_code == 200
-    assert sent["mentions"] == ["@member-runtime"]
+    assert sent["mentions"] == []
+    assert sent["content"].startswith("@王路飞\n")
     records = client.get("/api/send-records").json()["records"]
     assert records[0]["kind"] == "notification_test"
     assert records[0]["target"] == "王路飞"
@@ -4941,7 +4981,8 @@ def test_monitor_person_test_sends_current_form_with_wechat_member(tmp_path, mon
 
     assert response.status_code == 200
     assert response.json()["success"] is True
-    assert sent["mentions"] == ["wgm_stable_member", "@runtime-member"]
+    assert sent["mentions"] == []
+    assert sent["content"].startswith("@Alice\n")
     assert "Alice" in sent["content"]
     records = client.get("/api/send-records").json()["records"]
     assert records[0]["kind"] == "monitor_test"
@@ -4965,7 +5006,11 @@ def test_custom_reminder_test_sends_current_form_to_webhook(tmp_path, monkeypatc
     client = TestClient(app)
     client.post(
         "/api/notification-config",
-        json={"webhook_url": "https://example.test/cgi-bin/webhook/send?key=unit-test"},
+        json={
+            "webhook_url": "https://example.test/cgi-bin/webhook/send?key=unit-test",
+            "mention_mode": "custom",
+            "mention_targets": "10000000000",
+        },
     )
 
     response = client.post(
@@ -4998,6 +5043,7 @@ def test_personal_wechat_patrol_warning_uses_true_all_mention(tmp_path):
         is_wechat_bridge = True
 
     repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(webhook_url="", mention_mode="all")
     repo.save_patrol_warning_config(mention_all=True)
 
     mentions = main_module._patrol_warning_mentions_for_client(
@@ -5006,7 +5052,7 @@ def test_personal_wechat_patrol_warning_uses_true_all_mention(tmp_path):
         FakeWechatClient(),
     )
 
-    assert mentions == ["@all"]
+    assert mentions == []
 
 
 def test_send_records_display_wechat_runtime_id_as_member_name(tmp_path):
@@ -5495,7 +5541,8 @@ def test_due_monitored_reminder_uses_saved_wechat_member_for_personal_wechat(tmp
 
     asyncio.run(main_module._send_due_reminders(repo))
 
-    assert sent["mentions"] == ["wgm_stable_member", "@old-runtime-member"]
+    assert sent["mentions"] == []
+    assert sent["content"].startswith("@Alice\n")
     records = repo.list_send_records()
     assert records[0]["kind"] == "daily"
     assert records[0]["target"] == "Alice"
@@ -5654,8 +5701,8 @@ def test_due_custom_reminder_sends_with_saved_wechat_member(tmp_path, monkeypatc
 
     asyncio.run(main_module._send_due_reminders(repo))
 
-    assert sent["content"] == "需要关闭隧道灯"
-    assert sent["mentions"] == ["@member-runtime"]
+    assert sent["content"] == "@示例甲\n需要关闭隧道灯"
+    assert sent["mentions"] == []
     records = repo.list_send_records()
     assert records[0]["kind"] == "custom"
     assert records[0]["status"] == "success"

@@ -437,6 +437,8 @@ def test_saving_notification_config_replaces_existing_value(tmp_path: Path):
         "lightagent_token": "",
         "lightagent_target": "",
         "lightagent_targets": [],
+        "mention_mode": "person",
+        "mention_targets": "",
         "message_template": "new {name}",
     }
 

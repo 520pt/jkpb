@@ -143,9 +143,6 @@ class LightAgentNotifyClient:
 
     async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None) -> None:
         text: dict[str, object] = {"content": content}
-        mentions = [mobile for mobile in (mentioned_mobile_list or []) if mobile]
-        if mentions:
-            text["mention_ids"] = mentions
         await self._post({"msgtype": "text", "text": text})
 
     async def send_image(self, image_bytes: bytes) -> None:
@@ -184,6 +181,10 @@ class LightAgentNotifyClient:
                 continue
             if data.get("errcode") not in (None, 0):
                 failures.append(f"{target}: {data.get('errmsg', 'unknown error')}")
+                continue
+            status = str(data.get("status") or "").strip().lower()
+            if status in {"error", "failed", "failure"}:
+                failures.append(f"{target}: {data.get('message') or data.get('error') or data.get('detail') or 'unknown error'}")
                 continue
             if data.get("success") is False or data.get("ok") is False:
                 failures.append(f"{target}: {data.get('error') or data.get('detail') or 'unknown error'}")

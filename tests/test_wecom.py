@@ -162,7 +162,6 @@ async def _lightagent_text_posts_gateway_payload_with_token():
             "msgtype": "text",
             "text": {
                 "content": "提醒内容",
-                "mention_ids": ["@wechat-member-1"],
             },
         }
         return httpx.Response(200, json={"success": True})
@@ -181,8 +180,8 @@ async def _lightagent_text_posts_gateway_payload_with_token():
     assert len(requests) == 1
 
 
-def test_lightagent_text_uses_runtime_member_ids_as_mentions():
-    asyncio.run(_lightagent_text_uses_runtime_member_ids_as_mentions())
+def test_lightagent_text_ignores_runtime_member_ids_for_personal_wechat():
+    asyncio.run(_lightagent_text_ignores_runtime_member_ids_for_personal_wechat())
 
 
 def test_lightagent_text_posts_to_multiple_targets():
@@ -191,6 +190,10 @@ def test_lightagent_text_posts_to_multiple_targets():
 
 def test_lightagent_text_ignores_failed_target_when_another_target_succeeds():
     asyncio.run(_lightagent_text_ignores_failed_target_when_another_target_succeeds())
+
+
+def test_lightagent_text_treats_status_error_as_failure():
+    asyncio.run(_lightagent_text_treats_status_error_as_failure())
 
 
 async def _lightagent_text_posts_to_multiple_targets():
@@ -241,16 +244,34 @@ async def _lightagent_text_ignores_failed_target_when_another_target_succeeds():
     assert [json.loads(request.content.decode("utf-8"))["target"] for request in requests] == ["stale-room", "active-room"]
 
 
-async def _lightagent_text_uses_runtime_member_ids_as_mentions():
+async def _lightagent_text_treats_status_error_as_failure():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"status": "error", "message": "room not found"})
+
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = LightAgentNotifyClient(
+        endpoint_url="https://lightagent.test/api/push/send",
+        target="stale-room",
+        token="push-token",
+        http_client=http_client,
+    )
+
+    try:
+        await client.send_text("提醒内容")
+    except WeComError as exc:
+        assert "room not found" in str(exc)
+    else:
+        raise AssertionError("status=error should fail")
+    await http_client.aclose()
+
+
+async def _lightagent_text_ignores_runtime_member_ids_for_personal_wechat():
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         body = json.loads(request.content.decode("utf-8"))
-        assert body["text"] == {
-            "content": "提醒内容",
-            "mention_ids": ["wxid_member_1"],
-        }
+        assert body["text"] == {"content": "提醒内容"}
         assert "mentioned_mobile_list" not in body["text"]
         return httpx.Response(200, json={"success": True})
 

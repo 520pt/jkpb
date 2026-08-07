@@ -41,3 +41,7 @@
 - 2026-08-04: Do not put `side-block wide` on the two direct children of `#featureChannelSettings`; `.wide` sets `grid-column: 1 / -1` and forces the WeChat interaction page back into an up/down layout even when the panel grid has two columns.
 - 2026-08-04: Inside each WeChat interaction template block, keep trigger words and reply template side by side on desktop: title spans the row, trigger words are the left column, and reply template is the right column. Collapse those inner columns only on narrow mobile width.
 - 2026-08-04: NAS/Docker reboot should keep the built-in WeChat bridge logged in when `./wechat:/app/wechat` is mounted and the WeChat web session is still valid. The sidecar saves session memory immediately after login as well as during graceful shutdown; deleting or remapping `./wechat`, phone-side logout, WeChat-side session invalidation, or long offline periods can still require rescanning the QR code.
+- 2026-08-07: @ 对象配置统一归口到“消息通知渠道”。企业微信群机器人保留 `mentioned_mobile_list` / `@all` 真 @；个人微信群 / Web 微信不再发送 `mention_ids`，只在消息正文前追加可见 `@姓名`，避免不稳定真 @ 导致发送失败或误导配置。监控班、自定义提醒、公路巡查页面不再单独配置 @ 对象。
+- 2026-08-07: LightAgent/个人微信群推送不能只看 HTTP 200、`errcode`、`success` 或 `ok`；如果返回 JSON 里 `status` 是 `error`/`failed`/`failure`，必须记为发送失败，否则今日提醒会显示成功但群里实际收不到。
+- 2026-08-07: 内置个人微信桥发送图片必须和文字一样等待 sidecar `send_result`，并且桥未登录/未连接时要先失败提示扫码登录；否则图片类提醒可能写成成功但实际没发出，或卡到超时才失败。
+- 2026-08-07: “已导入排班”页面默认按 `confirmed_at` 显示最新导入月份，而不是沿用上次选中的旧月份；当前北京日期所在月份会用橙黄色横向/竖向路径默认标出当天早/中/晚监控班人员，默认高亮只延伸到当天班次单元格，相邻当天班次格共用一条边；手动点击仍使用蓝色整行整列高亮，二者颜色区分。

@@ -150,13 +150,13 @@ class NotificationConfigRequest(BaseModel):
     lightagent_token: str = ""
     lightagent_target: str = ""
     lightagent_targets: list[LightAgentTargetRequest] = Field(default_factory=list)
+    mention_mode: str = "person"
+    mention_targets: str = ""
     message_template: str = DEFAULT_MESSAGE_TEMPLATE
 
 
 class NotificationTestRequest(BaseModel):
-    test_mobile: str = ""
-    test_wechat_member_id: str = ""
-    test_wechat_member_name: str = ""
+    person_name: str = "示例甲"
 
 
 class FeatureChannelRoomRequest(BaseModel):
@@ -284,8 +284,6 @@ class PatrolWarningConfigRequest(BaseModel):
     end_reminder_enabled: bool = True
     end_reminder_interval_hours: int = Field(default=6, ge=1, le=168)
     end_reminder_window_hours: int = Field(default=48, ge=1, le=720)
-    mention_all: bool = True
-    mention_mobiles: str = ""
     send_content_mode: str = "both"
     start_message_template: str = DEFAULT_PATROL_WARNING_START_TEMPLATE
     end_message_template: str = DEFAULT_PATROL_WARNING_END_TEMPLATE
@@ -609,9 +607,6 @@ def create_app(
             person_name=request.name.strip(),
             send_at=datetime.now(TZ),
             content=content,
-            mention_mobile=request.mention_mobile.strip(),
-            mention_wechat_id=request.wechat_group_runtime_sender_id.strip(),
-            mention_wechat_member_id=request.wechat_group_member_id.strip(),
         )
         return await _send_test_reminder_event(repo, notification_client, event, "monitor_test")
 
@@ -662,9 +657,6 @@ def create_app(
             person_name=request.name.strip(),
             send_at=datetime.now(TZ),
             content=content,
-            mention_mobile=request.mention_mobile.strip(),
-            mention_wechat_id=request.wechat_group_runtime_sender_id.strip(),
-            mention_wechat_member_id=request.wechat_group_member_id.strip(),
         )
         return await _send_test_reminder_event(repo, notification_client, event, "custom_test")
 
@@ -859,7 +851,6 @@ def create_app(
                 target=str(config.get("route_code") or warning.route_code or "公路巡查预警"),
                 scheduled_at=now.isoformat(),
                 content=content,
-                mentioned_mobile_list=_patrol_warning_mentions(config),
                 warning=warning,
                 window_hours=int(config.get("end_reminder_window_hours") or 48),
                 now=now,
@@ -1019,6 +1010,8 @@ def create_app(
             lightagent_token=lightagent_token,
             lightagent_target=lightagent_target,
             lightagent_targets=lightagent_targets,
+            mention_mode=_normalize_notification_mention_mode(request.mention_mode),
+            mention_targets=request.mention_targets,
             message_template=request.message_template.strip() or DEFAULT_MESSAGE_TEMPLATE,
         )
         lightagent_sync = _sync_lightagent_notification_targets(repo, sender_type, lightagent_targets)
@@ -1034,23 +1027,20 @@ def create_app(
         notification_client = _notification_client_from_config(config)
         if notification_client is None:
             raise HTTPException(status_code=400, detail="请先配置通知发送通道")
+        person_name = str(request.person_name or "示例甲").strip() or "示例甲"
         content = _render_message_template(
             str(config.get("message_template") or DEFAULT_MESSAGE_TEMPLATE),
             {
-                "name": "示例甲",
+                "name": person_name,
                 "date": "2025-09-16",
                 "time_range": "08:00至16:00",
                 "shift_label": "中班",
             },
         )
-        target = request.test_mobile.strip()
-        mentions = [target]
-        if _normalize_notification_sender_type(str(config.get("sender_type") or "")) == "lightagent":
-            target = request.test_wechat_member_id.strip() or target
-            mentions = [request.test_wechat_member_id.strip()] if request.test_wechat_member_id.strip() else []
-        record_target = target or "测试消息"
-        if _normalize_notification_sender_type(str(config.get("sender_type") or "")) == "lightagent":
-            record_target = _wechat_test_record_target(repo, target, request.test_wechat_member_name.strip())
+        event = ReminderEvent(kind="notification_test", person_name=person_name, send_at=datetime.now(TZ), content=content)
+        mentions = _notification_true_mentions_for_event(repo, notification_client, event)
+        content = _notification_content_for_event(repo, notification_client, event)
+        record_target = person_name or "测试消息"
         try:
             await notification_client.send_text(content, mentions)
             repo.save_send_record(
@@ -1588,6 +1578,11 @@ def _normalize_notification_sender_type(value: str) -> str:
     return normalized if normalized in {"wecom_webhook", "lightagent"} else "wecom_webhook"
 
 
+def _normalize_notification_mention_mode(value: str) -> str:
+    normalized = str(value or "person").strip().lower()
+    return normalized if normalized in {"none", "all", "person", "custom"} else "person"
+
+
 def _env_notification_config_defaults() -> dict[str, Any]:
     lightagent_base_url = os.getenv("LIGHTAGENT_BASE_URL", "").strip().rstrip("/")
     lightagent_push_url = f"{lightagent_base_url}/api/push/send" if lightagent_base_url else ""
@@ -1622,6 +1617,8 @@ def _env_notification_config_defaults() -> dict[str, Any]:
         ),
         "lightagent_target": single_target,
         "lightagent_targets": env_targets,
+        "mention_mode": os.getenv("NOTIFICATION_MENTION_MODE", "").strip(),
+        "mention_targets": os.getenv("NOTIFICATION_MENTION_TARGETS", "").strip(),
     }
 
 
@@ -1648,7 +1645,7 @@ def _notification_config_with_env_defaults(config: dict[str, Any]) -> dict[str, 
         sender_type = env_sender_type or "lightagent"
         merged["sender_type"] = sender_type
 
-    for key in ("webhook_url", "lightagent_url", "lightagent_token", "lightagent_target"):
+    for key in ("webhook_url", "lightagent_url", "lightagent_token", "lightagent_target", "mention_mode", "mention_targets"):
         if env_config[key] and (env_can_select_sender or not str(merged.get(key, "")).strip()):
             merged[key] = env_config[key]
     if env_config["lightagent_targets"] and (
@@ -4185,6 +4182,7 @@ def _public_notification_config(config: dict[str, Any]) -> dict[str, Any]:
     lightagent_target = lightagent_targets[0]["id"] if lightagent_targets else ""
     lightagent_token = str(config.get("lightagent_token", "")).strip()
     sender_type = _normalize_notification_sender_type(str(config.get("sender_type") or "wecom_webhook"))
+    mention_mode = _normalize_notification_mention_mode(str(config.get("mention_mode") or "person"))
     webhook_active = sender_type == "wecom_webhook"
     lightagent_active = sender_type == "lightagent"
     active_configured = bool(webhook_url) if webhook_active else bool(lightagent_targets and (lightagent_url or wechat_bridge_enabled()))
@@ -4202,6 +4200,8 @@ def _public_notification_config(config: dict[str, Any]) -> dict[str, Any]:
         "lightagent_token_configured": bool(lightagent_token),
         "lightagent_target": lightagent_target,
         "lightagent_targets": lightagent_targets,
+        "mention_mode": mention_mode,
+        "mention_targets": str(config.get("mention_targets") or ""),
         "notification_configured": active_configured,
         "notification_display": "已配置" if active_configured else "未配置",
         "message_template": config.get("message_template") or DEFAULT_MESSAGE_TEMPLATE,
@@ -4226,8 +4226,6 @@ def _public_patrol_warning_config(config: dict[str, Any]) -> dict[str, Any]:
         "end_reminder_enabled": bool(config.get("end_reminder_enabled", True)),
         "end_reminder_interval_hours": int(config.get("end_reminder_interval_hours") or 6),
         "end_reminder_window_hours": int(config.get("end_reminder_window_hours") or 48),
-        "mention_all": bool(config.get("mention_all", True)),
-        "mention_mobiles": str(config.get("mention_mobiles") or ""),
         "send_content_mode": _patrol_send_content_mode(config),
         "start_message_template": str(config.get("start_message_template") or DEFAULT_PATROL_WARNING_START_TEMPLATE),
         "end_message_template": str(config.get("end_message_template") or DEFAULT_PATROL_WARNING_END_TEMPLATE),
@@ -6123,9 +6121,6 @@ def _plan_custom_reminder_events(repo: DutyRepository, assignments: list[ShiftAs
                     person_name=name,
                     send_at=datetime.combine(target, _parse_hhmm(reminder_time), tzinfo=TZ),
                     content=content,
-                    mention_mobile=str(reminder.get("mention_mobile") or "").strip(),
-                    mention_wechat_id=str(reminder.get("wechat_group_runtime_sender_id") or "").strip(),
-                    mention_wechat_member_id=str(reminder.get("wechat_group_member_id") or "").strip(),
                     key_suffix=str(reminder.get("id") or ""),
                 )
             )
@@ -6145,7 +6140,7 @@ def _plan_all_events(repo: DutyRepository, target: date):
                 target_date=target,
                 assignments=assignments,
                 monitored_name=person["name"],
-                mention_text=person["mention_text"],
+                mention_text="",
                 settings=ReminderSettings(
                     daily_time=_coerce_hhmm(person["daily_time"], "07:50"),
                     before_shift_minutes=person["before_shift_minutes"],
@@ -6343,7 +6338,6 @@ async def _check_patrol_warning_monitor(repo: DutyRepository) -> None:
                 target=route_code or latest.route_code or "公路巡查预警",
                 scheduled_at=now.isoformat(),
                 content=content,
-                mentioned_mobile_list=_patrol_warning_mentions(config),
                 warning=latest,
                 window_hours=int(config.get("end_reminder_window_hours") or 48),
                 now=now,
@@ -6377,7 +6371,6 @@ async def _check_patrol_warning_monitor(repo: DutyRepository) -> None:
             target=route_code or latest.route_code or "公路巡查预警",
             scheduled_at=slot_text,
             content=content,
-            mentioned_mobile_list=_patrol_warning_mentions(config),
             warning=latest,
             window_hours=int(config.get("end_reminder_window_hours") or 48),
             now=now,
@@ -6396,7 +6389,6 @@ async def _send_patrol_warning_message(
     target: str,
     scheduled_at: str,
     content: str,
-    mentioned_mobile_list: list[str],
     warning: Any | None = None,
     window_hours: int = 48,
     now: datetime | None = None,
@@ -6406,7 +6398,9 @@ async def _send_patrol_warning_message(
         patrol_config = repo.get_patrol_warning_config()
         send_content_mode = _normalize_patrol_send_content_mode(str(patrol_config.get("send_content_mode") or "both"))
         if send_content_mode in {"both", "text"}:
-            await webhook_client.send_text(content, _patrol_warning_mentions_for_client(repo, patrol_config, webhook_client))
+            event = ReminderEvent(kind=kind, person_name="", send_at=now or datetime.now(TZ), content=content)
+            content = _notification_content_for_event(repo, webhook_client, event)
+            await webhook_client.send_text(content, _notification_true_mentions_for_event(repo, webhook_client, event))
         if send_content_mode in {"both", "image"} and warning is not None:
             await webhook_client.send_image(
                 render_patrol_warning_image(
@@ -6436,18 +6430,17 @@ async def _send_patrol_warning_message(
 
 
 def _build_patrol_warning_content(warning: Any, config: dict[str, Any], *, now: datetime, mode: str) -> str:
-    mention_all = bool(config.get("mention_all", True))
     if mode == "end":
         return build_end_reminder_message(
             warning,
             now=now,
             window_hours=int(config.get("end_reminder_window_hours") or 48),
-            mention_all=mention_all,
+            mention_all=False,
             template=str(config.get("end_message_template") or DEFAULT_PATROL_WARNING_END_TEMPLATE),
         )
     return build_start_message(
         warning,
-        mention_all=mention_all,
+        mention_all=False,
         template=str(config.get("start_message_template") or DEFAULT_PATROL_WARNING_START_TEMPLATE),
     )
 
@@ -6461,11 +6454,77 @@ def _patrol_send_content_mode(config: dict[str, Any]) -> str:
     return _normalize_patrol_send_content_mode(str(config.get("send_content_mode") or "both"))
 
 
-def _patrol_warning_mentions(config: dict[str, Any]) -> list[str]:
-    if bool(config.get("mention_all", True)):
+def _notification_mention_config(repo: DutyRepository) -> dict[str, str]:
+    config = _notification_config_with_env_defaults(repo.get_notification_config())
+    return {
+        "mode": _normalize_notification_mention_mode(str(config.get("mention_mode") or "person")),
+        "targets": str(config.get("mention_targets") or "").strip(),
+    }
+
+
+def _split_mention_targets(value: Any) -> list[str]:
+    targets: list[str] = []
+    for part in re.split(r"[\s,，;；、]+", str(value or "")):
+        text = part.strip()
+        if text and text not in targets:
+            targets.append(text)
+    return targets
+
+
+def _notification_target_names(repo: DutyRepository, person_name: str = "") -> list[str]:
+    mention = _notification_mention_config(repo)
+    mode = mention["mode"]
+    if mode == "none":
+        return []
+    if mode == "all":
+        return ["所有人"]
+    if mode == "person":
+        name = str(person_name or "").strip()
+        return [name] if name and name != "测试消息" else []
+    names = []
+    for target in _split_mention_targets(mention["targets"]):
+        if target in {"@all", "@所有人", "所有人"}:
+            names.append("所有人")
+        else:
+            names.append(target.lstrip("@"))
+    return list(dict.fromkeys([name for name in names if name]))
+
+
+def _notification_true_mentions_for_event(repo: DutyRepository, client: Any, event: ReminderEvent) -> list[str]:
+    if _is_personal_wechat_notify_client(client):
+        return []
+    mention = _notification_mention_config(repo)
+    mode = mention["mode"]
+    if mode == "none":
+        return []
+    if mode == "all":
         return ["@all"]
-    text = str(config.get("mention_mobiles") or "")
-    return [part for part in re.split(r"[\s,，;；]+", text) if part]
+    mobile_lookup = _person_mobile_lookup(repo)
+    if mode == "person":
+        mobile = _mobile_for_event(event, mobile_lookup)
+        return [mobile] if mobile else []
+    mentions = []
+    for target in _split_mention_targets(mention["targets"]):
+        if target in {"@all", "@所有人", "所有人"}:
+            mentions.append("@all")
+        elif re.fullmatch(r"1\d{10}", target):
+            mentions.append(target)
+        else:
+            mobile = mobile_lookup.get(target.lstrip("@"), "")
+            if mobile:
+                mentions.append(mobile)
+    return list(dict.fromkeys([item for item in mentions if item]))
+
+
+def _notification_content_for_event(repo: DutyRepository, client: Any, event: ReminderEvent) -> str:
+    content = str(event.content or "")
+    if not _is_personal_wechat_notify_client(client):
+        return content
+    names = _notification_target_names(repo, event.person_name)
+    prefix = "\n".join(f"@{name}" for name in names if name)
+    if not prefix or content.lstrip().startswith("@"):
+        return content
+    return f"{prefix}\n{content}"
 
 
 def _person_mobile_lookup(repo: DutyRepository) -> dict[str, str]:
@@ -6481,62 +6540,8 @@ def _person_mobile_lookup(repo: DutyRepository) -> dict[str, str]:
     return {name: mobile for name, mobile in lookup.items() if name}
 
 
-def _person_wechat_sender_lookup(repo: DutyRepository, *, prefer_stable: bool = False) -> dict[str, str]:
-    lookup = _person_wechat_sender_ids_lookup(repo, prefer_stable=prefer_stable)
-    return {name: ids[0] for name, ids in lookup.items() if ids}
-
-
-def _person_wechat_sender_ids_lookup(repo: DutyRepository, *, prefer_stable: bool = False) -> dict[str, list[str]]:
-    lookup: dict[str, list[str]] = {}
-    for person in repo.list_personnel():
-        runtime_id = str(person.get("wechat_group_runtime_sender_id") or "").strip()
-        stable_id = str(person.get("wechat_group_member_id") or "").strip()
-        candidates = [stable_id, runtime_id] if prefer_stable else [runtime_id, stable_id]
-        ids = []
-        for sender_id in candidates:
-            if sender_id and sender_id not in ids:
-                ids.append(sender_id)
-        if ids:
-            lookup[str(person.get("name") or "").strip()] = ids
-    return {name: ids for name, ids in lookup.items() if name}
-
-
-def _wechat_lookup_mentions(value: Any) -> list[str]:
-    if isinstance(value, list):
-        candidates = value
-    else:
-        candidates = [value]
-    mentions = []
-    for item in candidates:
-        text = str(item or "").strip()
-        if text and text not in mentions:
-            mentions.append(text)
-    return mentions
-
-
 def _mobile_for_event(event: ReminderEvent, mobile_lookup: dict[str, str]) -> str:
-    return event.mention_mobile.strip() or mobile_lookup.get(event.person_name, "")
-
-
-def _mentions_for_event(client: Any, event: ReminderEvent, mobile_lookup: dict[str, str], wechat_lookup: dict[str, Any]) -> list[str]:
-    if _is_personal_wechat_notify_client(client):
-        mentions: list[str] = []
-        if isinstance(client, WechatBridgeNotifyClient):
-            mentions.extend(_wechat_lookup_mentions(event.mention_wechat_member_id.strip()))
-        mentions.extend(_wechat_lookup_mentions(event.mention_wechat_id.strip()))
-        mentions.extend(_wechat_lookup_mentions(wechat_lookup.get(event.person_name, "")))
-        return list(dict.fromkeys(mentions))
-    mobile = _mobile_for_event(event, mobile_lookup)
-    return [mobile] if mobile else []
-
-
-def _send_content_for_event(client: Any, event: ReminderEvent, mentions: list[str]) -> str:
-    content = event.content
-    if _is_personal_wechat_notify_client(client) and event.kind in {"custom", "custom_test"} and not mentions:
-        name = str(event.person_name or "").strip()
-        if name and not content.lstrip().startswith("@"):
-            return f"@{name}\n{content}"
-    return content
+    return mobile_lookup.get(event.person_name, "")
 
 
 async def _send_test_reminder_event(
@@ -6545,14 +6550,8 @@ async def _send_test_reminder_event(
     event: ReminderEvent,
     record_kind: str,
 ) -> dict[str, Any]:
-    mobile_lookup = _person_mobile_lookup(repo)
-    wechat_lookup = (
-        _person_wechat_sender_ids_lookup(repo, prefer_stable=True)
-        if isinstance(notification_client, WechatBridgeNotifyClient)
-        else _person_wechat_sender_lookup(repo)
-    )
-    mentions = _mentions_for_event(notification_client, event, mobile_lookup, wechat_lookup)
-    content = _send_content_for_event(notification_client, event, mentions)
+    mentions = _notification_true_mentions_for_event(repo, notification_client, event)
+    content = _notification_content_for_event(repo, notification_client, event)
     target = event.person_name or "测试消息"
     try:
         await notification_client.send_text(content, mentions)
@@ -6791,23 +6790,8 @@ def _lightagent_room_member_sender_ids(repo: DutyRepository) -> list[str]:
     return _bound_wechat_sender_ids(repo)
 
 def _patrol_warning_mentions_for_client(repo: DutyRepository, config: dict[str, Any], client: Any) -> list[str]:
-    if _is_personal_wechat_notify_client(client):
-        if bool(config.get("mention_all", True)):
-            return ["@all"]
-        names_or_ids = [part for part in re.split(r"[\s,，;；]+", str(config.get("mention_mobiles") or "")) if part]
-        lookup = (
-            _person_wechat_sender_ids_lookup(repo, prefer_stable=True)
-            if isinstance(client, WechatBridgeNotifyClient)
-            else _person_wechat_sender_lookup(repo)
-        )
-        mentions = []
-        for item in names_or_ids:
-            sender_ids = [item] if item.startswith("@") else _wechat_lookup_mentions(lookup.get(item, ""))
-            for sender_id in sender_ids:
-                if sender_id and sender_id not in mentions:
-                    mentions.append(sender_id)
-        return mentions
-    return _patrol_warning_mentions(config)
+    event = ReminderEvent(kind="patrol_warning_start", person_name="", send_at=datetime.now(TZ), content="")
+    return _notification_true_mentions_for_event(repo, client, event)
 
 
 def _is_personal_wechat_notify_client(client: Any) -> bool:
@@ -6831,7 +6815,9 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
             preview_date = _date_from_record(record) or _today_in_tz()
             await client.send_image(render_daily_duty_image(_build_daily_duty_preview(repo, preview_date)))
         elif kind.startswith("patrol_warning_"):
-            await client.send_text(content, _patrol_warning_mentions_for_client(repo, repo.get_patrol_warning_config(), client))
+            fake_event = ReminderEvent(kind=kind, person_name="", send_at=datetime.now(TZ), content=content)
+            content = _notification_content_for_event(repo, client, fake_event)
+            await client.send_text(content, _notification_true_mentions_for_event(repo, client, fake_event))
         else:
             mobile_lookup = _person_mobile_lookup(repo)
             fake_event = ReminderEvent(
@@ -6839,21 +6825,9 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
                 person_name=target,
                 send_at=datetime.now(TZ),
                 content=content,
-                mention_mobile="" if target in mobile_lookup or target == "测试消息" else target,
             )
-            await client.send_text(
-                content,
-                _mentions_for_event(
-                    client,
-                    fake_event,
-                    mobile_lookup,
-                    (
-                        _person_wechat_sender_ids_lookup(repo, prefer_stable=True)
-                        if isinstance(client, WechatBridgeNotifyClient)
-                        else _person_wechat_sender_lookup(repo)
-                    ),
-                ),
-            )
+            content = _notification_content_for_event(repo, client, fake_event)
+            await client.send_text(content, _notification_true_mentions_for_event(repo, client, fake_event))
         repo.save_send_record(
             kind=resend_kind,
             target=target,
@@ -6904,12 +6878,6 @@ async def _send_due_reminders(repo: DutyRepository) -> None:
         return
 
     people = {person["name"]: person for person in repo.list_monitored_people(enabled_only=True)}
-    mobile_lookup = _person_mobile_lookup(repo)
-    wechat_lookup = (
-        _person_wechat_sender_ids_lookup(repo, prefer_stable=True)
-        if isinstance(webhook_client, WechatBridgeNotifyClient)
-        else _person_wechat_sender_lookup(repo)
-    )
     for event in events:
         if not (now - REMINDER_SEND_GRACE <= event.send_at <= now):
             continue
@@ -6926,8 +6894,8 @@ async def _send_due_reminders(repo: DutyRepository) -> None:
             if event.kind == "daily_duty" and webhook_client:
                 await webhook_client.send_image(render_daily_duty_image(_build_daily_duty_preview(repo, now.date())))
             elif webhook_client:
-                mentions = _mentions_for_event(webhook_client, event, mobile_lookup, wechat_lookup)
-                await webhook_client.send_text(_send_content_for_event(webhook_client, event, mentions), mentions)
+                mentions = _notification_true_mentions_for_event(repo, webhook_client, event)
+                await webhook_client.send_text(_notification_content_for_event(repo, webhook_client, event), mentions)
             elif person and app_client:
                 await app_client.send_text(person["wecom_userid"], event.content)
             else:

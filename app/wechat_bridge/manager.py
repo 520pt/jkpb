@@ -193,21 +193,26 @@ class WechatBridgeManager:
         if not runtime_room_id:
             raise RuntimeError(f"目标微信群当前不可发送或未同步：{room_id}")
         self.ensure_started()
+        self._ensure_send_ready()
+        self._send_and_wait(
+            {
+                "type": SidecarCommandType.SEND_TEXT,
+                "room_id": runtime_room_id,
+                "text": text,
+                "mention_ids": [],
+                "alias_sync_cooldown_minutes": 1,
+            },
+            remember_text=text,
+        )
+
+    def _send_and_wait(self, command: dict[str, Any], *, remember_text: str = "") -> dict[str, Any]:
         request_id = f"send_{int(time.time() * 1000)}_{threading.get_ident()}"
+        command = {**command, "request_id": request_id}
         waiter = threading.Event()
         with self._send_result_lock:
             self._send_result_waiters[request_id] = {"event": waiter, "result": None}
         try:
-            self._send_command(
-                {
-                    "type": SidecarCommandType.SEND_TEXT,
-                    "request_id": request_id,
-                    "room_id": runtime_room_id,
-                    "text": text,
-                    "mention_ids": self.resolve_runtime_member_ids(mention_ids or []),
-                    "alias_sync_cooldown_minutes": 1,
-                }
-            )
+            self._send_command(command)
             if not waiter.wait(self.SEND_RESULT_TIMEOUT_SECONDS):
                 raise RuntimeError("内置微信桥发送结果超时，请检查微信是否在线或查看容器日志")
             with self._send_result_lock:
@@ -216,7 +221,9 @@ class WechatBridgeManager:
                 raise RuntimeError("内置微信桥发送结果异常")
             if result.get("ok") is False or result.get("type") == SidecarEventType.ERROR:
                 raise RuntimeError(str(result.get("message") or result.get("error") or "内置微信桥发送失败"))
-            self._remember_outgoing_text(runtime_room_id, str(result.get("sent_text") or text))
+            if remember_text:
+                self._remember_outgoing_text(str(command.get("room_id") or ""), str(result.get("sent_text") or remember_text))
+            return result
         finally:
             with self._send_result_lock:
                 self._send_result_waiters.pop(request_id, None)
@@ -235,13 +242,18 @@ class WechatBridgeManager:
         if not image_path.exists():
             raise RuntimeError(f"图片文件不存在：{path}")
         self.ensure_started()
-        self._send_command(
+        self._ensure_send_ready()
+        self._send_and_wait(
             {
                 "type": SidecarCommandType.SEND_IMAGE,
                 "room_id": runtime_room_id,
                 "path": str(image_path),
             }
         )
+
+    def _ensure_send_ready(self) -> None:
+        if self.status not in CONNECTED_STATUSES:
+            raise RuntimeError(f"内置微信桥未登录或未连接（当前状态：{self.status or 'unknown'}），请先完成微信登录并同步群聊")
 
     def status_snapshot(self) -> dict[str, Any]:
         self.ensure_started()

@@ -104,8 +104,8 @@ def test_wechat_bridge_notify_client_sends_to_multiple_targets():
     asyncio.run(client.send_image(b"png"))
 
     assert manager.text_calls == [
-        ("wgr_a", "测试", ["@member"]),
-        ("wgr_b", "测试", ["@member"]),
+        ("wgr_a", "测试", None),
+        ("wgr_b", "测试", None),
     ]
     assert manager.image_calls == [("wgr_a", b"png"), ("wgr_b", b"png")]
 
@@ -123,7 +123,7 @@ def test_wechat_bridge_notify_client_passes_all_mention():
 
     asyncio.run(client.send_text("预警内容", ["@all"]))
 
-    assert manager.text_calls == [("wgr_notice", "预警内容", ["@all"])]
+    assert manager.text_calls == [("wgr_notice", "预警内容", None)]
 
 
 def test_wechat_bridge_send_text_waits_for_success_result_and_records_sent_text(tmp_path):
@@ -161,17 +161,18 @@ def test_wechat_bridge_send_text_waits_for_success_result_and_records_sent_text(
     manager = WechatBridgeManager(data_dir=tmp_path / "wechat")
     manager.process = FakeProcess(manager)
     manager.start = lambda: None
+    manager.status = "connected"
     room = manager._normalize_rooms([{"id": "room@@runtime", "name": "测试群"}])[0]
 
     manager.send_text(room["stable_room_id"], "测试", mention_ids=["@runtime-member"])
 
     command = manager.process.stdin.commands[0]
-    assert command["mention_ids"] == ["@runtime-member"]
+    assert command["mention_ids"] == []
     assert command["request_id"].startswith("send_")
     assert manager._consume_outgoing_echo("room@@runtime", "@Alice 测试") is True
 
 
-def test_wechat_bridge_send_text_raises_sidecar_error_for_failed_true_mention(tmp_path):
+def test_wechat_bridge_send_text_ignores_requested_true_mention_ids(tmp_path):
     class FakeStdin:
         def __init__(self, manager):
             self.manager = manager
@@ -180,12 +181,8 @@ def test_wechat_bridge_send_text_raises_sidecar_error_for_failed_true_mention(tm
             command = json.loads(line)
             self.manager._consume_event(
                 SidecarEvent(
-                    SidecarEventType.ERROR,
-                    {
-                        "request_id": command["request_id"],
-                        "command": "send_text",
-                        "message": "个人微信群真 @ 发送失败，已阻止降级为普通 @ 文本",
-                    },
+                    SidecarEventType.SEND_RESULT,
+                    {"request_id": command["request_id"], "ok": True, "command": "send_text", "sent_text": command["text"]},
                 )
             )
 
@@ -202,14 +199,106 @@ def test_wechat_bridge_send_text_raises_sidecar_error_for_failed_true_mention(tm
     manager = WechatBridgeManager(data_dir=tmp_path / "wechat")
     manager.process = FakeProcess(manager)
     manager.start = lambda: None
+    manager.status = "connected"
+    room = manager._normalize_rooms([{"id": "room@@runtime", "name": "测试群"}])[0]
+
+    manager.send_text(room["stable_room_id"], "测试", mention_ids=["@runtime-member"])
+
+
+def test_wechat_bridge_send_image_waits_for_success_result(tmp_path):
+    class FakeStdin:
+        def __init__(self, manager):
+            self.manager = manager
+            self.commands = []
+
+        def write(self, line):
+            command = json.loads(line)
+            self.commands.append(command)
+            self.manager._consume_event(
+                SidecarEvent(
+                    SidecarEventType.SEND_RESULT,
+                    {"request_id": command["request_id"], "ok": True, "command": "send_file"},
+                )
+            )
+
+        def flush(self):
+            pass
+
+    class FakeProcess:
+        def __init__(self, manager):
+            self.stdin = FakeStdin(manager)
+
+        def poll(self):
+            return None
+
+    image_path = tmp_path / "test.png"
+    image_path.write_bytes(b"png")
+    manager = WechatBridgeManager(data_dir=tmp_path / "wechat")
+    manager.process = FakeProcess(manager)
+    manager.start = lambda: None
+    manager.status = "connected"
+    room = manager._normalize_rooms([{"id": "room@@runtime", "name": "测试群"}])[0]
+
+    manager.send_image(room["stable_room_id"], str(image_path))
+
+    command = manager.process.stdin.commands[0]
+    assert command["type"] == "send_image"
+    assert command["request_id"].startswith("send_")
+    assert command["path"] == str(image_path)
+
+
+def test_wechat_bridge_send_image_raises_on_sidecar_error(tmp_path):
+    class FakeStdin:
+        def __init__(self, manager):
+            self.manager = manager
+
+        def write(self, line):
+            command = json.loads(line)
+            self.manager._consume_event(
+                SidecarEvent(
+                    SidecarEventType.ERROR,
+                    {"request_id": command["request_id"], "message": "image blocked"},
+                )
+            )
+
+        def flush(self):
+            pass
+
+    class FakeProcess:
+        def __init__(self, manager):
+            self.stdin = FakeStdin(manager)
+
+        def poll(self):
+            return None
+
+    image_path = tmp_path / "test.png"
+    image_path.write_bytes(b"png")
+    manager = WechatBridgeManager(data_dir=tmp_path / "wechat")
+    manager.process = FakeProcess(manager)
+    manager.start = lambda: None
+    manager.status = "connected"
     room = manager._normalize_rooms([{"id": "room@@runtime", "name": "测试群"}])[0]
 
     try:
-        manager.send_text(room["stable_room_id"], "测试", mention_ids=["@runtime-member"])
+        manager.send_image(room["stable_room_id"], str(image_path))
     except RuntimeError as exc:
-        assert "已阻止降级为普通 @ 文本" in str(exc)
+        assert "image blocked" in str(exc)
     else:
-        raise AssertionError("send_text should raise failed true mention errors")
+        raise AssertionError("send_image should fail when sidecar reports an error")
+
+
+def test_wechat_bridge_send_text_fails_fast_when_not_connected(tmp_path):
+    manager = WechatBridgeManager(data_dir=tmp_path / "wechat")
+    manager.process = object()
+    manager.start = lambda: None
+    room = manager._normalize_rooms([{"id": "room@@runtime", "name": "测试群"}])[0]
+
+    try:
+        manager.send_text(room["stable_room_id"], "测试")
+    except RuntimeError as exc:
+        assert "未登录或未连接" in str(exc)
+    else:
+        raise AssertionError("send_text should fail before sending when bridge is offline")
 
 
 def test_wechat_bridge_marks_recent_outgoing_text_as_self_message(tmp_path):

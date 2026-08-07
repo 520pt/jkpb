@@ -989,6 +989,32 @@
     td.shift-early { background: #c7f7df; }
     td.shift-night { background: #ffe0e0; }
     td.shift-trip { background: #e5e7eb; }
+    #savedGrid th.saved-today-col,
+    #savedGrid td.name.saved-today-monitor-name {
+      background: #fef3c7;
+      color: #b45309;
+      font-weight: 800;
+    }
+    #savedGrid td.shift-cell.saved-today-monitor-row-path,
+    #savedGrid td.shift-cell.saved-today-monitor-col-path {
+      box-shadow: inset 0 0 0 999px rgba(245, 158, 11, 0.24);
+    }
+    #savedGrid td.shift-cell.saved-today-monitor-cell {
+      position: relative;
+      box-shadow: inset 0 0 0 999px rgba(245, 158, 11, 0.36);
+      color: #0f172a;
+      font-weight: 800;
+    }
+    #savedGrid td.shift-cell.saved-today-monitor-cell::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border: 3px solid #d97706;
+      pointer-events: none;
+    }
+    #savedGrid td.shift-cell.saved-today-monitor-cell.saved-today-monitor-join-prev::after {
+      border-top-width: 0;
+    }
     #savedGrid th.saved-col-highlight,
     #savedGrid td.name.saved-row-highlight {
       background: #bfdbfe;
@@ -2644,7 +2670,8 @@
           <button class="active" data-settings-target="settingsOverview">配置总览</button>
           <div class="settings-nav-group">通道配置</div>
           <button data-settings-target="wecomSettings">消息通知渠道</button>
-                  <button data-settings-target="featureChannelSettings">微信交互功能</button>
+          <button data-settings-target="featureChannelSettings">微信交互功能</button>
+          <button data-settings-target="wechatSimulationSettings">手动模拟微信发送</button>
           <div class="settings-nav-group">提醒配置</div>
           <button data-settings-target="driverSettings">今日在岗提醒</button>
           <button data-settings-target="patrolWarningSettings">公路巡查预警</button>
@@ -2677,11 +2704,23 @@
                 <input id="notificationSenderType" type="hidden" value="wecom_webhook" />
               </div>
               <div class="stack">
+                <div class="field-grid">
+                  <label>通知 @ 方式
+                    <select id="notificationMentionMode">
+                      <option value="person">按提醒对象自动 @</option>
+                      <option value="all">@所有人</option>
+                      <option value="custom">指定对象</option>
+                      <option value="none">不 @</option>
+                    </select>
+                  </label>
+                  <label>发送测试对象 <input id="notificationTestPersonName" list="personnelNameOptions" placeholder="示例甲" /></label>
+                </div>
+                <label id="notificationMentionTargetsField">通知 @ 对象
+                  <textarea id="notificationMentionTargets" rows="2" placeholder="指定对象时填写：姓名、手机号、@所有人，一行一个或逗号分隔"></textarea>
+                </label>
+                <p class="settings-panel-note">@ 对象统一在这里配置：企业微信群机器人支持手机号 / @所有人触发系统级 @；个人微信群只保证消息文字里可见 @姓名，不再发送不稳定的成员 ID @。</p>
                 <div id="wecomNotificationFields" class="stack">
                   <label>群机器人地址 <input id="webhookUrl" placeholder="未配置，保存时请输入机器人地址" /></label>
-                  <div id="wecomTestMobileFields" class="field-grid">
-                    <label>测试@手机号 <input id="testMobile" placeholder="10000000000" /></label>
-                  </div>
                   <div class="settings-actions notification-card-actions">
                     <button class="primary" id="saveNotificationWecomBtn" type="button" data-save-notification>保存通知配置</button>
                     <button id="testNotificationWecomBtn" type="button" data-test-notification>测试发送</button>
@@ -2704,9 +2743,6 @@
                     </div>
                     <div id="notificationTargetRoomList" class="list"></div>
                     <label id="lightAgentTokenField">推送 token <input id="lightAgentToken" type="password" placeholder="已配置时可留空" /></label>
-                    <label>测试@成员
-                      <select id="testWechatMember"></select>
-                    </label>
                     <div class="settings-actions notification-card-actions">
                       <button class="primary" id="saveNotificationBtn" type="button" data-save-notification>保存通知配置</button>
                       <button id="testNotificationBtn" type="button" data-test-notification>测试发送</button>
@@ -2714,7 +2750,7 @@
                   </div>
                   <div class="lightagent-notify-card">
                     <div class="side-block">
-                      <h3>微信登录与成员绑定</h3>
+                      <h3>微信登录与身份绑定</h3>
                       <div class="stack">
                         <div class="settings-actions">
                           <button type="button" id="refreshWechatLoginBtn">微信登录状态</button>
@@ -2785,7 +2821,7 @@
             </div>
             <div class="side-block">
               <h3>预览和日志</h3>
-              <p class="settings-panel-note">用于核对当前交互群、菜单内容、测试回复和最近命中情况。</p>
+              <p class="settings-panel-note">用于核对当前交互群、菜单内容和最近命中情况。</p>
               <div class="stack">
                 <div class="item">
                   <strong>交互微信群</strong>
@@ -2802,9 +2838,19 @@
                   <button type="button" id="testFeatureChannelBtn">测试模板回复</button>
                 </div>
                 <div class="item">
-                  <strong>手动模拟微信发送</strong>
-                  <small>不通过微信直接把文本丢给同一套交互逻辑，适合测试群名、成员名、绑定和图片回复。</small>
+                  <strong>命中日志</strong>
+                  <small>最近微信交互命中、模板触发和测试结果。</small>
                 </div>
+                <div id="wechatInteractionLogList" class="people-list reminder-card-list"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-panel single" id="wechatSimulationSettings">
+            <div class="side-block wide">
+              <h3>手动模拟微信发送</h3>
+              <p class="settings-panel-note">不通过微信直接把文本丢给同一套交互逻辑，适合测试群名、成员名、绑定和图片回复；不会真正往微信群发送消息。</p>
+              <div class="stack">
                 <label>模拟消息内容
                   <textarea id="wechatInteractionTestText" rows="3" placeholder="查询商邱宏巡查记录 2026-07-01至2026-07-31"></textarea>
                 </label>
@@ -2840,15 +2886,11 @@
                     <button class="primary" type="button" id="simulateWechatInteractionBtn">发送测试</button>
                   </div>
                 </div>
+                <p id="wechatInteractionTestStatus" class="status"></p>
                 <label>模拟结果
                   <pre id="wechatInteractionTestResult" class="tunnel-result-box"></pre>
                 </label>
                 <img id="wechatInteractionTestImage" class="warning-image-preview hidden" alt="微信交互测试图片预览" />
-                <div class="item">
-                  <strong>命中日志</strong>
-                  <small>最近微信交互命中、模板触发和测试结果。</small>
-                </div>
-                <div id="wechatInteractionLogList" class="people-list reminder-card-list"></div>
               </div>
             </div>
           </section>
@@ -2856,19 +2898,15 @@
           <section class="settings-panel reminder-card-panel" id="monitorSettings">
             <div class="side-block">
               <h3>监控班提醒</h3>
-              <p class="settings-panel-note">配置每个人的班前提醒和休息提醒。通知通道为个人微信群时，姓名可自动关联微信成员 ID；企业微信群机器人则使用手机号。</p>
+              <p class="settings-panel-note">配置每个人的班前提醒和休息提醒。@ 对象统一使用“消息通知渠道”的通知 @ 配置。</p>
               <div class="stack">
                 <div class="field-grid">
                   <label>姓名 <input id="personName" list="personnelNameOptions" placeholder="选择或输入姓名" /></label>
-                  <label id="monitorMobileField">@ 手机号 <input id="mentionMobile" placeholder="10000000000" /></label>
                 </div>
+                <input id="mentionMobile" type="hidden" />
                 <div class="field-grid hidden" id="monitorWechatFields">
-                  <label>个人微信群成员
-                    <select id="monitorWechatMember"></select>
-                  </label>
-                  <label>微信群成员 ID
-                    <input id="monitorWechatMemberId" readonly placeholder="未绑定" />
-                  </label>
+                  <select id="monitorWechatMember"></select>
+                  <input id="monitorWechatMemberId" readonly placeholder="未绑定" />
                 </div>
                 <div class="field-grid">
                   <label>每日提醒时间 <input id="dailyTime" type="time" value="07:50" /></label>
@@ -2926,12 +2964,6 @@
                   <label>结束后提醒频率（小时） <input id="patrolEndInterval" type="number" min="1" max="168" value="6" /></label>
                   <label>结束后巡查窗口（小时） <input id="patrolEndWindow" type="number" min="1" max="720" value="48" /></label>
                   <div class="patrol-delivery-row">
-                    <label>消息 @ 对象
-                      <input id="patrolMentionTarget" list="patrolMentionOptions" placeholder="@所有人 或手机号" />
-                      <datalist id="patrolMentionOptions">
-                        <option value="@所有人"></option>
-                      </datalist>
-                    </label>
                     <label>发送内容
                       <select id="patrolSendContentMode">
                         <option value="both">文字+图片</option>
@@ -2970,19 +3002,15 @@
           <section class="settings-panel reminder-card-panel" id="customReminderSettings">
             <div class="side-block">
               <h3>自定义提醒</h3>
-              <p class="settings-panel-note">适合补充固定事项提醒，例如特定班次的检查或交接事项。</p>
+              <p class="settings-panel-note">适合补充固定事项提醒，例如特定班次的检查或交接事项。@ 对象统一使用“消息通知渠道”的通知 @ 配置。</p>
               <div class="stack">
                 <div class="field-grid">
                   <label>姓名 <input id="customReminderName" list="personnelNameOptions" placeholder="选择或输入姓名" /></label>
-                  <label id="customReminderMobileField">@ 手机号 <input id="customReminderMobile" placeholder="10000000000" /></label>
                 </div>
+                <input id="customReminderMobile" type="hidden" />
                 <div class="field-grid hidden" id="customReminderWechatFields">
-                  <label>个人微信群成员
-                    <select id="customReminderWechatMember"></select>
-                  </label>
-                  <label>微信群成员 ID
-                    <input id="customReminderWechatMemberId" readonly placeholder="未绑定" />
-                  </label>
+                  <select id="customReminderWechatMember"></select>
+                  <input id="customReminderWechatMemberId" readonly placeholder="未绑定" />
                 </div>
                 <div class="field-grid">
                   <label>匹配班次
@@ -3189,6 +3217,7 @@
     const BEIJING_TIME_ZONE = "Asia/Shanghai";
     const shiftOptions = ["", "早", "中", "晚", "休", "出差"];
     const shiftClass = { "中": "mid", "早": "early", "晚": "night", "休": "rest", "出差": "trip" };
+    const monitorShiftCodes = new Set(["早", "中", "晚"]);
     const $ = (id) => document.getElementById(id);
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -3973,10 +4002,9 @@
         return;
       }
       state.savedRosters = body.rosters || [];
-      if (!state.selectedSavedRoster && state.savedRosters.length) {
-      const latest = state.savedRosters[state.savedRosters.length - 1];
-        state.selectedSavedRoster = savedRosterKey(latest);
-      }
+      const latest = latestSavedRoster(state.savedRosters);
+      state.selectedSavedRoster = latest ? savedRosterKey(latest) : "";
+      state.savedActiveCell = null;
       state.savedEditMode = false;
       state.savedDraft = null;
       renderSavedRosterSelector();
@@ -3985,6 +4013,36 @@
 
     function savedRosterKey(roster) {
       return `${roster.year}-${String(roster.month).padStart(2, "0")}`;
+    }
+
+    function compareSavedRosterImport(a, b) {
+      const importedA = String(a && a.confirmed_at || "");
+      const importedB = String(b && b.confirmed_at || "");
+      if (importedA !== importedB) return importedA.localeCompare(importedB);
+      const ymA = Number(a && a.year || 0) * 100 + Number(a && a.month || 0);
+      const ymB = Number(b && b.year || 0) * 100 + Number(b && b.month || 0);
+      return ymA - ymB;
+    }
+
+    function latestSavedRoster(rosters) {
+      return [...(rosters || [])].sort(compareSavedRosterImport).pop() || null;
+    }
+
+    function savedRosterTodayDay(roster) {
+      const [year, month, day] = beijingDateInputValue().split("-").map((value) => Number(value));
+      if (Number(roster && roster.year) !== year || Number(roster && roster.month) !== month) return "";
+      return String(day);
+    }
+
+    function isSavedTodayMonitorCell(roster, row, day) {
+      const todayDay = savedRosterTodayDay(roster);
+      if (!todayDay || String(day) !== todayDay) return false;
+      return monitorShiftCodes.has(String((row.days || {})[todayDay] || "").trim());
+    }
+
+    function isSavedTodayMonitorRow(roster, row) {
+      const todayDay = savedRosterTodayDay(roster);
+      return Boolean(todayDay && monitorShiftCodes.has(String((row.days || {})[todayDay] || "").trim()));
     }
 
     function renderSavedRosterSelector() {
@@ -3997,7 +4055,7 @@
         select.appendChild(option);
         return;
       }
-      state.savedRosters.forEach((roster) => {
+      [...state.savedRosters].sort((a, b) => compareSavedRosterImport(b, a)).forEach((roster) => {
         const option = document.createElement("option");
         option.value = savedRosterKey(roster);
         option.textContent = `${roster.year}年${roster.month}月`;
@@ -4026,18 +4084,26 @@
       $("savedStatus").className = "status ok";
       const dayCount = daysInMonth(Number(roster.year), Number(roster.month));
       const grid = state.savedEditMode && state.savedDraft ? state.savedDraft.grid : roster.grid;
+      const todayDay = savedRosterTodayDay(roster);
+      const todayMonitorRowIndexes = new Set();
+      grid.forEach((row, rowIndex) => {
+        if (isSavedTodayMonitorRow(roster, row)) todayMonitorRowIndexes.add(rowIndex);
+      });
+      const lastTodayMonitorRowIndex = Math.max(-1, ...todayMonitorRowIndexes);
       $("savedSummary").textContent = `${grid.length} 人 × ${dayCount} 天`;
       loadRosterVersions(roster);
       const head = document.createElement("tr");
       head.innerHTML = `<th class="name">姓名</th>${Array.from({ length: dayCount }, (_, i) => {
         const day = String(i + 1);
-        return `<th data-saved-day="${day}">${day}</th>`;
+        const todayClass = day === todayDay ? ' class="saved-today-col"' : "";
+        return `<th data-saved-day="${day}"${todayClass}>${day}</th>`;
       }).join("")}${state.savedEditMode ? "<th>操作</th>" : ""}`;
       table.appendChild(head);
       grid.forEach((row, rowIndex) => {
         const tr = document.createElement("tr");
         const name = document.createElement("td");
         name.className = "name";
+        if (isSavedTodayMonitorRow(roster, row)) name.classList.add("saved-today-monitor-name");
         name.dataset.savedRow = String(rowIndex);
         if (state.savedEditMode) {
           name.innerHTML = `<input list="personnelNameOptions" value="${escapeHtml(row.name || "")}" data-saved-row="${rowIndex}" data-saved-name="1" />`;
@@ -4050,6 +4116,14 @@
           const value = (row.days || {})[dayText] || "";
           const td = document.createElement("td");
           td.className = `shift-cell shift-${shiftClass[value] || "blank"}`;
+          if (todayMonitorRowIndexes.has(rowIndex) && todayDay && day <= Number(todayDay)) td.classList.add("saved-today-monitor-row-path");
+          if (todayDay && dayText === todayDay && rowIndex <= lastTodayMonitorRowIndex) td.classList.add("saved-today-monitor-col-path");
+          if (isSavedTodayMonitorCell(roster, row, dayText)) {
+            td.classList.add("saved-today-monitor-cell");
+            if (rowIndex > 0 && isSavedTodayMonitorCell(roster, grid[rowIndex - 1], dayText)) {
+              td.classList.add("saved-today-monitor-join-prev");
+            }
+          }
           td.dataset.savedRow = String(rowIndex);
           td.dataset.savedDay = dayText;
           applySavedCellHighlight(td, rowIndex, dayText);
@@ -4317,17 +4391,13 @@
     }
 
     function updateMonitorNotificationFields() {
-      const isLightAgent = isLightAgentNotificationSelected();
-      $("monitorMobileField").classList.toggle("hidden", isLightAgent);
-      $("monitorWechatFields").classList.toggle("hidden", !isLightAgent);
+      if ($("monitorWechatFields")) $("monitorWechatFields").classList.add("hidden");
       renderMonitorWechatMemberOptions();
       renderMonitoredPeopleList();
     }
 
     function updateCustomReminderNotificationFields() {
-      const isLightAgent = isLightAgentNotificationSelected();
-      $("customReminderMobileField").classList.toggle("hidden", isLightAgent);
-      $("customReminderWechatFields").classList.toggle("hidden", !isLightAgent);
+      if ($("customReminderWechatFields")) $("customReminderWechatFields").classList.add("hidden");
       renderCustomReminderWechatMemberOptions();
       renderCustomRemindersList();
     }
@@ -4437,10 +4507,7 @@
     }
 
     function monitorNotificationText(person) {
-      if (isLightAgentNotificationSelected()) {
-        return `通知方式 个人微信群 · ${monitorWechatBindingText(person)}`;
-      }
-      return `通知方式 群机器人 · @手机号 ${escapeHtml(person.mention_mobile || "未填写")}`;
+      return `@ 使用消息通知渠道统一配置`;
     }
 
     function renderMonitoredPeopleList() {
@@ -4516,10 +4583,7 @@
     }
 
     function customReminderNotificationText(reminder) {
-      if (isLightAgentNotificationSelected()) {
-        return `通知方式 个人微信群 · ${monitorWechatBindingText(customWechatSavedBinding(reminder.name))}`;
-      }
-      return `通知方式 群机器人 · @手机号 ${escapeHtml(reminder.mention_mobile || personnelMobileByName(reminder.name) || "未填写")}`;
+      return `@ 使用消息通知渠道统一配置`;
     }
 
     function renderCustomRemindersList() {
@@ -5212,13 +5276,6 @@
 
     function renderLightAgentMembers() {
       const members = state.lightAgentMembers || [];
-      const options = `<option value="">不@测试成员</option>` + members.map((member) => {
-        const id = wechatMemberRuntimeId(member);
-        const label = wechatMemberDisplayText(member);
-        const memberName = wechatMemberLabel(member);
-        return `<option value="${escapeHtml(id)}" data-member-name="${escapeHtml(memberName)}">${escapeHtml(label)}</option>`;
-      }).join("");
-      if ($("testWechatMember")) $("testWechatMember").innerHTML = options;
       if ($("lightAgentMemberList")) {
         $("lightAgentMemberList").innerHTML = members.map((member) => {
           const id = wechatMemberRuntimeId(member);
@@ -5691,6 +5748,8 @@
           lightagent_token: useLightAgent ? $("lightAgentToken").value.trim() : "",
           lightagent_target: useLightAgent && notificationTargets.length ? notificationTargets[0].id : "",
           lightagent_targets: useLightAgent ? notificationTargets : [],
+          mention_mode: $("notificationMentionMode").value || "person",
+          mention_targets: $("notificationMentionTargets").value.trim(),
           message_template: $("messageTemplate").value.trim()
         })
       });
@@ -5716,12 +5775,18 @@
         button.setAttribute("aria-pressed", active ? "true" : "false");
       });
       $("wecomNotificationFields").classList.toggle("hidden", isLightAgent);
-      $("wecomTestMobileFields").classList.toggle("hidden", isLightAgent);
       $("lightAgentNotificationFields").classList.toggle("hidden", !isLightAgent);
       $("lightAgentUrlField").classList.toggle("hidden", !isLightAgent || state.wechatBridgeEnabled);
       $("lightAgentTokenField").classList.toggle("hidden", !isLightAgent || state.wechatBridgeEnabled);
+      updateNotificationMentionFields();
       updateMonitorNotificationFields();
       updateCustomReminderNotificationFields();
+    }
+
+    function updateNotificationMentionFields() {
+      const field = $("notificationMentionTargetsField");
+      if (!field) return;
+      field.classList.toggle("hidden", $("notificationMentionMode").value !== "custom");
     }
 
     function setNotificationSenderType(value) {
@@ -5732,6 +5797,7 @@
     document.querySelectorAll("[data-notification-sender]").forEach((button) => {
       button.addEventListener("click", () => setNotificationSenderType(button.dataset.notificationSender));
     });
+    $("notificationMentionMode").addEventListener("change", updateNotificationMentionFields);
 
     async function syncLightAgentWechatStateForNotification(options = {}) {
       if ($("notificationSenderType").value !== "lightagent") return true;
@@ -5771,9 +5837,7 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            test_mobile: $("testMobile").value.trim(),
-            test_wechat_member_id: $("testWechatMember").value.trim(),
-            test_wechat_member_name: $("testWechatMember").selectedOptions[0] ? String($("testWechatMember").selectedOptions[0].dataset.memberName || "").trim() : ""
+            person_name: $("notificationTestPersonName").value.trim() || "示例甲"
           })
         });
         const text = await response.text();
@@ -5839,6 +5903,10 @@
           ? body.config.lightagent_targets
           : (body.config && body.config.lightagent_target ? [{ id: body.config.lightagent_target, name: "" }] : [])
       );
+      $("notificationMentionMode").value = body.config ? (body.config.mention_mode || "person") : "person";
+      $("notificationMentionTargets").value = body.config ? (body.config.mention_targets || "") : "";
+      $("notificationTestPersonName").value = "";
+      updateNotificationMentionFields();
       renderNotificationTargetRoomList();
       $("messageTemplate").value = body.config ? body.config.message_template || "" : "";
       updateNotificationBackendFields();
@@ -5906,6 +5974,13 @@
         sender_name: $("wechatInteractionTestSenderName").value.trim(),
         target_date: $("wechatInteractionTestTargetDate").value || null
       };
+    }
+
+    function setWechatInteractionTestStatus(message, className = "status") {
+      const status = $("wechatInteractionTestStatus") || $("featureChannelStatus");
+      if (!status) return;
+      status.textContent = message;
+      status.className = className;
     }
 
     function renderWechatInteractionTestResult(result) {
@@ -6137,8 +6212,7 @@
       try {
         const payload = wechatInteractionTestPayload();
         if (!payload.text) throw new Error("请先填写模拟消息内容");
-        $("featureChannelStatus").textContent = "正在模拟微信发送...";
-        $("featureChannelStatus").className = "status";
+        setWechatInteractionTestStatus("正在模拟微信发送...", "status");
         const response = await fetch("/api/wechat-interaction-config/simulate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -6148,18 +6222,14 @@
         if (!response.ok || !body.success) throw new Error(body.detail || "模拟发送失败");
         state.featureChannelTestResult = body.result || null;
         renderWechatInteractionTestResult(body);
-        $("featureChannelStatus").textContent = body.result && body.result.reply ? `模拟完成：${body.result.reply}` : "模拟发送完成";
-        $("featureChannelStatus").className = "status ok";
+        setWechatInteractionTestStatus(body.result && body.result.reply ? `模拟完成：${body.result.reply}` : "模拟发送完成", "status ok");
         await loadFeatureChannelLogs();
       } catch (error) {
-        $("featureChannelStatus").textContent = `模拟发送失败：${error.message || error}`;
-        $("featureChannelStatus").className = "status error";
+        setWechatInteractionTestStatus(`模拟发送失败：${error.message || error}`, "status error");
       }
     });
 
     function patrolWarningPayload() {
-      const mentionTarget = $("patrolMentionTarget").value.trim() || "@所有人";
-      const mentionAll = mentionTarget === "@所有人" || mentionTarget.toLowerCase() === "@all";
       return {
         enabled: $("patrolWarningEnabled").checked,
         login_url: $("patrolLoginUrl").value.trim(),
@@ -6174,8 +6244,6 @@
         end_reminder_enabled: $("patrolEndReminderEnabled").checked,
         end_reminder_interval_hours: Number($("patrolEndInterval").value || 6),
         end_reminder_window_hours: Number($("patrolEndWindow").value || 48),
-        mention_all: mentionAll,
-        mention_mobiles: mentionAll ? "" : mentionTarget,
         send_content_mode: $("patrolSendContentMode").value || "both",
         start_message_template: $("patrolStartTemplate").value.trim(),
         end_message_template: $("patrolEndTemplate").value.trim()
@@ -6419,7 +6487,6 @@
       $("patrolEndReminderEnabled").checked = config.end_reminder_enabled !== false;
       $("patrolEndInterval").value = config.end_reminder_interval_hours || 6;
       $("patrolEndWindow").value = config.end_reminder_window_hours || 48;
-      $("patrolMentionTarget").value = config.mention_all === false ? (config.mention_mobiles || "") : "@所有人";
       $("patrolSendContentMode").value = config.send_content_mode || "both";
       $("patrolStartTemplate").value = config.start_message_template || "";
       $("patrolEndTemplate").value = config.end_message_template || "";
