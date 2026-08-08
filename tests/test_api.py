@@ -220,7 +220,10 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'id="tunnelMechanicalUsername"' in html
 
     assert 'id="importTunnelMechanicalTemplateBtn"' in html
+    assert 'id="exportTunnelMechanicalTemplateBtn"' in html
     assert 'id="tunnelMechanicalTemplateFile"' in html
+    assert 'async function exportTunnelMechanicalTemplate' in html
+    assert '$("exportTunnelMechanicalTemplateBtn").addEventListener("click", exportTunnelMechanicalTemplate)' in html
     assert 'id="queryTunnelMechanicalResultBtn"' in html
     assert 'id="tunnelMechanicalResultDateModal"' in html
     assert 'id="tunnelMechanicalResultDateInput" type="date"' in html
@@ -800,6 +803,16 @@ def test_tunnel_mechanical_captcha_text_solver_calculates_math():
     assert main_module._solve_tunnel_mechanical_captcha_text("9 - 4 = ?") == "5"
 
 
+def test_httpx_error_message_includes_exception_type_when_message_is_empty():
+    request = main_module.httpx.Request("GET", "https://zhyhpt.yciccloud.com/prod-api/code")
+    error = main_module.httpx.ConnectError("", request=request)
+
+    message = main_module._httpx_error_message(error)
+
+    assert "ConnectError" in message
+    assert "https://zhyhpt.yciccloud.com/prod-api/code" in message
+
+
 def test_tunnel_mechanical_submit_uses_cached_login_state(tmp_path, monkeypatch):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
@@ -1354,6 +1367,169 @@ def test_expired_patrol_warning_is_hidden_after_window(tmp_path, monkeypatch):
     assert not any(event["kind"].startswith("patrol_warning_") for event in today_body["events"])
     assert not any(status["key"] == "patrol_warning" for status in today_body["group_statuses"])
     assert image_response.status_code == 404
+
+
+def test_ongoing_patrol_warning_is_hidden_after_window(tmp_path, monkeypatch):
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 8, 8, 17, 20, tzinfo=tz)
+
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_patrol_warning_config(
+        enabled=True,
+        route_code="S41",
+        end_reminder_window_hours=48,
+    )
+    repo.save_patrol_warning_state(
+        warning={
+            "key": "warning-old",
+            "route_code": "S41",
+            "route_name": "南涧－宁洱",
+            "warning_level": "3",
+            "warning_level_label": "橙色预警",
+            "start_time": "2026-07-29T01:45:02+08:00",
+            "end_time": "",
+            "start_stake": "K106.670",
+            "end_stake": "K120.000",
+        }
+    )
+    client = TestClient(app)
+
+    today_response = client.get("/api/reminders/today")
+    image_response = client.get("/api/patrol-warning-image")
+
+    assert today_response.status_code == 200
+    body = today_response.json()
+    assert not any(event["kind"].startswith("patrol_warning_") for event in body["events"])
+    assert not any(status["key"] == "patrol_warning" for status in body["group_statuses"])
+    assert image_response.status_code == 404
+
+
+def test_patrol_warning_monitor_marks_old_unsent_warning_handled(tmp_path, monkeypatch):
+    sent: list[object] = []
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 8, 8, 17, 20, tzinfo=tz)
+
+    class FakeWebhookClient:
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            sent.append(("text", content, mentioned_mobile_list))
+
+        async def send_image(self, image_bytes: bytes):
+            sent.append(("image", image_bytes))
+
+    warning = warning_from_dict(
+        {
+            "key": "warning-old",
+            "route_code": "S41",
+            "route_name": "南涧－宁洱",
+            "warning_level": "3",
+            "warning_level_label": "橙色预警",
+            "start_time": "2026-07-29T01:45:02+08:00",
+            "end_time": "",
+            "start_stake": "K106.670",
+            "end_stake": "K120.000",
+        },
+        main_module.TZ,
+    )
+
+    async def fake_fetch_latest_warning_result(*args, **kwargs):
+        return SimpleNamespace(
+            warning=warning,
+            stats={"total_rows": 1, "matched_rows": 1},
+            token="token",
+            token_expires_at="2026-08-09T01:20:00+08:00",
+            token_reused=False,
+        )
+
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(webhook_url="https://example.test/cgi-bin/webhook/send?key=unit-test")
+    repo.save_patrol_warning_config(
+        enabled=True,
+        login_url="https://example.test/login",
+        warning_url="https://example.test/warninginfo/findPage",
+        username="station-user",
+        password="secret",
+        route_code="S41",
+        end_reminder_window_hours=48,
+    )
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(main_module, "fetch_latest_warning_result", fake_fetch_latest_warning_result)
+    monkeypatch.setattr(main_module, "_wecom_webhook_client_from_repo", lambda repo: FakeWebhookClient())
+    monkeypatch.setattr(main_module, "next_poll_time", lambda now, interval_minutes: now)
+
+    asyncio.run(main_module._check_patrol_warning_monitor(repo))
+
+    state = repo.get_patrol_warning_state()
+    assert sent == []
+    assert state["warning_key"] == "warning-old"
+    assert state["last_start_sent_key"] == "warning-old"
+    assert repo.list_send_records() == []
+
+
+def test_patrol_warning_monitor_still_sends_fresh_warning(tmp_path, monkeypatch):
+    sent: list[object] = []
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 8, 8, 17, 20, tzinfo=tz)
+
+    class FakeWebhookClient:
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            sent.append(("text", content, mentioned_mobile_list))
+
+        async def send_image(self, image_bytes: bytes):
+            sent.append(("image", image_bytes))
+
+    warning = warning_from_dict(
+        {
+            "key": "warning-new",
+            "route_code": "S41",
+            "route_name": "南涧－宁洱",
+            "warning_level": "3",
+            "warning_level_label": "橙色预警",
+            "start_time": "2026-08-08T17:05:00+08:00",
+            "end_time": "",
+            "start_stake": "K106.670",
+            "end_stake": "K120.000",
+        },
+        main_module.TZ,
+    )
+
+    async def fake_fetch_latest_warning_result(*args, **kwargs):
+        return SimpleNamespace(
+            warning=warning,
+            stats={"total_rows": 1, "matched_rows": 1},
+            token="token",
+            token_expires_at="2026-08-09T01:20:00+08:00",
+            token_reused=False,
+        )
+
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(webhook_url="https://example.test/cgi-bin/webhook/send?key=unit-test")
+    repo.save_patrol_warning_config(
+        enabled=True,
+        login_url="https://example.test/login",
+        warning_url="https://example.test/warninginfo/findPage",
+        username="station-user",
+        password="secret",
+        route_code="S41",
+    )
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(main_module, "fetch_latest_warning_result", fake_fetch_latest_warning_result)
+    monkeypatch.setattr(main_module, "_wecom_webhook_client_from_repo", lambda repo: FakeWebhookClient())
+    monkeypatch.setattr(main_module, "next_poll_time", lambda now, interval_minutes: now)
+
+    asyncio.run(main_module._check_patrol_warning_monitor(repo))
+
+    assert any(item[0] == "text" for item in sent)
+    assert repo.get_patrol_warning_state()["last_start_sent_key"] == "warning-new"
 
 
 def test_confirm_roster_prunes_nonexistent_days_for_common_february(tmp_path):

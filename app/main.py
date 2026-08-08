@@ -4811,6 +4811,17 @@ def _tunnel_mechanical_cookie_header(cookies: httpx.Cookies) -> str:
     return "; ".join(f"{cookie.name}={cookie.value}" for cookie in cookies.jar)
 
 
+def _httpx_error_message(exc: httpx.HTTPError) -> str:
+    parts = [exc.__class__.__name__]
+    detail = str(exc).strip()
+    if detail:
+        parts.append(detail)
+    request = getattr(exc, "request", None)
+    if request is not None:
+        parts.append(str(request.url))
+    return "：".join(parts)
+
+
 async def _fetch_tunnel_mechanical_captcha(base_url: str, *, solve_attempts: int = 5) -> dict[str, Any]:
     base_url = _tunnel_mechanical_base_url(base_url)
     attempts = max(1, int(solve_attempts or 1))
@@ -4828,7 +4839,7 @@ async def _fetch_tunnel_mechanical_captcha(base_url: str, *, solve_attempts: int
                 )
                 body = response.json()
         except httpx.HTTPError as exc:
-            raise HTTPException(status_code=502, detail=f"获取智慧养护验证码失败：{exc}") from exc
+            raise HTTPException(status_code=502, detail=f"获取智慧养护验证码失败：{_httpx_error_message(exc)}") from exc
         except ValueError as exc:
             raise HTTPException(status_code=502, detail="获取智慧养护验证码失败：平台返回的不是 JSON") from exc
         if response.status_code != 200 or str(body.get("code") or "") not in {"200", "0"}:
@@ -5843,7 +5854,7 @@ def _plan_patrol_warning_display_events(repo: DutyRepository, target: date, *, n
 
     events: list[ReminderEvent] = []
     target_name = warning.route_code or warning.route_name or str(config.get("route_code") or "公路巡查预警")
-    start_at = warning.create_time or warning.start_time
+    start_at = warning.start_time or warning.create_time
     if start_at and start_at.date() == target:
         events.append(
             ReminderEvent(
@@ -5879,10 +5890,21 @@ def _patrol_warning_in_display_window(warning: Any, config: dict[str, Any], *, n
     if warning is None:
         return False
     end_time = getattr(warning, "end_time", None)
-    if not end_time:
-        return True
     window_hours = max(1, int((config or {}).get("end_reminder_window_hours") or 48))
-    return now <= end_time + timedelta(hours=window_hours)
+    if end_time:
+        return now <= end_time + timedelta(hours=window_hours)
+    start_time = getattr(warning, "start_time", None) or getattr(warning, "create_time", None)
+    return bool(not start_time or now <= start_time + timedelta(hours=min(window_hours, 48)))
+
+
+def _patrol_warning_should_send_start(warning: Any, config: dict[str, Any], *, now: datetime) -> bool:
+    if warning is None or not _patrol_warning_in_display_window(warning, config, now=now):
+        return False
+    start_time = getattr(warning, "start_time", None) or getattr(warning, "create_time", None)
+    if not start_time:
+        return True
+    poll_minutes = max(1, int((config or {}).get("poll_interval_minutes") or 10))
+    return now - start_time <= timedelta(minutes=max(60, poll_minutes * 3))
 
 
 def _today_reminder_group_statuses(repo: DutyRepository, target: date, events: list[ReminderEvent]) -> list[dict[str, str]]:
@@ -6368,24 +6390,28 @@ async def _check_patrol_warning_monitor(repo: DutyRepository) -> None:
         state = repo.get_patrol_warning_state()
 
     if str(state.get("last_start_sent_key") or "") != latest.key:
-        content = _build_patrol_warning_content(latest, config, now=now, mode="start")
-        try:
-            await _send_patrol_warning_message(
-                repo,
-                webhook_client,
-                kind="patrol_warning_start",
-                target=route_code or latest.route_code or "公路巡查预警",
-                scheduled_at=now.isoformat(),
-                content=content,
-                warning=latest,
-                window_hours=int(config.get("end_reminder_window_hours") or 48),
-                now=now,
-                image_mode="start",
-            )
+        if not _patrol_warning_should_send_start(latest, config, now=now):
             repo.save_patrol_warning_state(last_start_sent_key=latest.key)
-        except Exception as exc:
-            LOGGER.exception("公路巡查预警开始提醒发送失败：%s", exc)
-            return
+            LOGGER.info("跳过历史公路巡查预警开始提醒：%s start=%s", latest.key, latest.start_time or latest.create_time)
+        else:
+            content = _build_patrol_warning_content(latest, config, now=now, mode="start")
+            try:
+                await _send_patrol_warning_message(
+                    repo,
+                    webhook_client,
+                    kind="patrol_warning_start",
+                    target=route_code or latest.route_code or "公路巡查预警",
+                    scheduled_at=now.isoformat(),
+                    content=content,
+                    warning=latest,
+                    window_hours=int(config.get("end_reminder_window_hours") or 48),
+                    now=now,
+                    image_mode="start",
+                )
+                repo.save_patrol_warning_state(last_start_sent_key=latest.key)
+            except Exception as exc:
+                LOGGER.exception("公路巡查预警开始提醒发送失败：%s", exc)
+                return
 
     if not bool(config.get("end_reminder_enabled", True)):
         return

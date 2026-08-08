@@ -602,6 +602,7 @@ def test_config_snapshot_roundtrip_restores_user_configuration(tmp_path: Path):
     assert target.get_patrol_warning_config()["password"] == "patrol-pass"
     assert target.get_tunnel_mechanical_config()["password"] == "tunnel-pass"
     assert target.get_tunnel_mechanical_template()["people"] == [{"id": "1", "name": "商邱宏"}]
+    assert snapshot["tunnel_mechanical_template"]["people"] == [{"id": "1", "name": "商邱宏"}]
     assert target.list_monitored_people()[0]["name"] == "示例甲"
     assert target.list_custom_reminders()[0]["message"] == "自定义提醒"
     assert target.get_roster_month(2026, 8)["grid"][0]["days"]["1"] == "早"
@@ -631,4 +632,3 @@ def test_send_records_roundtrip(tmp_path: Path):
             "created_at": repo.list_send_records()[0]["created_at"],
         }
     ]
-

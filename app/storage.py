@@ -440,6 +440,7 @@ class DutyRepository:
         return {
             "format": "duty-reminder-config",
             "version": 1,
+            "tunnel_mechanical_template": self.get_tunnel_mechanical_template(),
             "tables": tables,
         }
 
@@ -454,9 +455,14 @@ class DutyRepository:
         if not isinstance(tables, dict):
             raise ValueError("配置文件缺少 tables")
         imported: dict[str, int] = {}
+        tunnel_template_snapshot = snapshot.get("tunnel_mechanical_template")
+        if not isinstance(tunnel_template_snapshot, dict):
+            tunnel_template_snapshot = None
         with self._connect() as conn:
             for table in CONFIG_EXPORT_TABLES:
                 rows = tables.get(table, [])
+                if table == "tunnel_mechanical_template" and tunnel_template_snapshot is not None:
+                    rows = [{"id": 1, "template_json": json.dumps(tunnel_template_snapshot, ensure_ascii=False)}]
                 if rows is None:
                     rows = []
                 if not isinstance(rows, list):

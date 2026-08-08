@@ -2587,6 +2587,7 @@
                   <h3>隧道模板</h3>
                   <div class="toolbar tunnel-template-actions">
                     <input id="tunnelMechanicalTemplateFile" type="file" accept="application/json,.json" hidden />
+                    <button id="exportTunnelMechanicalTemplateBtn" type="button">导出模板</button>
                     <button id="importTunnelMechanicalTemplateBtn" type="button">导入模板</button>
                     <button id="loadTunnelMechanicalBtn" type="button">刷新模板</button>
                     <button id="selectAllTunnelMechanicalBtn" type="button">全选</button>
@@ -8067,6 +8068,27 @@
       }
     }
 
+    async function exportTunnelMechanicalTemplate() {
+      setTunnelMechanicalStatus("正在导出隧道模板...");
+      try {
+        const response = await fetch("/api/tunnel-mechanical/templates");
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.detail || "导出模板失败");
+        const blob = new Blob([JSON.stringify(body, null, 2)], { type: "application/json;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `tunnel-mechanical-template-${beijingDateInputValue()}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        setTunnelMechanicalStatus("隧道模板已导出", "ok");
+      } catch (error) {
+        setTunnelMechanicalStatus(`导出失败：${error.message || error}`, "error");
+      }
+    }
+
     async function loadTunnelMechanicalTemplates(force = false) {
       if (state.tunnelMechanicalTemplates && !force) return;
       setTunnelMechanicalStatus("正在加载隧道机电模板...");
@@ -8184,6 +8206,7 @@
       }
     }
 
+    $("exportTunnelMechanicalTemplateBtn").addEventListener("click", exportTunnelMechanicalTemplate);
     $("importTunnelMechanicalTemplateBtn").addEventListener("click", () => $("tunnelMechanicalTemplateFile").click());
     $("tunnelMechanicalTemplateFile").addEventListener("change", (event) => {
       importTunnelMechanicalTemplate(event.target.files && event.target.files[0]);
