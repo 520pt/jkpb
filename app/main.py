@@ -28,6 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 from app.daily_duty_image import has_cjk_font, render_daily_duty_image
+from app.http_client import tunnel_async_httpx_client
 from app.ocr import extract_roster_image, extract_template_roster_image, recheck_template_roster_cells
 from app.patrol_warning import (
     PatrolWarningError,
@@ -4828,7 +4829,7 @@ async def _fetch_tunnel_mechanical_captcha(base_url: str, *, solve_attempts: int
     last_result: dict[str, Any] | None = None
     for _ in range(attempts):
         try:
-            async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
+            async with tunnel_async_httpx_client(timeout=15) as client:
                 response = await client.get(
                     f"{base_url}/prod-api/code",
                     headers={
@@ -4929,7 +4930,7 @@ async def _refresh_tunnel_mechanical_token(
         return None
     now = datetime.now(TZ)
     try:
-        async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
+        async with tunnel_async_httpx_client(timeout=20) as client:
             response = await client.post(
                 f"{base_url}/prod-api/auth/refresh",
                 headers={
@@ -4994,7 +4995,7 @@ async def _login_tunnel_mechanical(
         payload = _tunnel_mechanical_login_payload(config, code=attempt_code, uuid=attempt_uuid)
         now = datetime.now(TZ)
         try:
-            async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
+            async with tunnel_async_httpx_client(timeout=20) as client:
                 response = await client.post(
                     f"{base_url}/prod-api/auth/login",
                     headers={
@@ -5166,7 +5167,7 @@ async def _post_tunnel_mechanical_submissions(
 ) -> list[dict[str, Any]]:
     results = []
     try:
-        async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
+        async with tunnel_async_httpx_client(timeout=20) as client:
             for submission in submissions:
                 response = await client.post(submit_url, headers=headers, json=submission["payload"])
                 try:
@@ -5354,7 +5355,7 @@ async def _query_tunnel_mechanical_update_detail(
         return None
     url = f"{base_url}/prod-api/patrol/deviceCheck/get/{record_id}"
     try:
-        async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
+        async with tunnel_async_httpx_client(timeout=20) as client:
             response = await client.get(url, headers=headers)
             try:
                 body: Any = response.json()
@@ -5381,7 +5382,7 @@ async def _post_tunnel_mechanical_updates(
 ) -> list[dict[str, Any]]:
     results = []
     try:
-        async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
+        async with tunnel_async_httpx_client(timeout=20) as client:
             for update in updates:
                 last_result: dict[str, Any] | None = None
                 for method in ("post", "put"):
@@ -5641,7 +5642,7 @@ async def _query_tunnel_mechanical_raw_records(
     ]
     last_error = ""
     unmatched_rows: list[dict[str, Any]] = []
-    async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
+    async with tunnel_async_httpx_client(timeout=20) as client:
         for params in attempts:
             try:
                 response = await client.get(url, headers=headers, params=params)

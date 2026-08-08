@@ -23,6 +23,10 @@ services:
 
       # 微信查询接口内部 token，默认即可；不要暴露给外部。
       DUTY_REMINDER_QUERY_TOKEN: 520pt
+
+      # 可选：只给智慧养护/隧道机电接口使用的代理出口。
+      # 留空不会启用；不会影响企业微信、个人微信群、GitHub 或其他外联。
+      DUTY_REMINDER_TUNNEL_PROXY: "${DUTY_REMINDER_TUNNEL_PROXY:-}"
     volumes:
       # 保存数据库、提醒配置、排班数据、隧道机电配置、公路巡查配置。
       - ./data:/app/data

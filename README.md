@@ -81,6 +81,7 @@ services:
       WECHAT_BRIDGE_ENABLED: "true"
       WECHAT_BRIDGE_DATA_DIR: /app/wechat
       DUTY_REMINDER_QUERY_TOKEN: 520pt
+      DUTY_REMINDER_TUNNEL_PROXY: ""
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads
@@ -99,6 +100,15 @@ docker compose -f docker-compose.prod.yml up -d
 docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 ```
+
+如果服务器访问智慧养护/隧道机电接口超时，但其它网站正常，可以只给隧道机电接口配置专用代理出口：
+
+```bash
+echo 'DUTY_REMINDER_TUNNEL_PROXY=socks5h://127.0.0.1:10808' >> .env
+docker compose -f docker-compose.prod.yml up -d
+```
+
+这个变量只用于智慧养护/隧道机电接口，不会影响企业微信、个人微信群、GitHub 或其它外联请求。不要使用系统全局的 `HTTP_PROXY` / `HTTPS_PROXY` 来解决这个问题。
 
 图片导入默认使用固定排班表模板解析：检测表格线并按单元格颜色/像素特征识别班次，不再对整张图片运行 OCR。姓名列会做局部 OCR，识别不到的姓名需要在导入校对页面手动修正。
 
