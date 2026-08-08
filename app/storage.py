@@ -50,6 +50,20 @@ DEFAULT_PATROL_WARNING_END_TEMPLATE = (
 )
 NOTIFICATION_SENDER_TYPES = {"wecom_webhook", "lightagent"}
 NOTIFICATION_MENTION_MODES = {"none", "all", "person", "custom"}
+CONFIG_EXPORT_TABLES = [
+    "roster_months",
+    "roster_versions",
+    "monitored_people",
+    "notification_config",
+    "feature_channel_config",
+    "wechat_interaction_config",
+    "personnel_names",
+    "custom_reminders",
+    "daily_duty_config",
+    "patrol_warning_config",
+    "tunnel_mechanical_config",
+    "tunnel_mechanical_template",
+]
 
 
 def _normalize_notification_sender_type(value: str) -> str:
@@ -413,6 +427,62 @@ class DutyRepository:
         with self._connect() as conn:
             rows = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
         return {row["name"] for row in rows}
+
+    def export_config_snapshot(self) -> dict[str, Any]:
+        with self._connect() as conn:
+            tables: dict[str, list[dict[str, Any]]] = {}
+            for table in CONFIG_EXPORT_TABLES:
+                if table not in self.table_names():
+                    tables[table] = []
+                    continue
+                rows = conn.execute(f"SELECT * FROM {table}").fetchall()
+                tables[table] = [dict(row) for row in rows]
+        return {
+            "format": "duty-reminder-config",
+            "version": 1,
+            "tables": tables,
+        }
+
+    def import_config_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(snapshot, dict):
+            raise ValueError("配置文件格式不正确")
+        if snapshot.get("format") != "duty-reminder-config":
+            raise ValueError("不是 duty-reminder 配置文件")
+        if int(snapshot.get("version") or 0) != 1:
+            raise ValueError("不支持的配置文件版本")
+        tables = snapshot.get("tables")
+        if not isinstance(tables, dict):
+            raise ValueError("配置文件缺少 tables")
+        imported: dict[str, int] = {}
+        with self._connect() as conn:
+            for table in CONFIG_EXPORT_TABLES:
+                rows = tables.get(table, [])
+                if rows is None:
+                    rows = []
+                if not isinstance(rows, list):
+                    raise ValueError(f"{table} 必须是数组")
+                existing_columns = {
+                    str(row["name"])
+                    for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+                }
+                conn.execute(f"DELETE FROM {table}")
+                count = 0
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    clean = {key: value for key, value in row.items() if key in existing_columns}
+                    if not clean:
+                        continue
+                    columns = list(clean.keys())
+                    placeholders = ",".join("?" for _ in columns)
+                    names = ",".join(columns)
+                    conn.execute(
+                        f"INSERT INTO {table} ({names}) VALUES ({placeholders})",
+                        [clean[column] for column in columns],
+                    )
+                    count += 1
+                imported[table] = count
+        return {"tables": imported}
 
     def save_roster_month(
         self,

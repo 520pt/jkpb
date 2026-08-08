@@ -75,6 +75,20 @@ def test_wechat_bridge_resolves_stable_member_ids_to_current_runtime_ids(tmp_pat
     assert manager.resolve_runtime_member_ids([first["stable_member_id"], "@new-runtime"]) == ["@new-runtime"]
 
 
+def test_wechat_bridge_identity_snapshot_roundtrip(tmp_path):
+    source = WechatBridgeManager(data_dir=tmp_path / "source-wechat")
+    source.self_id = "@self"
+    room = source._normalize_rooms([{"id": "room@@runtime", "name": "通知群"}])[0]
+    member = source._normalize_members("room@@runtime", [{"id": "@member", "name": "示例甲", "wechat_id": "sample"}])[0]
+
+    snapshot = source.export_identity_snapshot()
+    target = WechatBridgeManager(data_dir=tmp_path / "target-wechat")
+    target.import_identity_snapshot(snapshot)
+
+    assert target.resolve_runtime_room_id(room["stable_room_id"]) == "room@@runtime"
+    assert target.resolve_runtime_member_ids([member["stable_member_id"]]) == ["@member"]
+
+
 def test_wechat_bridge_qr_event_exposes_image_data_uri(tmp_path):
     manager = WechatBridgeManager(data_dir=tmp_path / "wechat")
 

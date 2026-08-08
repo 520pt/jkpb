@@ -492,6 +492,38 @@ def create_app(
     def health():
         return {"status": "ok"}
 
+    @app.get("/api/config/export")
+    def export_config():
+        snapshot = repo.export_config_snapshot()
+        snapshot["exported_at"] = datetime.now(TZ).isoformat()
+        if app.state.wechat_bridge:
+            snapshot["wechat_bridge_identity"] = app.state.wechat_bridge.export_identity_snapshot()
+        payload = json.dumps(snapshot, ensure_ascii=False, indent=2).encode("utf-8")
+        filename = f"duty-reminder-config-{datetime.now(TZ):%Y%m%d-%H%M%S}.json"
+        return Response(
+            content=payload,
+            media_type="application/json; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @app.post("/api/config/import")
+    async def import_config(file: UploadFile = File(...)):
+        if not (file.filename or "").lower().endswith(".json"):
+            raise HTTPException(status_code=400, detail="请上传 JSON 配置文件")
+        raw = await file.read()
+        if len(raw) > 10 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="配置文件不能超过 10MB")
+        try:
+            data = json.loads(raw.decode("utf-8-sig"))
+            result = repo.import_config_snapshot(data)
+            if app.state.wechat_bridge:
+                app.state.wechat_bridge.import_identity_snapshot(data.get("wechat_bridge_identity") or {})
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=400, detail="配置 JSON 格式不正确") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"success": True, "result": result}
+
     @app.get("/api/uploads/{filename}")
     def get_uploaded_image(filename: str):
         safe_name = Path(filename).name
@@ -1239,6 +1271,13 @@ def create_app(
     def refresh_lightagent_wechat():
         if app.state.wechat_bridge:
             app.state.wechat_bridge.refresh_rooms()
+            return app.state.wechat_bridge.status_snapshot()
+        return _lightagent_web_request(repo, "POST", "/api/wechat_group/qrlogin", json_body={"action": "refresh"})
+
+    @app.post("/api/lightagent/wechat/refresh-qr")
+    def refresh_lightagent_wechat_qr():
+        if app.state.wechat_bridge:
+            app.state.wechat_bridge.refresh_login_qr()
             return app.state.wechat_bridge.status_snapshot()
         return _lightagent_web_request(repo, "POST", "/api/wechat_group/qrlogin", json_body={"action": "refresh"})
 

@@ -116,6 +116,14 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'data-tab="orangeWarning">橙色预警查询' in html
     assert 'data-tab="settings">配置中心' in html
     assert 'id="settingsOverview"' in html
+    assert 'id="exportConfigBtn"' in html
+    assert 'id="importConfigBtn"' in html
+    assert 'id="importConfigFile"' in html
+    assert 'id="configBackupStatus"' in html
+    assert 'function exportConfig' in html
+    assert 'function importConfig' in html
+    assert '"/api/config/export"' in html
+    assert '"/api/config/import"' in html
     assert "微信交互功能" in html
     assert 'id="tunnelMechanicalPage"' in html
     assert 'id="orangeWarningPage"' in html
@@ -210,6 +218,7 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert "switchTunnelMechanicalPanel" in html
     assert 'id="submitTunnelMechanicalBtn"' in html
     assert 'id="tunnelMechanicalUsername"' in html
+
     assert 'id="importTunnelMechanicalTemplateBtn"' in html
     assert 'id="tunnelMechanicalTemplateFile"' in html
     assert 'id="queryTunnelMechanicalResultBtn"' in html
@@ -246,6 +255,9 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'monitorShiftCodes.has' in html
     assert 'id="wechatInteractionTestText"' in html
     assert 'id="wechatInteractionTestStatus"' in html
+    assert 'id="refreshWechatQrBtn"' in html
+    assert 'function refreshLightAgentWechatQr' in html
+    assert '"/api/lightagent/wechat/refresh-qr"' in html
     feature_section = html[
         html.index('<section class="settings-panel wechat-interaction-panel" id="featureChannelSettings">') :
         html.index('<section class="settings-panel single" id="wechatSimulationSettings">')
@@ -304,6 +316,147 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert "已过预警结束巡查提醒" in html
     assert "其余待发送提醒" in html
     assert "event-collapsed" in html
+
+
+
+
+def test_config_export_route_returns_complete_snapshot(tmp_path):
+    source = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    source.save_notification_config(sender_type="lightagent", webhook_url="", lightagent_token="push-token", mention_mode="custom")
+    source.save_daily_duty_config(reminder_time="07:20", big_driver_names=["司机甲"], small_driver_names=["司机乙"])
+    source.save_patrol_warning_config(enabled=True, username="patrol-user", password="patrol-pass", route_code="S41")
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    response = client.get("/api/config/export")
+    snapshot = response.json()
+
+    assert response.status_code == 200
+    assert response.headers["content-disposition"].startswith('attachment; filename="duty-reminder-config-')
+    assert snapshot["format"] == "duty-reminder-config"
+    assert snapshot["version"] == 1
+    assert snapshot["tables"]["notification_config"][0]["lightagent_token"] == "push-token"
+    assert snapshot["tables"]["daily_duty_config"][0]["reminder_time"] == "07:20"
+    assert snapshot["tables"]["patrol_warning_config"][0]["username"] == "patrol-user"
+
+
+def test_config_export_route_includes_wechat_bridge_identity(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+
+    class FakeBridge:
+        def export_identity_snapshot(self):
+            return {
+                "rooms": {"wgr_notice": {"runtime_room_id": "room@@runtime", "name": "通知群"}},
+                "members": {"wgm_member": {"runtime_sender_id": "@member", "name": "示例甲"}},
+            }
+
+    app.state.wechat_bridge = FakeBridge()
+    client = TestClient(app)
+
+    snapshot = client.get("/api/config/export").json()
+
+    assert snapshot["wechat_bridge_identity"]["rooms"]["wgr_notice"]["runtime_room_id"] == "room@@runtime"
+    assert snapshot["wechat_bridge_identity"]["members"]["wgm_member"]["runtime_sender_id"] == "@member"
+
+
+def test_config_import_route_restores_configuration_and_overwrites_existing_data(tmp_path):
+    source = DutyRepository(tmp_path / "source" / "duty-reminder.db")
+    source.save_notification_config(
+        sender_type="lightagent",
+        webhook_url="",
+        lightagent_url="http://lightagent:9899/api/push/send",
+        lightagent_token="push-token",
+        lightagent_target="wgr_notice",
+        lightagent_targets=[{"id": "wgr_notice", "name": "通知群"}],
+        mention_mode="custom",
+        mention_targets="示例甲",
+        message_template="提醒 {name}",
+    )
+    source.save_daily_duty_config(reminder_time="07:20", big_driver_names=["司机甲"], small_driver_names=["司机乙"])
+    source.save_personnel_contacts([{"name": "示例甲", "mention_mobile": "10000000000"}])
+    source.save_monitored_person(name="示例甲", mention_mobile="10000000000", daily_time="07:30")
+    source.save_custom_reminder(name="示例甲", mention_mobile="10000000000", shift_code="early", reminder_time="07:10", message="自定义提醒")
+    source.save_roster_month(2026, 8, [{"name": "示例甲", "days": {"1": "早"}}], "uploads/a.png")
+    snapshot = source.export_config_snapshot()
+
+    app = create_app(data_dir=tmp_path / "target" / "data", upload_dir=tmp_path / "target" / "uploads", start_scheduler=False)
+    target_repo = DutyRepository(tmp_path / "target" / "data" / "duty-reminder.db")
+    target_repo.save_notification_config(sender_type="wecom_webhook", webhook_url="https://old.example.test")
+    target_repo.save_personnel_contacts([{"name": "旧姓名", "mention_mobile": "19999999999"}])
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/config/import",
+        files={"file": ("duty-reminder-config.json", json_bytes(snapshot), "application/json")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert target_repo.get_notification_config()["lightagent_token"] == "push-token"
+    assert target_repo.get_notification_config()["lightagent_target"] == "wgr_notice"
+    assert target_repo.get_daily_duty_config()["reminder_time"] == "07:20"
+    assert target_repo.list_personnel()[0]["name"] == "示例甲"
+    assert target_repo.list_monitored_people()[0]["name"] == "示例甲"
+    assert target_repo.list_custom_reminders()[0]["message"] == "自定义提醒"
+    assert target_repo.get_roster_month(2026, 8)["grid"][0]["days"]["1"] == "早"
+    assert all(person["name"] != "旧姓名" for person in target_repo.list_personnel())
+
+
+def test_config_import_route_restores_wechat_bridge_identity(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+
+    captured: dict[str, object] = {}
+
+    class FakeBridge:
+        def import_identity_snapshot(self, identity):
+            captured["identity"] = identity
+
+    app.state.wechat_bridge = FakeBridge()
+    client = TestClient(app)
+    snapshot = {
+        "format": "duty-reminder-config",
+        "version": 1,
+        "tables": {},
+        "wechat_bridge_identity": {
+            "rooms": {"wgr_notice": {"runtime_room_id": "room@@runtime", "name": "通知群"}},
+            "members": {"wgm_member": {"runtime_sender_id": "@member", "name": "示例甲"}},
+        },
+    }
+
+    response = client.post(
+        "/api/config/import",
+        files={"file": ("duty-reminder-config.json", json_bytes(snapshot), "application/json")},
+    )
+
+    assert response.status_code == 200
+    assert captured["identity"] == snapshot["wechat_bridge_identity"]
+
+
+def test_refresh_lightagent_wechat_qr_route_uses_manager(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+
+    calls: list[str] = []
+
+    class FakeBridge:
+        def __init__(self):
+            self.status = "qr_ready"
+
+        def refresh_login_qr(self):
+            calls.append("refresh")
+            self.status = "starting"
+
+        def status_snapshot(self):
+            return {"status": "success", "login_status": self.status, "qrcode_url": "data:image/png;base64,abc", "qr_image": "data:image/png;base64,abc"}
+
+    app.state.wechat_bridge = FakeBridge()
+    client = TestClient(app)
+
+    response = client.post("/api/lightagent/wechat/refresh-qr")
+
+    assert response.status_code == 200
+    assert calls == ["refresh"]
+    assert response.json()["login_status"] == "starting"
+    assert response.json()["qrcode_url"].startswith("data:image/png;base64,")
 
 
 def test_send_record_kind_labels_cover_backend_record_kinds():

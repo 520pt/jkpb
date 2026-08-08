@@ -2689,6 +2689,12 @@
                 <h2>配置总览</h2>
                 <p>按提醒类型查看当前是否启用、是否配置完整，以及对应的发送通道。</p>
               </div>
+              <div class="settings-actions" style="margin-bottom: 12px;">
+                <button type="button" id="exportConfigBtn">导出全部配置</button>
+                <button type="button" id="importConfigBtn">导入全部配置</button>
+                <input id="importConfigFile" type="file" accept=".json,application/json" class="hidden" />
+              </div>
+              <p id="configBackupStatus" class="status"></p>
               <div class="settings-card-grid" id="settingsOverviewCards"></div>
             </div>
           </section>
@@ -2754,6 +2760,7 @@
                       <div class="stack">
                         <div class="settings-actions">
                           <button type="button" id="refreshWechatLoginBtn">微信登录状态</button>
+                          <button type="button" id="refreshWechatQrBtn">刷新二维码</button>
                           <button type="button" id="refreshWechatRoomsBtn">同步群聊</button>
                           <button type="button" id="refreshWechatMembersBtn">同步成员</button>
                         </div>
@@ -5383,6 +5390,21 @@
       }
     }
 
+    async function refreshLightAgentWechatQr() {
+      const status = $("lightAgentWechatStatus");
+      status.textContent = "正在刷新微信登录二维码...";
+      status.className = "status";
+      const response = await fetch("/api/lightagent/wechat/refresh-qr", { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.detail || "刷新二维码失败");
+      if (body.qr_image || body.qrcode_url) {
+        $("lightAgentQrImage").src = body.qr_image || body.qrcode_url;
+        $("lightAgentQrBox").classList.remove("hidden");
+      }
+      await refreshLightAgentWechatStatus({ silent: true });
+      return body;
+    }
+
     async function loadLightAgentRooms(refresh = true) {
       if (refresh) {
         $("lightAgentWechatStatus").textContent = "正在同步群聊...";
@@ -5459,6 +5481,12 @@
     }
 
     $("refreshWechatLoginBtn").addEventListener("click", refreshLightAgentWechatStatus);
+    $("refreshWechatQrBtn").addEventListener("click", async () => {
+      try { await refreshLightAgentWechatQr(); } catch (error) {
+        $("lightAgentWechatStatus").textContent = `刷新二维码失败：${error.message || error}`;
+        $("lightAgentWechatStatus").className = "status error";
+      }
+    });
     $("refreshWechatRoomsBtn").addEventListener("click", async () => {
       try { await loadLightAgentRooms(true); } catch (error) {
         $("lightAgentWechatStatus").textContent = `同步群聊失败：${error.message || error}`;
@@ -5475,6 +5503,41 @@
       try { await saveWechatBindings(); } catch (error) {
         $("lightAgentWechatStatus").textContent = `保存绑定失败：${error.message || error}`;
         $("lightAgentWechatStatus").className = "status error";
+      }
+    });
+    $("exportConfigBtn").addEventListener("click", async () => {
+      const status = $("configBackupStatus");
+      if (status) status.textContent = "正在导出配置...";
+      if (status) status.className = "status";
+      try {
+        await exportConfig();
+        if (status) status.textContent = "配置已导出";
+        if (status) status.className = "status ok";
+      } catch (error) {
+        if (status) status.textContent = `导出失败：${error.message || error}`;
+        if (status) status.className = "status error";
+      }
+    });
+    $("importConfigBtn").addEventListener("click", () => $("importConfigFile").click());
+    $("importConfigFile").addEventListener("change", async () => {
+      const file = $("importConfigFile").files && $("importConfigFile").files[0];
+      if (!file) return;
+      if (!window.confirm("导入会覆盖当前设备上的排班、通知渠道、人员、自定义提醒、公路巡查、隧道机电等配置。确定继续吗？")) {
+        $("importConfigFile").value = "";
+        return;
+      }
+      const status = $("configBackupStatus");
+      if (status) status.textContent = "正在导入配置...";
+      if (status) status.className = "status";
+      try {
+        await importConfig(file);
+        if (status) status.textContent = "配置已导入";
+        if (status) status.className = "status ok";
+      } catch (error) {
+        if (status) status.textContent = `导入失败：${error.message || error}`;
+        if (status) status.className = "status error";
+      } finally {
+        $("importConfigFile").value = "";
       }
     });
     $("lightAgentRoomSelect").addEventListener("change", async () => {
@@ -5765,6 +5828,48 @@
       }
       renderSettingsOverview();
       return body.success;
+    }
+
+    async function exportConfig() {
+      const response = await fetch("/api/config/export");
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.detail || "导出失败");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `duty-reminder-config-${beijingDateInputValue()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    async function importConfig(file) {
+      if (!file) throw new Error("请选择 JSON 配置文件");
+      const form = new FormData();
+      form.append("file", file);
+      const response = await fetch("/api/config/import", {
+        method: "POST",
+        body: form,
+      });
+      const body = await response.json();
+      if (!response.ok || !body.success) throw new Error(body.detail || "导入失败");
+      await loadNotificationConfig();
+      await loadFeatureChannelConfig().catch(() => null);
+      await loadPatrolWarningConfig();
+      await loadDailyDutyConfig();
+      await loadPersonnel();
+      await loadCustomReminders();
+      await loadPeople();
+      await loadTunnelMechanicalConfig();
+      await loadTunnelMechanicalTemplates();
+      await loadSavedRosters();
+      await loadTodayReminders();
+      await loadSavedDutyChart();
+      return body;
     }
 
     function updateNotificationBackendFields() {

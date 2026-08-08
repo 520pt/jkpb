@@ -148,6 +148,14 @@ class WechatBridgeManager:
             self.process = None
             self.status = "idle"
 
+    def refresh_login_qr(self) -> None:
+        with self._lock:
+            if self.process and self.process.poll() is None and self.status in CONNECTED_STATUSES:
+                return
+            self._reset_login_state()
+            self.stop()
+            self.start()
+
     def refresh_rooms(self) -> None:
         self.ensure_started()
         self._send_command({"type": SidecarCommandType.LIST_ROOMS})
@@ -271,6 +279,34 @@ class WechatBridgeManager:
             "selected_room_names": [room.get("name", "") for room in rooms],
             "last_send_result": dict(self.last_send_result),
         }
+
+    def export_identity_snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            self._load_identity()
+            return {
+                "rooms": dict(self.identity.get("rooms") or {}),
+                "members": dict(self.identity.get("members") or {}),
+            }
+
+    def import_identity_snapshot(self, identity: dict[str, Any]) -> None:
+        if not isinstance(identity, dict):
+            return
+        rooms = identity.get("rooms") if isinstance(identity.get("rooms"), dict) else {}
+        members = identity.get("members") if isinstance(identity.get("members"), dict) else {}
+        with self._lock:
+            self.identity = {"rooms": dict(rooms), "members": dict(members)}
+            self._save_identity()
+
+    def _reset_login_state(self) -> None:
+        self.last_error = ""
+        self.qr_code = ""
+        self.qrcode_url = ""
+        self.qr_image = ""
+        self.self_id = ""
+        self.self_name = ""
+        self.rooms = []
+        self.room_members = {}
+        self.last_send_result = {}
 
     def rooms_snapshot(self) -> list[dict[str, Any]]:
         with self._lock:

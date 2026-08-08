@@ -555,6 +555,58 @@ def test_wechat_interaction_logs_roundtrip(tmp_path: Path):
     ]
 
 
+def test_config_snapshot_roundtrip_restores_user_configuration(tmp_path: Path):
+    source = DutyRepository(tmp_path / "source.db")
+    source.save_notification_config(
+        sender_type="lightagent",
+        webhook_url="",
+        lightagent_url="http://lightagent:9899/api/push/send",
+        lightagent_token="push-token",
+        lightagent_target="wgr_notice",
+        lightagent_targets=[{"id": "wgr_notice", "name": "通知群"}],
+        mention_mode="custom",
+        mention_targets="示例甲",
+        message_template="提醒 {name}",
+    )
+    source.save_feature_channel_config(
+        enabled=True,
+        lightagent_web_url="http://lightagent:9899",
+        lightagent_web_password="web-pass",
+        wechat_group_rooms=[{"id": "wgr_notice", "name": "通知群"}],
+    )
+    source.save_wechat_interaction_config(
+        patrol_record_triggers=["巡查记录"],
+        patrol_record_template="查询商邱宏巡查记录 2026-07-01至2026-07-31",
+        tunnel_template_triggers=["模板"],
+        tunnel_template="隧道机电录入 日期{date} 负责人罗富耀 记录人商邱宏 天气晴",
+        tunnel_modify_template_triggers=["修改模板"],
+        tunnel_modify_template="隧道机电修改 日期{date} 负责人罗富耀 记录人商邱宏 天气晴 修改日期为{date}",
+    )
+    source.save_daily_duty_config(reminder_time="07:20", big_driver_names=["司机甲"], small_driver_names=["司机乙"])
+    source.save_patrol_warning_config(enabled=True, username="patrol-user", password="patrol-pass", route_code="S41")
+    source.save_tunnel_mechanical_config(base_url="https://example.test", username="tunnel-user", password="tunnel-pass")
+    source.save_tunnel_mechanical_template({"people": [{"id": "1", "name": "商邱宏"}], "assets": []})
+    source.save_personnel_contacts([_personnel_row("示例甲", "10000000000", wechat_group_member_name="示例甲微信")])
+    source.save_monitored_person(name="示例甲", mention_mobile="10000000000", daily_time="07:30")
+    source.save_custom_reminder(name="示例甲", mention_mobile="10000000000", shift_code="early", reminder_time="07:10", message="自定义提醒")
+    source.save_roster_month(2026, 8, [{"name": "示例甲", "days": {"1": "早"}}], "uploads/a.png")
+
+    snapshot = source.export_config_snapshot()
+    target = DutyRepository(tmp_path / "target.db")
+    target.import_config_snapshot(snapshot)
+
+    assert snapshot["format"] == "duty-reminder-config"
+    assert target.get_notification_config()["lightagent_token"] == "push-token"
+    assert target.get_feature_channel_config()["lightagent_web_password"] == "web-pass"
+    assert target.get_daily_duty_config()["reminder_time"] == "07:20"
+    assert target.get_patrol_warning_config()["password"] == "patrol-pass"
+    assert target.get_tunnel_mechanical_config()["password"] == "tunnel-pass"
+    assert target.get_tunnel_mechanical_template()["people"] == [{"id": "1", "name": "商邱宏"}]
+    assert target.list_monitored_people()[0]["name"] == "示例甲"
+    assert target.list_custom_reminders()[0]["message"] == "自定义提醒"
+    assert target.get_roster_month(2026, 8)["grid"][0]["days"]["1"] == "早"
+
+
 def test_send_records_roundtrip(tmp_path: Path):
     repo = DutyRepository(tmp_path / "duty.db")
 
@@ -579,5 +631,4 @@ def test_send_records_roundtrip(tmp_path: Path):
             "created_at": repo.list_send_records()[0]["created_at"],
         }
     ]
-
 
