@@ -39,6 +39,41 @@ def test_generates_before_shift_reminder_with_configured_minutes():
     assert before.send_at == datetime(2025, 9, 16, 7, 45, tzinfo=TZ)
 
 
+def test_deduplicates_overlapping_daily_and_before_shift_reminders():
+    assignment = ShiftAssignment("示例甲", date(2025, 9, 16), Shift.MIDDLE)
+    events = plan_reminders_for_day(
+        target_date=date(2025, 9, 16),
+        assignments=[assignment],
+        monitored_name="示例甲",
+        mention_text="@示例甲",
+        settings=ReminderSettings(daily_time="07:50", before_shift_minutes=10),
+        tz=TZ,
+    )
+
+    assert [event.kind for event in events] == ["daily"]
+    assert events[0].send_at == datetime(2025, 9, 16, 7, 50, tzinfo=TZ)
+
+
+def test_merges_same_person_same_time_reminders_without_losing_content():
+    events = plan_reminders_for_day(
+        target_date=date(2025, 9, 16),
+        assignments=[
+            ShiftAssignment("示例甲", date(2025, 9, 16), Shift.NIGHT),
+            ShiftAssignment("示例甲", date(2025, 9, 17), Shift.EARLY),
+        ],
+        monitored_name="示例甲",
+        mention_text="",
+        settings=ReminderSettings(daily_time="07:50", before_shift_minutes=10),
+        tz=TZ,
+    )
+
+    daily_events = [event for event in events if event.send_at == datetime(2025, 9, 16, 7, 50, tzinfo=TZ)]
+    assert len(daily_events) == 1
+    assert daily_events[0].kind == "daily"
+    assert "2025-09-16" in daily_events[0].content
+    assert "2025-09-17" in daily_events[0].content
+
+
 def test_early_shift_before_reminder_is_previous_day():
     assignment = ShiftAssignment("示例甲", date(2025, 9, 16), Shift.EARLY)
     events = plan_reminders_for_day(

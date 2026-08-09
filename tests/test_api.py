@@ -1944,6 +1944,9 @@ def test_notification_channel_switch_preserves_wecom_but_only_lightagent_sends(t
             sent["content"] = content
             sent["mentions"] = mentioned_mobile_list
 
+        async def send_image(self, image_bytes: bytes):
+            sent["image_bytes"] = image_bytes
+
     monkeypatch.setenv("WECHAT_BRIDGE_ENABLED", "false")
     monkeypatch.setattr("app.main.WeComWebhookClient", FailingWebhookClient)
     monkeypatch.setattr("app.main.LightAgentNotifyClient", FakeLightAgentClient)
@@ -4176,6 +4179,33 @@ def test_wechat_query_allows_unbound_group_member_to_query_all_today_reminders(t
     assert "还没有识别到" not in body["reply"]
 
 
+def test_wechat_today_reminder_summary_does_not_repeat_same_time_monitor_reminder(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post("/api/personnel", json={"names": ["Alice"]})
+    client.post("/api/people", json={"name": "Alice", "daily_time": "07:50", "before_shift_minutes": 10, "enabled": True})
+    client.post(
+        "/api/rosters/confirm",
+        json={
+            "year": 2025,
+            "month": 9,
+            "grid": [{"name": "Alice", "days": {"16": "晚", "17": "早"}}],
+        },
+    )
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "查询今日提醒", "runtime_sender_id": "@missing-member", "target_date": "2025-09-16"},
+    )
+
+    assert response.status_code == 200
+    reply = response.json()["reply"]
+    assert "07:50每日提醒、15:50班前提醒、23:50班前提醒" in reply
+    assert "07:50每日提醒、07:50每日提醒" not in reply
+
+
 def test_wechat_query_tomorrow_monitor_returns_all_shift_summary_even_when_bound(tmp_path, monkeypatch):
     monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
     monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2025, 9, 15))
@@ -4501,7 +4531,29 @@ def test_wechat_query_returns_next_reminder(tmp_path, monkeypatch):
     body = response.json()
     assert body["query_type"] == "next_reminder"
     assert "Alice 下次提醒" in body["reply"]
-    assert "07:40" in body["reply"]
+    assert "2025-09-15" in body["reply"]
+    assert "请注意" in body["reply"]
+    assert body["image_url"].startswith("/api/uploads/wechat-query-")
+    image_response = client.get(body["image_url"])
+    assert image_response.status_code == 200
+    assert image_response.content.startswith(b"\x89PNG")
+
+
+def test_wechat_query_template_remains_text_only(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "模板", "runtime_sender_id": "@member-1"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["query_type"] == "tunnel_mechanical_template"
+    assert "image_url" not in body
 
 
 def test_monitored_person_can_be_updated_and_deleted(tmp_path):
@@ -5249,6 +5301,9 @@ def test_personal_wechat_notification_test_records_member_name(tmp_path, monkeyp
             sent["content"] = content
             sent["mentions"] = mentioned_mobile_list
 
+        async def send_image(self, image_bytes: bytes):
+            sent["image_bytes"] = image_bytes
+
     monkeypatch.setattr("app.main._notification_client_from_config", lambda config: FakeWechatClient())
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
@@ -5284,6 +5339,9 @@ def test_monitor_person_test_sends_current_form_with_wechat_member(tmp_path, mon
             sent["content"] = content
             sent["mentions"] = mentioned_mobile_list
 
+        async def send_image(self, image_bytes: bytes):
+            sent["image_bytes"] = image_bytes
+
     monkeypatch.setattr("app.main._notification_client_from_config", lambda config: FakeWechatClient())
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
@@ -5312,7 +5370,9 @@ def test_monitor_person_test_sends_current_form_with_wechat_member(tmp_path, mon
     assert response.json()["success"] is True
     assert sent["mentions"] == []
     assert sent["content"].startswith("@Alice\n")
-    assert "Alice" in sent["content"]
+    assert sent["content"].endswith("监控班提醒图片如下：")
+    assert isinstance(sent["image_bytes"], bytes)
+    assert sent["image_bytes"].startswith(b"\x89PNG")
     records = client.get("/api/send-records").json()["records"]
     assert records[0]["kind"] == "monitor_test"
     assert records[0]["target"] == "Alice"
@@ -5839,7 +5899,7 @@ def test_due_monitored_reminder_uses_saved_wechat_member_for_personal_wechat(tmp
             sent["mentions"] = mentioned_mobile_list
 
         async def send_image(self, image_bytes: bytes):
-            raise AssertionError("monitored reminders should send text")
+            sent["image_bytes"] = image_bytes
 
     repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
     repo.save_notification_config(
@@ -5872,6 +5932,9 @@ def test_due_monitored_reminder_uses_saved_wechat_member_for_personal_wechat(tmp
 
     assert sent["mentions"] == []
     assert sent["content"].startswith("@Alice\n")
+    assert sent["content"].endswith("监控班提醒图片如下：")
+    assert isinstance(sent["image_bytes"], bytes)
+    assert sent["image_bytes"].startswith(b"\x89PNG")
     records = repo.list_send_records()
     assert records[0]["kind"] == "daily"
     assert records[0]["target"] == "Alice"
@@ -5880,6 +5943,7 @@ def test_due_monitored_reminder_uses_saved_wechat_member_for_personal_wechat(tmp
 
 def test_due_reminder_retry_after_send_failure(tmp_path, monkeypatch):
     sent: list[str] = []
+    images: list[bytes] = []
 
     class FrozenDateTime(datetime):
         current = datetime(2025, 9, 16, 7, 50, 5, tzinfo=TZ)
@@ -5899,7 +5963,7 @@ def test_due_reminder_retry_after_send_failure(tmp_path, monkeypatch):
                 raise RuntimeError("network down")
 
         async def send_image(self, image_bytes: bytes):
-            raise AssertionError("not expected")
+            images.append(image_bytes)
 
     repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
     repo.save_notification_config(webhook_url="https://example.test/cgi-bin/webhook/send?key=unit-test")
@@ -5930,6 +5994,8 @@ def test_due_reminder_retry_after_send_failure(tmp_path, monkeypatch):
 
     records = repo.list_send_records()
     assert len(sent) == 2
+    assert len(images) == 1
+    assert images[0].startswith(b"\x89PNG")
     assert records[0]["status"] == "success"
     assert records[1]["status"] == "failed"
 
@@ -6296,7 +6362,7 @@ def test_resend_failed_text_record_sends_again_and_records_result(tmp_path, monk
             sent["mobiles"] = mentioned_mobile_list
 
         async def send_image(self, image_bytes: bytes):
-            raise AssertionError("文字补发不应该发送图片")
+            sent["image_bytes"] = image_bytes
 
     monkeypatch.setattr("app.main.WeComWebhookClient", FakeWebhookClient)
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
@@ -6327,14 +6393,17 @@ def test_resend_failed_text_record_sends_again_and_records_result(tmp_path, monk
 
     assert response.status_code == 200
     assert response.json()["success"] is True
-    assert sent["content"] == "补发内容"
+    assert sent["content"] == "监控班提醒图片如下："
     assert sent["mobiles"] == ["10000000000"]
+    assert sent["image_bytes"].startswith(b"\x89PNG")
     records = client.get("/api/send-records").json()["records"]
     assert records[0]["kind"] == "daily_resend"
     assert records[0]["status"] == "success"
 
 
 def test_resend_record_does_not_append_duplicate_resend_suffix(tmp_path, monkeypatch):
+    sent: dict[str, object] = {}
+
     class FakeWebhookClient:
         def __init__(self, webhook_url: str):
             pass
@@ -6343,7 +6412,7 @@ def test_resend_record_does_not_append_duplicate_resend_suffix(tmp_path, monkeyp
             pass
 
         async def send_image(self, image_bytes: bytes):
-            raise AssertionError("文字补发不应该发送图片")
+            sent["image_bytes"] = image_bytes
 
     monkeypatch.setattr("app.main.WeComWebhookClient", FakeWebhookClient)
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
@@ -6363,6 +6432,7 @@ def test_resend_record_does_not_append_duplicate_resend_suffix(tmp_path, monkeyp
     response = client.post(f"/api/send-records/{record_id}/resend")
 
     assert response.status_code == 200
+    assert sent["image_bytes"].startswith(b"\x89PNG")
     records = client.get("/api/send-records").json()["records"]
     assert records[0]["kind"] == "daily_resend"
     assert records[0]["kind"] != "daily_resend_resend"

@@ -46,6 +46,7 @@ from app.patrol_warning_image import render_patrol_warning_image
 from app.patrol_record_image import render_patrol_record_image
 from app.reminders import DEFAULT_MESSAGE_TEMPLATE, ReminderEvent, ReminderSettings, plan_reminders_for_day
 from app.roster import Shift, ShiftAssignment, normalize_shift_code
+from app.shift_reminder_image import render_shift_reminder_image
 from app.storage import (
     DEFAULT_DAILY_DUTY_TEMPLATE,
     DEFAULT_PATROL_WARNING_END_TEMPLATE,
@@ -55,6 +56,7 @@ from app.storage import (
 )
 from app.tunnel_mechanical_image import render_tunnel_mechanical_result_image
 from app.wecom import LightAgentNotifyClient, WeComClient, WeComError, WeComWebhookClient
+from app.wechat_query_image import render_wechat_query_image
 from app.wechat_bridge.manager import get_wechat_bridge_manager, wechat_bridge_enabled
 from app.wechat_bridge.notify import WechatBridgeNotifyClient
 
@@ -1955,8 +1957,44 @@ async def _build_wechat_query_response_with_log(
     except Exception as exc:
         _save_wechat_interaction_log(repo, query, {"success": False, "query_type": "", "reply": f"查询失败：{exc}"}, error=str(exc))
         raise
+    _attach_wechat_query_image(result, uploads)
     _save_wechat_interaction_log(repo, query, result)
     return result
+
+
+def _attach_wechat_query_image(result: dict[str, Any], uploads: Path | None) -> None:
+    if uploads is None or not bool(result.get("success")):
+        return
+    if str(result.get("image_url") or result.get("result_image_url") or "").strip():
+        return
+    image_bytes = render_wechat_query_image(result)
+    if not image_bytes:
+        return
+    uploads.mkdir(parents=True, exist_ok=True)
+    filename = f"wechat-query-{uuid.uuid4().hex}.png"
+    (uploads / filename).write_bytes(image_bytes)
+    image_url = f"/api/uploads/{filename}"
+    result["image_url"] = image_url
+    result["image_full_url"] = _public_app_url(image_url)
+    if not result.get("replies"):
+        result["replies"] = [f"{_wechat_query_image_reply_title(result)}结果如下："]
+
+
+def _wechat_query_image_reply_title(result: dict[str, Any]) -> str:
+    query_type = str(result.get("query_type") or "").strip()
+    return {
+        "help": "帮助菜单",
+        "unbound": "查询",
+        "binding": "绑定查询",
+        "monitor": "监控查询",
+        "monitor_all": "监控查询",
+        "monitor_all_range": "监控查询",
+        "reminder": "提醒查询",
+        "reminder_all": "提醒查询",
+        "reminder_all_range": "提醒查询",
+        "next_reminder": "下次提醒查询",
+        "next_reminder_all": "下次提醒查询",
+    }.get(query_type, "查询")
 
 
 def _lightagent_web_base_url(config: dict[str, Any]) -> str:
@@ -4091,9 +4129,15 @@ def _build_person_next_reminder_query_response(repo: DutyRepository, person_name
         reply = f"{person_name} 未来14天没有计划提醒。"
     else:
         lines = [f"{person_name} 下次提醒"]
+        seen: set[tuple[str, str, str]] = set()
         for event in upcoming[:5]:
-            content = str(event.content or "").splitlines()[0]
-            lines.append(f"- {event.send_at:%m-%d %H:%M} {_wechat_query_event_label(event.kind)}：{content}")
+            display_date = _next_reminder_display_date(event)
+            display_content = _next_reminder_display_content(event)
+            display_key = (display_date, person_name, display_content)
+            if display_key in seen:
+                continue
+            seen.add(display_key)
+            lines.append(f"- {display_date}：{display_content}")
         reply = "\n".join(lines)
     return {
         "success": True,
@@ -4114,9 +4158,15 @@ def _build_all_next_reminder_query_response(repo: DutyRepository) -> dict[str, A
         reply = "未来14天没有计划提醒。"
     else:
         lines = ["全员下次提醒"]
+        seen: set[tuple[str, str, str]] = set()
         for event in upcoming[:10]:
-            content = str(event.content or "").splitlines()[0]
-            lines.append(f"- {event.person_name} {event.send_at:%m-%d %H:%M} {_wechat_query_event_label(event.kind)}：{content}")
+            display_date = _next_reminder_display_date(event)
+            display_content = _next_reminder_display_content(event)
+            display_key = (display_date, event.person_name, display_content)
+            if display_key in seen:
+                continue
+            seen.add(display_key)
+            lines.append(f"- {display_date} {event.person_name}：{display_content}")
         if len(upcoming) > 10:
             lines.append(f"- 另有 {len(upcoming) - 10} 条提醒未显示")
         reply = "\n".join(lines)
@@ -4199,6 +4249,37 @@ def _wechat_query_event_label(kind: str) -> str:
         "rest": "休息提醒",
         "custom": "自定义提醒",
     }.get(kind, kind)
+
+
+_NEXT_REMINDER_CONTENT_RE = re.compile(
+    r"^(?P<name>.+?) (?P<date>\d{4}-\d{2}-\d{2})（(?P<time_range>[^)]+)\)是你的(?P<shift_label>早班|中班|晚班|夜班)$"
+)
+
+
+def _next_reminder_display_date(event: ReminderEvent) -> str:
+    content = str(event.content or "").splitlines()[0].strip()
+    match = _NEXT_REMINDER_CONTENT_RE.match(content)
+    if match:
+        return match.group("date")
+    return f"{event.send_at:%Y-%m-%d}"
+
+
+def _next_reminder_display_content(event: ReminderEvent) -> str:
+    content = str(event.content or "").splitlines()[0].strip()
+    match = _NEXT_REMINDER_CONTENT_RE.match(content)
+    if not match:
+        return content
+
+    time_range = match.group("time_range")
+    shift_label = match.group("shift_label")
+    if shift_label == "早班":
+        prefix = "今晚凌晨" if event.send_at.hour >= 18 else "今天凌晨"
+        return f"请注意{prefix}{time_range}是你的早班 记得检查隧道灯是否关闭 7点50分记得开启隧道灯"
+    if shift_label == "中班":
+        return f"请注意今天{time_range}是你的中班 记得写一二楼的卫生间消毒清洁记录"
+    if shift_label in {"晚班", "夜班"}:
+        return f"请注意今天下午{time_range}是你的晚班 记得在晚上21点关闭隧道灯"
+    return content
 
 
 def _login_page_response(static_dir: Path, *, error: str = "", next_url: str = "/", status_code: int = 200) -> HTMLResponse:
@@ -6593,6 +6674,17 @@ def _notification_content_for_event(repo: DutyRepository, client: Any, event: Re
     return f"{prefix}\n{content}"
 
 
+def _should_send_shift_reminder_image(event: ReminderEvent) -> bool:
+    return _is_shift_reminder_kind(event.kind)
+
+
+def _is_shift_reminder_kind(kind: str) -> bool:
+    value = str(kind or "").strip()
+    while value.endswith("_resend"):
+        value = value[: -len("_resend")]
+    return value in {"daily", "before_shift", "monitor_test"}
+
+
 def _person_mobile_lookup(repo: DutyRepository) -> dict[str, str]:
     lookup: dict[str, str] = {}
     for person in repo.list_monitored_people():
@@ -6620,7 +6712,11 @@ async def _send_test_reminder_event(
     content = _notification_content_for_event(repo, notification_client, event)
     target = event.person_name or "测试消息"
     try:
-        await notification_client.send_text(content, mentions)
+        if _should_send_shift_reminder_image(event) and hasattr(notification_client, "send_image"):
+            await notification_client.send_text(_notification_content_for_event(repo, notification_client, ReminderEvent(kind=event.kind, person_name=event.person_name, send_at=event.send_at, content="监控班提醒图片如下：")), mentions)
+            await notification_client.send_image(render_shift_reminder_image(event))
+        else:
+            await notification_client.send_text(content, mentions)
         repo.save_send_record(
             kind=record_kind,
             target=target,
@@ -6884,6 +6980,16 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
             fake_event = ReminderEvent(kind=kind, person_name="", send_at=datetime.now(TZ), content=content)
             content = _notification_content_for_event(repo, client, fake_event)
             await client.send_text(content, _notification_true_mentions_for_event(repo, client, fake_event))
+        elif _is_shift_reminder_kind(kind) and hasattr(client, "send_image"):
+            fake_event = ReminderEvent(
+                kind=kind,
+                person_name=target,
+                send_at=datetime.now(TZ),
+                content=content,
+            )
+            mentions = _notification_true_mentions_for_event(repo, client, fake_event)
+            await client.send_text(_notification_content_for_event(repo, client, ReminderEvent(kind=kind, person_name=target, send_at=datetime.now(TZ), content="监控班提醒图片如下：")), mentions)
+            await client.send_image(render_shift_reminder_image(fake_event))
         else:
             mobile_lookup = _person_mobile_lookup(repo)
             fake_event = ReminderEvent(
@@ -6959,6 +7065,13 @@ async def _send_due_reminders(repo: DutyRepository) -> None:
         try:
             if event.kind == "daily_duty" and webhook_client:
                 await webhook_client.send_image(render_daily_duty_image(_build_daily_duty_preview(repo, now.date())))
+            elif webhook_client and _should_send_shift_reminder_image(event) and hasattr(webhook_client, "send_image"):
+                mentions = _notification_true_mentions_for_event(repo, webhook_client, event)
+                await webhook_client.send_text(
+                    _notification_content_for_event(repo, webhook_client, ReminderEvent(kind=event.kind, person_name=event.person_name, send_at=event.send_at, content="监控班提醒图片如下：")),
+                    mentions,
+                )
+                await webhook_client.send_image(render_shift_reminder_image(event))
             elif webhook_client:
                 mentions = _notification_true_mentions_for_event(repo, webhook_client, event)
                 await webhook_client.send_text(_notification_content_for_event(repo, webhook_client, event), mentions)

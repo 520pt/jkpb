@@ -58,6 +58,49 @@ def render_assignment_message(assignment: ShiftAssignment, template: str = DEFAU
     return content
 
 
+_REMINDER_KIND_PRIORITY = {
+    "daily": 0,
+    "before_shift": 1,
+    "rest": 2,
+    "custom": 3,
+}
+
+
+def _dedupe_reminder_events(events: list[ReminderEvent]) -> list[ReminderEvent]:
+    grouped: dict[tuple[str, datetime], list[ReminderEvent]] = {}
+    for event in events:
+        grouped.setdefault((event.person_name, event.send_at), []).append(event)
+
+    deduped: list[ReminderEvent] = []
+    for same_time_events in grouped.values():
+        first = min(same_time_events, key=lambda event: _REMINDER_KIND_PRIORITY.get(event.kind, 99))
+        contents: list[str] = []
+        for event in same_time_events:
+            if event.content not in contents:
+                contents.append(event.content)
+        deduped.append(
+            ReminderEvent(
+                kind=first.kind,
+                person_name=first.person_name,
+                send_at=first.send_at,
+                content="\n".join(contents),
+                mention_mobile=first.mention_mobile,
+                mention_wechat_id=first.mention_wechat_id,
+                mention_wechat_member_id=first.mention_wechat_member_id,
+                key_suffix=first.key_suffix,
+            )
+        )
+    return sorted(
+        deduped,
+        key=lambda event: (
+            event.send_at,
+            _REMINDER_KIND_PRIORITY.get(event.kind, 99),
+            event.person_name,
+            event.key_suffix,
+        ),
+    )
+
+
 def plan_reminders_for_day(
     *,
     target_date: date,
@@ -96,4 +139,4 @@ def plan_reminders_for_day(
                 )
             )
 
-    return sorted(events, key=lambda event: event.send_at)
+    return _dedupe_reminder_events(events)
