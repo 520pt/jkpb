@@ -668,7 +668,14 @@ def create_app(
 
     @app.post("/api/custom-reminders")
     def save_custom_reminder(request: CustomReminderRequest):
-        reminder_id = repo.save_custom_reminder(**request.model_dump())
+        payload = request.model_dump()
+        normalized_message = _custom_reminder_message_for_name(payload["message"], payload["name"])
+        if normalized_message is None:
+            raise HTTPException(status_code=422, detail="提醒文案开头的 @对象必须和姓名一致；@对象请统一在消息通知渠道配置")
+        if not normalized_message:
+            raise HTTPException(status_code=422, detail="请填写提醒文案，@对象请统一在消息通知渠道配置")
+        payload["message"] = normalized_message
+        reminder_id = repo.save_custom_reminder(**payload)
         return {"success": True, "id": reminder_id, "reminders": repo.list_custom_reminders()}
 
     @app.post("/api/custom-reminders/test")
@@ -677,8 +684,13 @@ def create_app(
         if notification_client is None:
             raise HTTPException(status_code=400, detail="请先配置通知发送通道")
         shift = Shift(request.shift_code)
+        message = _custom_reminder_message_for_name(request.message, request.name)
+        if message is None:
+            raise HTTPException(status_code=422, detail="提醒文案开头的 @对象必须和姓名一致；@对象请统一在消息通知渠道配置")
+        if not message:
+            raise HTTPException(status_code=422, detail="请填写提醒文案，@对象请统一在消息通知渠道配置")
         content = _render_simple_template(
-            request.message.strip(),
+            message,
             {
                 "name": request.name.strip(),
                 "date": "2025-09-16",
@@ -1232,6 +1244,8 @@ def create_app(
             sender_name=request.sender_name,
             target_date=request.target_date,
         )
+        if not _looks_like_duty_wechat_command(_normalize_wechat_query_text(query.text), repo):
+            return _ignored_wechat_message_response()
         result = await _build_wechat_query_response_with_log(repo, query, uploads=uploads)
         image_path = _wechat_query_result_image_path(result, uploads)
         return {
@@ -1338,6 +1352,8 @@ def create_app(
     @app.post("/api/wechat-query")
     async def wechat_query(http_request: Request, query: WechatQueryRequest):
         _require_wechat_query_auth(http_request)
+        if not _looks_like_duty_wechat_command(_normalize_wechat_query_text(query.text), repo):
+            return _ignored_wechat_message_response()
         return await _build_wechat_query_response_with_log(repo, query, uploads=uploads)
 
     @app.post("/api/wechat-roster/import")
@@ -2679,6 +2695,16 @@ def _looks_like_duty_wechat_command(text: str, repo: DutyRepository | None = Non
             _is_wechat_monitor_query,
         )
     )
+
+
+def _ignored_wechat_message_response() -> dict[str, Any]:
+    return {
+        "success": False,
+        "query_type": "ignored",
+        "reply": "",
+        "replies": [],
+        "ignored": True,
+    }
 
 
 async def _build_wechat_patrol_record_response(
@@ -6083,6 +6109,47 @@ def _render_simple_template(template: str, values: dict[str, str]) -> str:
     return content
 
 
+def _custom_reminder_message_for_name(message: str, name: str) -> str | None:
+    """Return custom reminder body, stripping legacy leading @ lines.
+
+    The authoritative custom reminder target is the form's `name` + roster shift.
+    A leading manual `@某人` line from older configs must not become a second,
+    conflicting target and make reminders look like they fired for the wrong
+    person.
+    """
+    target_name = str(name or "").strip()
+    leading_mentions: list[str] = []
+    body_lines: list[str] = []
+    scanning_prefix = True
+    for line in str(message or "").splitlines():
+        stripped = line.strip()
+        if scanning_prefix:
+            match = None
+            target_prefix = f"@{target_name}" if target_name else ""
+            if target_prefix and stripped.startswith(target_prefix) and (
+                len(stripped) == len(target_prefix) or stripped[len(target_prefix)] in " \t，,。.:：;；、"
+            ):
+                rest = stripped[len(target_prefix) :].lstrip(" \t，,。.:：;；、")
+                match = (target_name, rest)
+            else:
+                regex_match = re.match(r"^@([^\s@，,。.:：;；、]+)\s*(.*)$", stripped)
+                if regex_match:
+                    match = (regex_match.group(1).strip(), regex_match.group(2).strip())
+            if match:
+                leading_mentions.append(match[0])
+                rest = match[1].strip()
+                if rest:
+                    body_lines.append(rest)
+                continue
+            if not stripped:
+                continue
+            scanning_prefix = False
+        body_lines.append(line)
+    if leading_mentions and target_name not in leading_mentions:
+        return None
+    return "\n".join(body_lines).strip()
+
+
 def _rest_status_for_date(repo: DutyRepository, person_name: str, target: date) -> dict[str, str] | None:
     today_is_rest = _is_rest_code(_roster_code_for_person(repo, person_name, target))
     tomorrow = target + timedelta(days=1)
@@ -6247,6 +6314,9 @@ def _plan_custom_reminder_events(repo: DutyRepository, assignments: list[ShiftAs
             shift = Shift(shift_code)
         except ValueError:
             continue
+        message_template = _custom_reminder_message_for_name(str(reminder.get("message") or ""), name)
+        if message_template is None:
+            continue
         for assignment in assignments:
             if assignment.work_date != target or assignment.person_name != name or assignment.shift is not shift:
                 continue
@@ -6257,7 +6327,7 @@ def _plan_custom_reminder_events(repo: DutyRepository, assignments: list[ShiftAs
                 "shift_label": assignment.shift.label,
                 "reminder_time": reminder_time,
             }
-            content = _render_simple_template(str(reminder.get("message") or ""), values)
+            content = _render_simple_template(message_template, values)
             events.append(
                 ReminderEvent(
                     kind="custom",
