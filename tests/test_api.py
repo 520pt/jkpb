@@ -81,6 +81,9 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert '<section id="reviewPage" class="tab-page hidden">' in html
     assert 'id="personName" list="personnelNameOptions" placeholder="选择或输入姓名"' in html
     assert 'id="customReminderName" list="personnelNameOptions" placeholder="选择或输入姓名"' in html
+    assert "customReminderTimeRules" in html
+    assert 'early: { min: "00:00", max: "08:00", fallback: "07:50", label: "早班" }' in html
+    assert '$("customReminderShift").addEventListener("change", applyCustomReminderTimeRule)' in html
     assert 'id="driverNameInput" list="personnelNameOptions" placeholder="选择或输入姓名"' in html
     assert 'data-edit-person="${escapeHtml(person.name)}"' in html
     assert 'data-delete-person="${escapeHtml(person.name)}"' in html
@@ -381,6 +384,7 @@ def test_config_import_route_restores_configuration_and_overwrites_existing_data
     source.save_custom_reminder(name="示例甲", mention_mobile="10000000000", shift_code="early", reminder_time="07:10", message="自定义提醒")
     source.save_roster_month(2026, 8, [{"name": "示例甲", "days": {"1": "早"}}], "uploads/a.png")
     snapshot = source.export_config_snapshot()
+    snapshot["tables"]["custom_reminders"][0]["reminder_time"] = "21:00"
 
     app = create_app(data_dir=tmp_path / "target" / "data", upload_dir=tmp_path / "target" / "uploads", start_scheduler=False)
     target_repo = DutyRepository(tmp_path / "target" / "data" / "duty-reminder.db")
@@ -401,6 +405,7 @@ def test_config_import_route_restores_configuration_and_overwrites_existing_data
     assert target_repo.list_personnel()[0]["name"] == "示例甲"
     assert target_repo.list_monitored_people()[0]["name"] == "示例甲"
     assert target_repo.list_custom_reminders()[0]["message"] == "自定义提醒"
+    assert target_repo.list_custom_reminders()[0]["reminder_time"] == "07:50"
     assert target_repo.get_roster_month(2026, 8)["grid"][0]["days"]["1"] == "早"
     assert all(person["name"] != "旧姓名" for person in target_repo.list_personnel())
 
@@ -1858,6 +1863,26 @@ def test_custom_reminder_rejects_conflicting_leading_at_target(tmp_path):
 
     assert response.status_code == 422
     assert "提醒文案开头的 @对象必须和姓名一致" in response.json()["detail"]
+    assert client.get("/api/custom-reminders").json()["reminders"] == []
+
+
+def test_custom_reminder_rejects_time_outside_shift_window(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/custom-reminders",
+        json={
+            "name": "罗熙云",
+            "shift_code": "early",
+            "reminder_time": "21:00",
+            "message": "需要开启隧道灯",
+            "enabled": True,
+        },
+    )
+
+    assert response.status_code == 422
+    assert "早班提醒时间必须在 00:00 至 08:00 之间" in str(response.json()["detail"])
     assert client.get("/api/custom-reminders").json()["reminders"] == []
 
 
@@ -6189,6 +6214,210 @@ def test_due_custom_reminder_does_not_send_when_person_lacks_matching_shift(tmp_
 
     assert sent == []
     assert repo.list_send_records() == []
+
+
+def test_due_custom_reminder_sends_early_shift_at_configured_morning_time(tmp_path, monkeypatch):
+    sent: dict[str, object] = {}
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 8, 11, 7, 50, 25, tzinfo=tz)
+
+    class FakePersonalWechatClient:
+        is_wechat_bridge = True
+
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            sent["content"] = content
+            sent["mentions"] = mentioned_mobile_list
+
+        async def send_image(self, image_bytes: bytes):
+            raise AssertionError("自定义提醒不应该发送图片")
+
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(
+        sender_type="lightagent",
+        webhook_url="",
+        lightagent_url="https://lightagent.test/api/push/send",
+        lightagent_targets=[{"id": "wgr_notice", "name": "通知群"}],
+    )
+    repo.save_roster_month(2026, 8, [{"name": "罗熙云", "days": {"11": "早"}}], "uploads/month.png")
+    repo.save_custom_reminder(
+        name="罗熙云",
+        shift_code="early",
+        reminder_time="07:50",
+        message="开启隧道灯",
+        enabled=True,
+    )
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(main_module, "_wecom_webhook_client_from_repo", lambda repo: FakePersonalWechatClient())
+
+    asyncio.run(main_module._send_due_reminders(repo))
+
+    assert sent["content"] == "@罗熙云\n开启隧道灯"
+    assert sent["mentions"] == []
+    records = repo.list_send_records()
+    assert records[0]["kind"] == "custom"
+    assert records[0]["target"] == "罗熙云"
+    assert records[0]["scheduled_at"] == "2026-08-11T07:50:00+08:00"
+
+
+def test_personal_wechat_custom_reminder_uses_actual_person_not_fixed_mention_target(tmp_path, monkeypatch):
+    sent: dict[str, object] = {}
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 8, 10, 21, 0, 25, tzinfo=tz)
+
+    class FakePersonalWechatClient:
+        is_wechat_bridge = True
+
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            sent["content"] = content
+            sent["mentions"] = mentioned_mobile_list
+
+        async def send_image(self, image_bytes: bytes):
+            raise AssertionError("自定义提醒不应该发送图片")
+
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(
+        sender_type="lightagent",
+        webhook_url="",
+        lightagent_url="https://lightagent.test/api/push/send",
+        lightagent_targets=[{"id": "wgr_notice", "name": "通知群"}],
+        mention_mode="custom",
+        mention_targets="罗富耀",
+    )
+    repo.save_daily_duty_config(enabled=False)
+    repo.save_roster_month(
+        2026,
+        8,
+        [{"name": "商邱宏", "days": {"10": "晚"}}, {"name": "罗富耀", "days": {"10": "中"}}],
+        "uploads/month.png",
+    )
+    repo.save_custom_reminder(
+        name="商邱宏",
+        shift_code="night",
+        reminder_time="21:00",
+        message="关闭隧道灯",
+        enabled=True,
+    )
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(main_module, "_wecom_webhook_client_from_repo", lambda repo: FakePersonalWechatClient())
+
+    asyncio.run(main_module._send_due_reminders(repo))
+
+    assert sent["content"] == "@商邱宏\n关闭隧道灯"
+    assert sent["mentions"] == []
+    assert repo.list_send_records()[0]["target"] == "商邱宏"
+
+
+def test_wecom_custom_reminder_uses_actual_person_mobile_not_fixed_mention_target(tmp_path, monkeypatch):
+    sent: dict[str, object] = {}
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 8, 10, 21, 0, 25, tzinfo=tz)
+
+    class FakeWebhookClient:
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            sent["content"] = content
+            sent["mobiles"] = mentioned_mobile_list
+
+        async def send_image(self, image_bytes: bytes):
+            raise AssertionError("自定义提醒不应该发送图片")
+
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(
+        webhook_url="https://example.test/cgi-bin/webhook/send?key=unit-test",
+        mention_mode="custom",
+        mention_targets="10000000000",
+    )
+    repo.save_roster_month(2026, 8, [{"name": "商邱宏", "days": {"10": "晚"}}], "uploads/month.png")
+    repo.save_custom_reminder(
+        name="商邱宏",
+        mention_mobile="19900000000",
+        shift_code="night",
+        reminder_time="21:00",
+        message="关闭隧道灯",
+        enabled=True,
+    )
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(main_module, "_wecom_webhook_client_from_repo", lambda repo: FakeWebhookClient())
+
+    asyncio.run(main_module._send_due_reminders(repo))
+
+    assert sent["content"] == "关闭隧道灯"
+    assert sent["mobiles"] == ["19900000000"]
+
+
+def test_three_people_custom_reminders_follow_actual_roster_shift_not_fixed_target(tmp_path, monkeypatch):
+    sent: list[str] = []
+
+    class FrozenDateTime(datetime):
+        current = datetime(2026, 8, 11, 7, 50, 25, tzinfo=TZ)
+
+        @classmethod
+        def now(cls, tz=None):
+            return cls.current
+
+    class FakePersonalWechatClient:
+        is_wechat_bridge = True
+
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            sent.append(content)
+
+        async def send_image(self, image_bytes: bytes):
+            raise AssertionError("自定义提醒不应该发送图片")
+
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(
+        sender_type="lightagent",
+        webhook_url="",
+        lightagent_url="https://lightagent.test/api/push/send",
+        lightagent_targets=[{"id": "wgr_notice", "name": "通知群"}],
+        mention_mode="custom",
+        mention_targets="罗富耀",
+    )
+    repo.save_daily_duty_config(enabled=False)
+    repo.save_roster_month(
+        2026,
+        8,
+        [
+            {"name": "商邱宏", "days": {"11": "晚"}},
+            {"name": "罗富耀", "days": {"11": "中"}},
+            {"name": "罗熙云", "days": {"11": "早"}},
+        ],
+        "uploads/month.png",
+    )
+    for name in ["商邱宏", "罗富耀", "罗熙云"]:
+        repo.save_custom_reminder(
+            name=name,
+            shift_code="early",
+            reminder_time="07:50",
+            message="开启隧道灯",
+            enabled=True,
+        )
+        repo.save_custom_reminder(
+            name=name,
+            shift_code="night",
+            reminder_time="21:00",
+            message="关闭隧道灯",
+            enabled=True,
+        )
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(main_module, "_wecom_webhook_client_from_repo", lambda repo: FakePersonalWechatClient())
+
+    asyncio.run(main_module._send_due_reminders(repo))
+    FrozenDateTime.current = datetime(2026, 8, 11, 21, 0, 25, tzinfo=TZ)
+    asyncio.run(main_module._send_due_reminders(repo))
+
+    assert sent == ["@罗熙云\n开启隧道灯", "@商邱宏\n关闭隧道灯"]
+    records = repo.list_send_records()
+    assert [record["target"] for record in records] == ["商邱宏", "罗熙云"]
+    assert {record["content"] for record in records} == {"开启隧道灯", "关闭隧道灯"}
 
 
 def test_due_custom_reminder_sends_with_saved_wechat_member(tmp_path, monkeypatch):

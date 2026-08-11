@@ -25,8 +25,9 @@ import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.custom_reminders import custom_reminder_time_window_text, is_custom_reminder_time_allowed
 from app.daily_duty_image import has_cjk_font, render_daily_duty_image
 from app.http_client import tunnel_async_httpx_client
 from app.ocr import extract_roster_image, extract_template_roster_image, recheck_template_roster_cells
@@ -254,6 +255,12 @@ class CustomReminderRequest(BaseModel):
     @classmethod
     def validate_reminder_time(cls, value: str) -> str:
         return _validate_hhmm(value)
+
+    @model_validator(mode="after")
+    def validate_reminder_time_matches_shift(self):
+        if not is_custom_reminder_time_allowed(self.shift_code, self.reminder_time):
+            raise ValueError(custom_reminder_time_window_text(self.shift_code))
+        return self
 
 
 class CustomReminderTestRequest(CustomReminderRequest):
@@ -704,6 +711,7 @@ def create_app(
             person_name=request.name.strip(),
             send_at=datetime.now(TZ),
             content=content,
+            mention_mobile=request.mention_mobile.strip(),
         )
         return await _send_test_reminder_event(repo, notification_client, event, "custom_test")
 
@@ -6334,6 +6342,7 @@ def _plan_custom_reminder_events(repo: DutyRepository, assignments: list[ShiftAs
                     person_name=name,
                     send_at=datetime.combine(target, _parse_hhmm(reminder_time), tzinfo=TZ),
                     content=content,
+                    mention_mobile=str(reminder.get("mention_mobile") or "").strip(),
                     key_suffix=str(reminder.get("id") or ""),
                 )
             )
@@ -6688,7 +6697,20 @@ def _split_mention_targets(value: Any) -> list[str]:
     return targets
 
 
-def _notification_target_names(repo: DutyRepository, person_name: str = "") -> list[str]:
+def _person_target_for_event(event: ReminderEvent) -> str:
+    if event.kind in {"daily", "before_shift", "rest", "custom", "monitor_test", "custom_test"}:
+        name = str(event.person_name or "").strip()
+        return name if name and name != "测试消息" else ""
+    return ""
+
+
+def _notification_target_names(repo: DutyRepository, event: ReminderEvent | str = "") -> list[str]:
+    if isinstance(event, ReminderEvent):
+        person_name = str(event.person_name or "").strip()
+        person_target = _person_target_for_event(event)
+    else:
+        person_name = str(event or "").strip()
+        person_target = person_name if person_name and person_name != "测试消息" else ""
     mention = _notification_mention_config(repo)
     mode = mention["mode"]
     if mode == "none":
@@ -6696,8 +6718,9 @@ def _notification_target_names(repo: DutyRepository, person_name: str = "") -> l
     if mode == "all":
         return ["所有人"]
     if mode == "person":
-        name = str(person_name or "").strip()
-        return [name] if name and name != "测试消息" else []
+        return [person_target or person_name] if (person_target or person_name) and person_name != "测试消息" else []
+    if person_target:
+        return [person_target]
     names = []
     for target in _split_mention_targets(mention["targets"]):
         if target in {"@all", "@所有人", "所有人"}:
@@ -6720,6 +6743,9 @@ def _notification_true_mentions_for_event(repo: DutyRepository, client: Any, eve
     if mode == "person":
         mobile = _mobile_for_event(event, mobile_lookup)
         return [mobile] if mobile else []
+    if _person_target_for_event(event):
+        mobile = _mobile_for_event(event, mobile_lookup)
+        return [mobile] if mobile else []
     mentions = []
     for target in _split_mention_targets(mention["targets"]):
         if target in {"@all", "@所有人", "所有人"}:
@@ -6737,7 +6763,7 @@ def _notification_content_for_event(repo: DutyRepository, client: Any, event: Re
     content = str(event.content or "")
     if not _is_personal_wechat_notify_client(client):
         return content
-    names = _notification_target_names(repo, event.person_name)
+    names = _notification_target_names(repo, event)
     prefix = "\n".join(f"@{name}" for name in names if name)
     if not prefix or content.lstrip().startswith("@"):
         return content
@@ -6769,7 +6795,7 @@ def _person_mobile_lookup(repo: DutyRepository) -> dict[str, str]:
 
 
 def _mobile_for_event(event: ReminderEvent, mobile_lookup: dict[str, str]) -> str:
-    return mobile_lookup.get(event.person_name, "")
+    return str(event.mention_mobile or "").strip() or mobile_lookup.get(event.person_name, "")
 
 
 async def _send_test_reminder_event(

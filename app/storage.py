@@ -5,6 +5,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from app.custom_reminders import normalize_custom_reminder_time_for_import
+
 DEFAULT_MESSAGE_TEMPLATE = "{name} {date}（{time_range})是你的{shift_label}"
 LEGACY_DAILY_DUTY_TEMPLATE = (
     "今日在岗人员\n"
@@ -479,6 +481,11 @@ class DutyRepository:
                     clean = {key: value for key, value in row.items() if key in existing_columns}
                     if not clean:
                         continue
+                    if table == "custom_reminders" and "reminder_time" in clean:
+                        clean["reminder_time"] = normalize_custom_reminder_time_for_import(
+                            str(clean.get("shift_code") or ""),
+                            str(clean.get("reminder_time") or ""),
+                        )
                     columns = list(clean.keys())
                     placeholders = ",".join("?" for _ in columns)
                     names = ",".join(columns)

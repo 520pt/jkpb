@@ -4556,6 +4556,29 @@
       return ({ early: "早班", middle: "中班", night: "晚班" })[shiftCode] || shiftCode;
     }
 
+    const customReminderTimeRules = {
+      early: { min: "00:00", max: "08:00", fallback: "07:50", label: "早班" },
+      middle: { min: "07:00", max: "16:00", fallback: "07:50", label: "中班" },
+      night: { min: "15:00", max: "23:59", fallback: "21:00", label: "晚班" }
+    };
+
+    function customReminderTimeAllowed(shiftCode, value) {
+      const rule = customReminderTimeRules[shiftCode];
+      return rule && value && value >= rule.min && value <= rule.max;
+    }
+
+    function applyCustomReminderTimeRule() {
+      const shiftCode = $("customReminderShift").value || "early";
+      const rule = customReminderTimeRules[shiftCode] || customReminderTimeRules.early;
+      const input = $("customReminderTime");
+      input.min = rule.min;
+      input.max = rule.max;
+      input.title = `${rule.label}提醒时间必须在 ${rule.min} 至 ${rule.max} 之间`;
+      if (!customReminderTimeAllowed(shiftCode, input.value)) {
+        input.value = rule.fallback;
+      }
+    }
+
     function resetCustomReminderForm() {
       state.editingCustomReminderId = null;
       $("customReminderName").value = "";
@@ -4563,7 +4586,8 @@
       renderCustomReminderWechatMemberOptions("");
       updateCustomReminderNotificationFields();
       $("customReminderShift").value = "early";
-      $("customReminderTime").value = "21:00";
+      $("customReminderTime").value = "07:50";
+      applyCustomReminderTimeRule();
       $("customReminderMessage").value = "";
       $("customReminderEnabled").checked = true;
       $("saveCustomReminderBtn").textContent = "保存自定义提醒";
@@ -4577,6 +4601,7 @@
       updateCustomReminderNotificationFields();
       $("customReminderShift").value = reminder.shift_code || "early";
       $("customReminderTime").value = reminder.reminder_time || "21:00";
+      applyCustomReminderTimeRule();
       $("customReminderMessage").value = reminder.message || "";
       $("customReminderEnabled").checked = reminder.enabled !== false;
       $("saveCustomReminderBtn").textContent = "保存修改";
@@ -4616,7 +4641,7 @@
         mention_mobile: $("customReminderMobile").value.trim(),
         ...customReminderWechatBindingPayload(),
         shift_code: $("customReminderShift").value,
-        reminder_time: $("customReminderTime").value || "21:00",
+        reminder_time: $("customReminderTime").value || (customReminderTimeRules[$("customReminderShift").value] || customReminderTimeRules.early).fallback,
         message: $("customReminderMessage").value.trim(),
         enabled: $("customReminderEnabled").checked
       };
@@ -4626,6 +4651,12 @@
       const payload = customReminderFormPayload();
       if (!payload.name || !payload.message) {
         $("customReminderStatus").textContent = "请填写姓名和提醒文案";
+        $("customReminderStatus").className = "status error";
+        return;
+      }
+      if (!customReminderTimeAllowed(payload.shift_code, payload.reminder_time)) {
+        const rule = customReminderTimeRules[payload.shift_code] || customReminderTimeRules.early;
+        $("customReminderStatus").textContent = `${rule.label}提醒时间必须在 ${rule.min} 至 ${rule.max} 之间`;
         $("customReminderStatus").className = "status error";
         return;
       }
@@ -4649,6 +4680,12 @@
       const payload = customReminderFormPayload();
       if (!payload.name || !payload.message) {
         $("customReminderStatus").textContent = "请填写姓名和提醒文案";
+        $("customReminderStatus").className = "status error";
+        return;
+      }
+      if (!customReminderTimeAllowed(payload.shift_code, payload.reminder_time)) {
+        const rule = customReminderTimeRules[payload.shift_code] || customReminderTimeRules.early;
+        $("customReminderStatus").textContent = `${rule.label}提醒时间必须在 ${rule.min} 至 ${rule.max} 之间`;
         $("customReminderStatus").className = "status error";
         return;
       }
@@ -8292,6 +8329,8 @@
     $("customReminderWechatMember").addEventListener("change", () => {
       $("customReminderWechatMemberId").value = $("customReminderWechatMember").value.trim();
     });
+    $("customReminderShift").addEventListener("change", applyCustomReminderTimeRule);
+    $("customReminderTime").addEventListener("blur", applyCustomReminderTimeRule);
     setupImageViewer();
     setupNameTagEditor("personnelNames");
     setupNameTagEditor("bigDriverNames");
