@@ -3240,6 +3240,9 @@
                   <input id="monitorWechatMemberId" readonly placeholder="未绑定" />
                 </div>
                 <div class="field-grid">
+                  <label>发送到微信群 <select id="monitorNotificationRoom"></select></label>
+                </div>
+                <div class="field-grid">
                   <label>每日提醒时间 <input id="dailyTime" type="time" value="07:50" /></label>
                   <label>班次提前提醒分钟 <input id="beforeMinutes" type="number" min="0" max="1440" value="10" /></label>
                 </div>
@@ -3292,6 +3295,9 @@
                   <label class="checkbox-label"><span>启用结束后周期巡查提醒</span><input id="patrolEndReminderEnabled" type="checkbox" checked /></label>
                 </div>
                 <div class="field-grid">
+                  <label>发送到微信群 <select id="patrolNotificationRoom"></select></label>
+                </div>
+                <div class="field-grid">
                   <label>结束后周期提醒频率（小时） <input id="patrolEndInterval" type="number" min="1" max="168" value="6" /></label>
                   <label>结束后周期巡查窗口（小时） <input id="patrolEndWindow" type="number" min="1" max="720" value="48" /></label>
                   <div class="patrol-delivery-row">
@@ -3342,6 +3348,9 @@
                 <div class="field-grid hidden" id="customReminderWechatFields">
                   <select id="customReminderWechatMember"></select>
                   <input id="customReminderWechatMemberId" readonly placeholder="未绑定" />
+                </div>
+                <div class="field-grid">
+                  <label>发送到微信群 <select id="customReminderNotificationRoom"></select></label>
                 </div>
                 <div class="field-grid">
                   <label>匹配班次
@@ -3425,6 +3434,7 @@
                   <div class="field-grid">
                     <label class="checkbox-label"><span>启用今日在岗提醒</span><input id="dailyDutyEnabled" type="checkbox" checked /></label>
                     <label>提醒时间 <input id="dailyDutyTime" type="time" value="07:50" /></label>
+                    <label>发送到微信群 <select id="dailyDutyNotificationRoom"></select></label>
                   </div>
                   <label>今日在岗提醒文案 <textarea id="dailyDutyTemplate" class="daily-duty-template-input" placeholder="今日在岗人员&#10;监控班：今日早班：{early}，明日早班：{tomorrow_early}，中班：{middle}，晚班：{night}&#10;驾驶员：大车：{big_drivers} 小车：{small_drivers}&#10;备勤人员：{standby}&#10;今日下午休息：{afternoon_rest}&#10;正在休息：{resting}&#10;今日下午到岗：{afternoon_return}"></textarea></label>
                   <div class="settings-actions">
@@ -4742,6 +4752,7 @@
       $("mentionMobile").value = "";
       renderMonitorWechatMemberOptions("");
       updateMonitorNotificationFields();
+      if ($("monitorNotificationRoom")) $("monitorNotificationRoom").value = "";
       $("dailyTime").value = "07:50";
       $("beforeMinutes").value = "10";
       $("monitorPersonEnabled").checked = true;
@@ -4761,6 +4772,7 @@
       $("mentionMobile").value = person.mention_mobile || "";
       renderMonitorWechatMemberOptions(person.wechat_group_runtime_sender_id || "");
       updateMonitorNotificationFields();
+      if ($("monitorNotificationRoom")) $("monitorNotificationRoom").value = person.notification_room_id || "";
       $("dailyTime").value = person.daily_time || "07:50";
       $("beforeMinutes").value = String(person.before_shift_minutes || 10);
       $("monitorPersonEnabled").checked = person.enabled !== false;
@@ -4780,6 +4792,7 @@
         name: $("personName").value.trim(),
         mention_mobile: $("mentionMobile").value.trim(),
         ...monitorWechatBindingPayload(),
+        ...selectedNotificationRoomPayload("monitorNotificationRoom"),
         daily_time: $("dailyTime").value || "07:50",
         before_shift_minutes: Number($("beforeMinutes").value || 10),
         rest_reminder_enabled: $("restReminderEnabled").checked,
@@ -4838,7 +4851,8 @@
     }
 
     function monitorNotificationText(person) {
-      return `@ 使用消息通知渠道统一配置`;
+      const roomId = String(person.notification_room_id || "").trim();
+      return `${roomId ? `发送群：${notificationRoomLabelById(roomId, person.notification_room_name)}` : "发送群：默认全部通知群"} · @ 使用消息通知渠道统一配置`;
     }
 
     function renderMonitoredPeopleList() {
@@ -4908,6 +4922,7 @@
       $("customReminderMobile").value = "";
       renderCustomReminderWechatMemberOptions("");
       updateCustomReminderNotificationFields();
+      if ($("customReminderNotificationRoom")) $("customReminderNotificationRoom").value = "";
       $("customReminderShift").value = "early";
       $("customReminderTime").value = "07:50";
       applyCustomReminderTimeRule();
@@ -4922,6 +4937,7 @@
       $("customReminderMobile").value = reminder.mention_mobile || personnelMobileByName(reminder.name);
       renderCustomReminderWechatMemberOptions(customWechatSavedBinding(reminder.name).wechat_group_runtime_sender_id || "");
       updateCustomReminderNotificationFields();
+      if ($("customReminderNotificationRoom")) $("customReminderNotificationRoom").value = reminder.notification_room_id || "";
       $("customReminderShift").value = reminder.shift_code || "early";
       $("customReminderTime").value = reminder.reminder_time || "21:00";
       applyCustomReminderTimeRule();
@@ -4939,7 +4955,8 @@
     }
 
     function customReminderNotificationText(reminder) {
-      return `@ 使用消息通知渠道统一配置`;
+      const roomId = String(reminder.notification_room_id || "").trim();
+      return `${roomId ? `发送群：${notificationRoomLabelById(roomId, reminder.notification_room_name)}` : "发送群：默认全部通知群"} · @ 使用消息通知渠道统一配置`;
     }
 
     function renderCustomRemindersList() {
@@ -4963,6 +4980,7 @@
         name: $("customReminderName").value.trim(),
         mention_mobile: $("customReminderMobile").value.trim(),
         ...customReminderWechatBindingPayload(),
+        ...selectedNotificationRoomPayload("customReminderNotificationRoom"),
         shift_code: $("customReminderShift").value,
         reminder_time: $("customReminderTime").value || (customReminderTimeRules[$("customReminderShift").value] || customReminderTimeRules.early).fallback,
         message: $("customReminderMessage").value.trim(),
@@ -5553,6 +5571,47 @@
       return result;
     }
 
+    function notificationRoomLabelById(id, fallbackName = "") {
+      const roomId = String(id || "").trim();
+      const room = normalizeFeatureChannelRooms(state.notificationTargetRooms || []).find((item) => item.id === roomId) || {};
+      return cleanWechatVisibleName(fallbackName || room.name || "", roomId) || (roomId ? `微信群 ${shortWechatId(roomId)}` : "默认全部通知群");
+    }
+
+    function selectedNotificationRoomPayload(selectId) {
+      const select = $(selectId);
+      if (!select) return { notification_room_id: "", notification_room_name: "" };
+      const option = select.selectedOptions[0];
+      return {
+        notification_room_id: String(select.value || "").trim(),
+        notification_room_name: option ? String(option.dataset.roomName || "").trim() : ""
+      };
+    }
+
+    function renderBusinessNotificationRoomSelects() {
+      const rooms = normalizeFeatureChannelRooms(state.notificationTargetRooms || []);
+      const savedValues = {
+        dailyDutyNotificationRoom: state.dailyDutyConfig && state.dailyDutyConfig.notification_room_id,
+        patrolNotificationRoom: state.patrolWarningConfig && state.patrolWarningConfig.notification_room_id,
+      };
+      [
+        "monitorNotificationRoom",
+        "customReminderNotificationRoom",
+        "dailyDutyNotificationRoom",
+        "patrolNotificationRoom"
+      ].forEach((id) => {
+        const select = $(id);
+        if (!select) return;
+        const current = String(select.value || savedValues[id] || "").trim();
+        select.innerHTML = `<option value="">默认：全部通知群</option>` + rooms.map((room) => {
+          const label = notificationRoomLabelById(room.id, room.name);
+          return `<option value="${escapeHtml(room.id)}" data-room-name="${escapeHtml(room.name || "")}" ${room.id === current ? "selected" : ""}>${escapeHtml(label)}</option>`;
+        }).join("");
+        if (current && !rooms.some((room) => room.id === current)) {
+          select.insertAdjacentHTML("beforeend", `<option value="${escapeHtml(current)}" selected>已保存群 ${escapeHtml(shortWechatId(current))}</option>`);
+        }
+      });
+    }
+
     function renderFeatureChannelRoomList() {
       const box = $("featureChannelRoomList");
       if (!box) return;
@@ -5604,6 +5663,7 @@
           renderNotificationTargetRoomList();
         });
       });
+      renderBusinessNotificationRoomSelects();
     }
 
     function addNotificationTargetRoomFromInputs() {
@@ -5932,6 +5992,8 @@
       setNameListValue("bigDriverNames", config.big_driver_names || []);
       setNameListValue("smallDriverNames", config.small_driver_names || []);
       $("dailyDutyTemplate").value = config.message_template || "";
+      renderBusinessNotificationRoomSelects();
+      if ($("dailyDutyNotificationRoom")) $("dailyDutyNotificationRoom").value = config.notification_room_id || "";
       renderSettingsOverview();
     }
 
@@ -5944,7 +6006,8 @@
           reminder_time: $("dailyDutyTime").value || "07:50",
           big_driver_names: parseNameList($("bigDriverNames").value),
           small_driver_names: parseNameList($("smallDriverNames").value),
-          message_template: $("dailyDutyTemplate").value.trim()
+          message_template: $("dailyDutyTemplate").value.trim(),
+          ...selectedNotificationRoomPayload("dailyDutyNotificationRoom")
         })
       });
       const body = await response.json();
@@ -6712,7 +6775,8 @@
         end_reminder_window_hours: Number($("patrolEndWindow").value || 48),
         send_content_mode: $("patrolSendContentMode").value || "both",
         start_message_template: $("patrolStartTemplate").value.trim(),
-        end_message_template: $("patrolEndTemplate").value.trim()
+        end_message_template: $("patrolEndTemplate").value.trim(),
+        ...selectedNotificationRoomPayload("patrolNotificationRoom")
       };
     }
 
@@ -6956,6 +7020,8 @@
       $("patrolSendContentMode").value = config.send_content_mode || "both";
       $("patrolStartTemplate").value = config.start_message_template || "";
       $("patrolEndTemplate").value = config.end_message_template || "";
+      renderBusinessNotificationRoomSelects();
+      if ($("patrolNotificationRoom")) $("patrolNotificationRoom").value = config.notification_room_id || "";
       renderPatrolWarningLatest(body.state && body.state.warning, null, body.state);
       renderSettingsOverview();
     }
@@ -7996,7 +8062,7 @@
             <div class="today-reminder-meta">
               <div>
                 <strong>${escapeHtml(event.person_name || "-")}</strong>
-                <small>${escapeHtml(sendRecordKindLabel(event.kind))}</small>
+                <small>${escapeHtml(sendRecordKindLabel(event.kind))} · ${escapeHtml(notificationRoomLabelById(event.notification_room_id, event.notification_room_name))}</small>
               </div>
               <div>
                 <strong>${escapeHtml(formatIsoMinute(event.send_at))}</strong>
@@ -8101,7 +8167,7 @@
           <div class="record-item ${record.status === "success" ? "success" : "failed"}">
             <div><strong>${escapeHtml(formatIsoMinute(record.created_at))}</strong><small>创建时间</small></div>
             <div><strong>${escapeHtml(sendRecordKindLabel(record.kind))}</strong><small>类型</small></div>
-            <div><strong>${escapeHtml(record.target || "-")}</strong><small>目标</small></div>
+            <div><strong>${escapeHtml(record.target || "-")}</strong><small>目标 · ${escapeHtml(notificationRoomLabelById(record.notification_room_id, record.notification_room_name))}</small></div>
             <div><strong>${escapeHtml(sendRecordStatusLabel(record.status))}</strong><small>状态</small></div>
             <div>
               <strong>${escapeHtml(record.scheduled_at ? formatIsoMinute(record.scheduled_at) : "-")}</strong>

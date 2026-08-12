@@ -411,3 +411,22 @@ def test_wechat_bridge_message_runtime_id_does_not_update_ambiguous_member_name(
         "@hash-member-a",
         "@hash-member-b",
     ]
+
+
+
+def test_wechat_bridge_notify_client_can_send_to_selected_target_only():
+    sent: list[tuple[str, str]] = []
+
+    class FakeManager:
+        def send_text(self, room_id, text, *, mention_ids=None):
+            sent.append(("text", room_id))
+
+        def send_image_bytes(self, room_id, image_bytes):
+            sent.append(("image", room_id))
+
+    client = WechatBridgeNotifyClient(targets=["room-1", "room-2"], manager=FakeManager())
+
+    asyncio.run(client.send_text("测试", target_ids=["room-2"]))
+    asyncio.run(client.send_image(b"png", target_ids=["room-2"]))
+
+    assert sent == [("text", "room-2"), ("image", "room-2")]

@@ -141,11 +141,17 @@ class LightAgentNotifyClient:
         self.channel = channel.strip() or "wechat_group"
         self.http_client = http_client or httpx.AsyncClient(timeout=10, trust_env=False)
 
-    async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None) -> None:
+    async def send_text(
+        self,
+        content: str,
+        mentioned_mobile_list: list[str] | None = None,
+        *,
+        target_ids: list[str] | None = None,
+    ) -> None:
         text: dict[str, object] = {"content": content}
-        await self._post({"msgtype": "text", "text": text})
+        await self._post({"msgtype": "text", "text": text}, target_ids=target_ids)
 
-    async def send_image(self, image_bytes: bytes) -> None:
+    async def send_image(self, image_bytes: bytes, *, target_ids: list[str] | None = None) -> None:
         await self._post(
             {
                 "msgtype": "image",
@@ -153,18 +159,20 @@ class LightAgentNotifyClient:
                     "base64": base64.b64encode(image_bytes).decode("ascii"),
                     "md5": hashlib.md5(image_bytes).hexdigest(),
                 },
-            }
+            },
+            target_ids=target_ids,
         )
 
-    async def _post(self, payload: dict[str, object]) -> None:
+    async def _post(self, payload: dict[str, object], *, target_ids: list[str] | None = None) -> None:
         if not self.endpoint_url:
             raise WeComError("LightAgent 推送地址未配置")
-        if not self.targets:
+        targets = _selected_lightagent_targets(self.targets, target_ids)
+        if not targets:
             raise WeComError("LightAgent 目标群 room_id 未配置")
         headers = {"Authorization": f"Bearer {self.token}"} if self.token else None
         failures: list[str] = []
         sent = 0
-        for target in self.targets:
+        for target in targets:
             body = {"channel": self.channel, "target": target, **payload}
             try:
                 response = await self.http_client.post(self.endpoint_url, json=body, headers=headers)
@@ -201,3 +209,13 @@ def _lightagent_error_text(response: httpx.Response) -> str:
         return response.text[:200]
     detail = data.get("detail") or data.get("error") or data.get("errmsg")
     return str(detail or "")[:200]
+
+
+def _selected_lightagent_targets(default_targets: list[str], target_ids: list[str] | None) -> list[str]:
+    values = default_targets if target_ids is None else target_ids
+    selected: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in selected:
+            selected.append(text)
+    return selected

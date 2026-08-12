@@ -14,6 +14,7 @@ import re
 import secrets
 import time
 import uuid
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -121,6 +122,8 @@ class MonitoredPersonRequest(BaseModel):
     wechat_group_member_id: str = ""
     wechat_group_runtime_sender_id: str = ""
     wechat_group_member_name: str = ""
+    notification_room_id: str = ""
+    notification_room_name: str = ""
     daily_time: str = "07:50"
     before_shift_minutes: int = Field(default=10, ge=0, le=1440)
     rest_reminder_enabled: bool = False
@@ -229,6 +232,8 @@ class CustomReminderRequest(BaseModel):
     wechat_group_member_id: str = ""
     wechat_group_runtime_sender_id: str = ""
     wechat_group_member_name: str = ""
+    notification_room_id: str = ""
+    notification_room_name: str = ""
     shift_code: str
     reminder_time: str
     message: str
@@ -273,6 +278,8 @@ class DailyDutyConfigRequest(BaseModel):
     big_driver_names: list[str] = []
     small_driver_names: list[str] = []
     message_template: str = DEFAULT_DAILY_DUTY_TEMPLATE
+    notification_room_id: str = ""
+    notification_room_name: str = ""
 
     @field_validator("reminder_time")
     @classmethod
@@ -297,6 +304,8 @@ class PatrolWarningConfigRequest(BaseModel):
     send_content_mode: str = "both"
     start_message_template: str = DEFAULT_PATROL_WARNING_START_TEMPLATE
     end_message_template: str = DEFAULT_PATROL_WARNING_END_TEMPLATE
+    notification_room_id: str = ""
+    notification_room_name: str = ""
 
 
 class PatrolWarningSendRequest(BaseModel):
@@ -649,6 +658,8 @@ def create_app(
             person_name=request.name.strip(),
             send_at=datetime.now(TZ),
             content=content,
+            target_room_id=request.notification_room_id.strip(),
+            target_room_name=request.notification_room_name.strip(),
         )
         return await _send_test_reminder_event(repo, notification_client, event, "monitor_test")
 
@@ -712,6 +723,8 @@ def create_app(
             send_at=datetime.now(TZ),
             content=content,
             mention_mobile=request.mention_mobile.strip(),
+            target_room_id=request.notification_room_id.strip(),
+            target_room_name=request.notification_room_name.strip(),
         )
         return await _send_test_reminder_event(repo, notification_client, event, "custom_test")
 
@@ -748,13 +761,15 @@ def create_app(
         target = request.target_date or _today_in_tz()
         preview = _build_daily_duty_preview(repo, target)
         try:
-            await notification_client.send_image(render_daily_duty_image(preview))
+            await _notify_send_image(notification_client, render_daily_duty_image(preview), _daily_duty_target_room_ids(repo))
             repo.save_send_record(
                 kind="daily_duty_test",
                 target="今日在岗人员",
                 scheduled_at=preview["send_at"],
                 status="success",
                 content=preview["content"],
+                notification_room_id=str(preview.get("notification_room_id") or ""),
+                notification_room_name=str(preview.get("notification_room_name") or ""),
             )
         except WeComError as exc:
             repo.save_send_record(
@@ -764,6 +779,8 @@ def create_app(
                 status="failed",
                 content=preview["content"],
                 error=str(exc),
+                notification_room_id=str(preview.get("notification_room_id") or ""),
+                notification_room_name=str(preview.get("notification_room_name") or ""),
             )
             raise HTTPException(status_code=502, detail=_sanitize_wechat_ids_for_display(repo, str(exc))) from exc
         except Exception as exc:
@@ -775,6 +792,8 @@ def create_app(
                 status="failed",
                 content=preview["content"],
                 error=error,
+                notification_room_id=str(preview.get("notification_room_id") or ""),
+                notification_room_name=str(preview.get("notification_room_name") or ""),
             )
             raise HTTPException(status_code=502, detail=_sanitize_wechat_ids_for_display(repo, error)) from exc
         return {"success": True, "content": preview["content"], "send_at": preview["send_at"], "details": preview["details"]}
@@ -4386,6 +4405,8 @@ def _public_patrol_warning_config(config: dict[str, Any]) -> dict[str, Any]:
         "send_content_mode": _patrol_send_content_mode(config),
         "start_message_template": str(config.get("start_message_template") or DEFAULT_PATROL_WARNING_START_TEMPLATE),
         "end_message_template": str(config.get("end_message_template") or DEFAULT_PATROL_WARNING_END_TEMPLATE),
+        "notification_room_id": str(config.get("notification_room_id") or ""),
+        "notification_room_name": str(config.get("notification_room_name") or ""),
     }
 
 
@@ -5935,6 +5956,8 @@ def _reminder_events_response(repo: DutyRepository, target: date, *, now: dateti
                 "person_name": event.person_name,
                 "send_at": event.send_at.isoformat(),
                 "content": event.content,
+                "notification_room_id": event.target_room_id,
+                "notification_room_name": event.target_room_name,
                 "sent_state": "sent_or_due" if event.send_at <= now else "pending",
                 **_today_reminder_event_media(repo, event, target),
             }
@@ -5972,6 +5995,8 @@ def _plan_patrol_warning_display_events(repo: DutyRepository, target: date, *, n
 
     events: list[ReminderEvent] = []
     target_name = warning.route_code or warning.route_name or str(config.get("route_code") or "公路巡查预警")
+    room_id = str(config.get("notification_room_id") or "").strip()
+    room_name = str(config.get("notification_room_name") or "").strip()
     start_at = warning.start_time or warning.create_time
     if start_at and start_at.date() == target:
         events.append(
@@ -5980,6 +6005,8 @@ def _plan_patrol_warning_display_events(repo: DutyRepository, target: date, *, n
                 person_name=target_name,
                 send_at=start_at,
                 content=_build_patrol_warning_content(warning, config, now=now, mode="start"),
+                target_room_id=room_id,
+                target_room_name=room_name,
             )
         )
 
@@ -5996,6 +6023,8 @@ def _plan_patrol_warning_display_events(repo: DutyRepository, target: date, *, n
                         person_name=target_name,
                         send_at=slot,
                         content=_build_patrol_warning_content(warning, config, now=slot, mode="end"),
+                        target_room_id=room_id,
+                        target_room_name=room_name,
                     )
                 )
             if slot.date() > target:
@@ -6280,6 +6309,8 @@ def _build_daily_duty_preview(repo: DutyRepository, target: date) -> dict[str, A
         "send_at": send_at.isoformat(),
         "content": _render_simple_template(config["message_template"] or DEFAULT_DAILY_DUTY_TEMPLATE, values),
         "details": values,
+        "notification_room_id": str(config.get("notification_room_id") or ""),
+        "notification_room_name": str(config.get("notification_room_name") or ""),
     }
 
 
@@ -6371,6 +6402,8 @@ def _plan_custom_reminder_events(repo: DutyRepository, assignments: list[ShiftAs
                     content=content,
                     mention_mobile=str(reminder.get("mention_mobile") or "").strip(),
                     key_suffix=str(reminder.get("id") or ""),
+                    target_room_id=str(reminder.get("notification_room_id") or "").strip(),
+                    target_room_name=str(reminder.get("notification_room_name") or "").strip(),
                 )
             )
     return events
@@ -6384,20 +6417,21 @@ def _plan_all_events(repo: DutyRepository, target: date):
     events = []
     message_template = str(repo.get_notification_config().get("message_template") or DEFAULT_MESSAGE_TEMPLATE)
     for person in repo.list_monitored_people(enabled_only=True):
-        events.extend(
-            plan_reminders_for_day(
-                target_date=target,
-                assignments=assignments,
-                monitored_name=person["name"],
-                mention_text="",
-                settings=ReminderSettings(
-                    daily_time=_coerce_hhmm(person["daily_time"], "07:50"),
-                    before_shift_minutes=person["before_shift_minutes"],
-                    message_template=message_template,
-                ),
-                tz=TZ,
-            )
+        person_events = plan_reminders_for_day(
+            target_date=target,
+            assignments=assignments,
+            monitored_name=person["name"],
+            mention_text="",
+            settings=ReminderSettings(
+                daily_time=_coerce_hhmm(person["daily_time"], "07:50"),
+                before_shift_minutes=person["before_shift_minutes"],
+                message_template=message_template,
+            ),
+            tz=TZ,
         )
+        room_id = str(person.get("notification_room_id") or "").strip()
+        room_name = str(person.get("notification_room_name") or "").strip()
+        events.extend(replace(event, target_room_id=room_id, target_room_name=room_name) for event in person_events)
         if person.get("rest_reminder_enabled"):
             rest_status = _rest_status_for_date(repo, person["name"], target)
             if rest_status:
@@ -6411,6 +6445,8 @@ def _plan_all_events(repo: DutyRepository, target: date):
                         person_name=person["name"],
                         send_at=datetime.combine(target, _parse_hhmm(_coerce_hhmm(person.get("rest_reminder_time") or "08:30", "08:30")), tzinfo=TZ),
                         content=content,
+                        target_room_id=str(person.get("notification_room_id") or "").strip(),
+                        target_room_name=str(person.get("notification_room_name") or "").strip(),
                     )
                 )
     daily_duty = _build_daily_duty_preview(repo, target)
@@ -6421,6 +6457,8 @@ def _plan_all_events(repo: DutyRepository, target: date):
                 person_name="今日在岗人员",
                 send_at=datetime.fromisoformat(daily_duty["send_at"]),
                 content=daily_duty["content"],
+                target_room_id=str(daily_duty.get("notification_room_id") or "").strip(),
+                target_room_name=str(daily_duty.get("notification_room_name") or "").strip(),
             )
         )
     events.extend(_plan_custom_reminder_events(repo, assignments, target))
@@ -6653,18 +6691,21 @@ async def _send_patrol_warning_message(
     try:
         patrol_config = repo.get_patrol_warning_config()
         send_content_mode = _normalize_patrol_send_content_mode(str(patrol_config.get("send_content_mode") or "both"))
+        target_ids = _patrol_warning_target_room_ids(repo)
         if send_content_mode in {"both", "text"}:
             event = ReminderEvent(kind=kind, person_name="", send_at=now or datetime.now(TZ), content=content)
             content = _notification_content_for_event(repo, webhook_client, event)
-            await webhook_client.send_text(content, _notification_true_mentions_for_event(repo, webhook_client, event))
+            await _notify_send_text(webhook_client, content, _notification_true_mentions_for_event(repo, webhook_client, event), target_ids)
         if send_content_mode in {"both", "image"} and warning is not None:
-            await webhook_client.send_image(
+            await _notify_send_image(
+                webhook_client,
                 render_patrol_warning_image(
                     warning,
                     now=now or datetime.now(TZ),
                     window_hours=window_hours,
                     mode=image_mode,
-                )
+                ),
+                target_ids,
             )
         repo.save_send_record(
             kind=kind,
@@ -6672,6 +6713,8 @@ async def _send_patrol_warning_message(
             scheduled_at=scheduled_at,
             status="success",
             content=content,
+            notification_room_id=str(patrol_config.get("notification_room_id") or ""),
+            notification_room_name=str(patrol_config.get("notification_room_name") or ""),
         )
     except Exception as exc:
         repo.save_send_record(
@@ -6681,6 +6724,8 @@ async def _send_patrol_warning_message(
             status="failed",
             content=content,
             error=str(exc),
+            notification_room_id=str(patrol_config.get("notification_room_id") or ""),
+            notification_room_name=str(patrol_config.get("notification_room_name") or ""),
         )
         raise
 
@@ -6837,17 +6882,20 @@ async def _send_test_reminder_event(
     mentions = _notification_true_mentions_for_event(repo, notification_client, event)
     content = _notification_content_for_event(repo, notification_client, event)
     target = event.person_name or "测试消息"
+    target_ids = _notification_target_room_ids_for_event(event)
     try:
         if _should_send_shift_reminder_image(event) and hasattr(notification_client, "send_image"):
-            await notification_client.send_text(_notification_content_for_event(repo, notification_client, ReminderEvent(kind=event.kind, person_name=event.person_name, send_at=event.send_at, content="监控班提醒图片如下：")), mentions)
-            await notification_client.send_image(render_shift_reminder_image(event))
+            await _notify_send_text(notification_client, _notification_content_for_event(repo, notification_client, ReminderEvent(kind=event.kind, person_name=event.person_name, send_at=event.send_at, content="监控班提醒图片如下：")), mentions, target_ids)
+            await _notify_send_image(notification_client, render_shift_reminder_image(event), target_ids)
         else:
-            await notification_client.send_text(content, mentions)
+            await _notify_send_text(notification_client, content, mentions, target_ids)
         repo.save_send_record(
             kind=record_kind,
             target=target,
             status="success",
             content=content,
+            notification_room_id=event.target_room_id,
+            notification_room_name=event.target_room_name,
         )
     except WeComError as exc:
         repo.save_send_record(
@@ -6856,6 +6904,8 @@ async def _send_test_reminder_event(
             status="failed",
             content=content,
             error=str(exc),
+            notification_room_id=event.target_room_id,
+            notification_room_name=event.target_room_name,
         )
         raise HTTPException(status_code=502, detail=_sanitize_wechat_ids_for_display(repo, str(exc))) from exc
     except Exception as exc:
@@ -6866,6 +6916,8 @@ async def _send_test_reminder_event(
             status="failed",
             content=content,
             error=error,
+            notification_room_id=event.target_room_id,
+            notification_room_name=event.target_room_name,
         )
         raise HTTPException(status_code=502, detail=_sanitize_wechat_ids_for_display(repo, error)) from exc
     return {"success": True, "content": content, "mentions": mentions}
@@ -7030,6 +7082,9 @@ def _public_send_record(repo: DutyRepository, record: dict[str, Any]) -> dict[st
         item["target"] = _wechat_room_record_target(repo, target)
     elif _looks_like_wechat_runtime_id(target):
         item["target"] = _wechat_test_record_target(repo, target)
+    room_id = str(item.get("notification_room_id") or "").strip()
+    if room_id:
+        item["notification_room_name"] = _wechat_room_display_lookup(repo).get(room_id) or item.get("notification_room_name") or room_id
     for key in ("content", "error"):
         if item.get(key):
             item[key] = _sanitize_wechat_ids_for_display(repo, str(item.get(key) or ""))
@@ -7082,6 +7137,49 @@ def _patrol_warning_mentions_for_client(repo: DutyRepository, config: dict[str, 
     return _notification_true_mentions_for_event(repo, client, event)
 
 
+
+def _notification_target_room_ids_for_event(event: ReminderEvent) -> list[str] | None:
+    room_id = str(getattr(event, "target_room_id", "") or "").strip()
+    return [room_id] if room_id else None
+
+
+def _daily_duty_target_room_ids(repo: DutyRepository) -> list[str] | None:
+    room_id = str(repo.get_daily_duty_config().get("notification_room_id") or "").strip()
+    return [room_id] if room_id else None
+
+
+def _patrol_warning_target_room_ids(repo: DutyRepository) -> list[str] | None:
+    room_id = str(repo.get_patrol_warning_config().get("notification_room_id") or "").strip()
+    return [room_id] if room_id else None
+
+
+def _configured_person_target_room_ids(repo: DutyRepository, name: str) -> list[str] | None:
+    clean = str(name or "").strip()
+    for person in repo.list_monitored_people():
+        if str(person.get("name") or "").strip() == clean:
+            room_id = str(person.get("notification_room_id") or "").strip()
+            return [room_id] if room_id else None
+    return None
+
+
+def _record_target_room_ids(record: dict[str, Any]) -> list[str] | None:
+    room_id = str(record.get("notification_room_id") or "").strip()
+    return [room_id] if room_id else None
+
+
+async def _notify_send_text(client: Any, content: str, mentions: list[str] | None = None, target_ids: list[str] | None = None) -> None:
+    if target_ids and _is_personal_wechat_notify_client(client):
+        await client.send_text(content, mentions, target_ids=target_ids)
+        return
+    await client.send_text(content, mentions)
+
+
+async def _notify_send_image(client: Any, image_bytes: bytes, target_ids: list[str] | None = None) -> None:
+    if target_ids and _is_personal_wechat_notify_client(client):
+        await client.send_image(image_bytes, target_ids=target_ids)
+        return
+    await client.send_image(image_bytes)
+
 def _is_personal_wechat_notify_client(client: Any) -> bool:
     return isinstance(client, (LightAgentNotifyClient, WechatBridgeNotifyClient)) or bool(
         getattr(client, "is_wechat_bridge", False)
@@ -7098,14 +7196,15 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
     scheduled_at = str(record.get("scheduled_at") or "")
     content = str(record.get("content") or "")
     resend_kind = kind if kind.endswith("_resend") else f"{kind}_resend"
+    record_target_ids = _record_target_room_ids(record)
     try:
         if kind in {"daily_duty", "daily_duty_test", "daily_duty_resend"}:
             preview_date = _date_from_record(record) or _today_in_tz()
-            await client.send_image(render_daily_duty_image(_build_daily_duty_preview(repo, preview_date)))
+            await _notify_send_image(client, render_daily_duty_image(_build_daily_duty_preview(repo, preview_date)), record_target_ids or _daily_duty_target_room_ids(repo))
         elif kind.startswith("patrol_warning_"):
             fake_event = ReminderEvent(kind=kind, person_name="", send_at=datetime.now(TZ), content=content)
             content = _notification_content_for_event(repo, client, fake_event)
-            await client.send_text(content, _notification_true_mentions_for_event(repo, client, fake_event))
+            await _notify_send_text(client, content, _notification_true_mentions_for_event(repo, client, fake_event), record_target_ids or _patrol_warning_target_room_ids(repo))
         elif _is_shift_reminder_kind(kind) and hasattr(client, "send_image"):
             fake_event = ReminderEvent(
                 kind=kind,
@@ -7114,8 +7213,9 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
                 content=content,
             )
             mentions = _notification_true_mentions_for_event(repo, client, fake_event)
-            await client.send_text(_notification_content_for_event(repo, client, ReminderEvent(kind=kind, person_name=target, send_at=datetime.now(TZ), content="监控班提醒图片如下：")), mentions)
-            await client.send_image(render_shift_reminder_image(fake_event))
+            resend_target_ids = record_target_ids or _configured_person_target_room_ids(repo, target)
+            await _notify_send_text(client, _notification_content_for_event(repo, client, ReminderEvent(kind=kind, person_name=target, send_at=datetime.now(TZ), content="监控班提醒图片如下：")), mentions, resend_target_ids)
+            await _notify_send_image(client, render_shift_reminder_image(fake_event), resend_target_ids)
         else:
             mobile_lookup = _person_mobile_lookup(repo)
             fake_event = ReminderEvent(
@@ -7125,13 +7225,15 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
                 content=content,
             )
             content = _notification_content_for_event(repo, client, fake_event)
-            await client.send_text(content, _notification_true_mentions_for_event(repo, client, fake_event))
+            await _notify_send_text(client, content, _notification_true_mentions_for_event(repo, client, fake_event), record_target_ids or _configured_person_target_room_ids(repo, target))
         repo.save_send_record(
             kind=resend_kind,
             target=target,
             scheduled_at=scheduled_at,
             status="success",
             content=content,
+            notification_room_id=str(record.get("notification_room_id") or ""),
+            notification_room_name=str(record.get("notification_room_name") or ""),
         )
     except WeComError as exc:
         repo.save_send_record(
@@ -7141,6 +7243,8 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
             status="failed",
             content=content,
             error=str(exc),
+            notification_room_id=str(record.get("notification_room_id") or ""),
+            notification_room_name=str(record.get("notification_room_name") or ""),
         )
         raise HTTPException(status_code=502, detail=_sanitize_wechat_ids_for_display(repo, str(exc))) from exc
     except Exception as exc:
@@ -7152,6 +7256,8 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
             status="failed",
             content=content,
             error=error,
+            notification_room_id=str(record.get("notification_room_id") or ""),
+            notification_room_name=str(record.get("notification_room_name") or ""),
         )
         raise HTTPException(status_code=502, detail=_sanitize_wechat_ids_for_display(repo, error)) from exc
     return {"success": True}
@@ -7185,22 +7291,25 @@ async def _send_due_reminders(repo: DutyRepository) -> None:
         if not can_send:
             continue
         content_hash = hashlib.sha256(event.content.encode("utf-8")).hexdigest()[:12]
-        reminder_key = f"{event.person_name}:{event.kind}:{event.send_at.isoformat()}:{event.key_suffix}:{content_hash}"
+        reminder_key = f"{event.person_name}:{event.kind}:{event.send_at.isoformat()}:{event.key_suffix}:{event.target_room_id}:{content_hash}"
         if not repo.mark_sent_once(reminder_key):
             continue
         try:
+            target_ids = _notification_target_room_ids_for_event(event)
             if event.kind == "daily_duty" and webhook_client:
-                await webhook_client.send_image(render_daily_duty_image(_build_daily_duty_preview(repo, now.date())))
+                await _notify_send_image(webhook_client, render_daily_duty_image(_build_daily_duty_preview(repo, now.date())), target_ids)
             elif webhook_client and _should_send_shift_reminder_image(event) and hasattr(webhook_client, "send_image"):
                 mentions = _notification_true_mentions_for_event(repo, webhook_client, event)
-                await webhook_client.send_text(
+                await _notify_send_text(
+                    webhook_client,
                     _notification_content_for_event(repo, webhook_client, ReminderEvent(kind=event.kind, person_name=event.person_name, send_at=event.send_at, content="监控班提醒图片如下：")),
                     mentions,
+                    target_ids,
                 )
-                await webhook_client.send_image(render_shift_reminder_image(event))
+                await _notify_send_image(webhook_client, render_shift_reminder_image(event), target_ids)
             elif webhook_client:
                 mentions = _notification_true_mentions_for_event(repo, webhook_client, event)
-                await webhook_client.send_text(_notification_content_for_event(repo, webhook_client, event), mentions)
+                await _notify_send_text(webhook_client, _notification_content_for_event(repo, webhook_client, event), mentions, target_ids)
             elif person and app_client:
                 await app_client.send_text(person["wecom_userid"], event.content)
             else:
@@ -7211,6 +7320,8 @@ async def _send_due_reminders(repo: DutyRepository) -> None:
                 scheduled_at=event.send_at.isoformat(),
                 status="success",
                 content=event.content,
+                notification_room_id=event.target_room_id,
+                notification_room_name=event.target_room_name,
             )
         except Exception as exc:
             repo.delete_sent_once(reminder_key)
@@ -7221,6 +7332,8 @@ async def _send_due_reminders(repo: DutyRepository) -> None:
                 status="failed",
                 content=event.content,
                 error=str(exc),
+                notification_room_id=event.target_room_id,
+                notification_room_name=event.target_room_name,
             )
             LOGGER.exception("提醒发送失败：%s %s", event.kind, event.person_name)
 

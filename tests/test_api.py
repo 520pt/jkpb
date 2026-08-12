@@ -7044,3 +7044,235 @@ def test_recheck_roster_corrects_mismatched_cells_from_source_image(tmp_path):
             "box": {"x": 257, "y": 120, "width": 24, "height": 33},
         }
     ]
+
+
+
+def test_due_monitored_reminder_routes_to_configured_wechat_room(tmp_path, monkeypatch):
+    sent: list[tuple[str, list[str] | None]] = []
+    images: list[list[str] | None] = []
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2025, 9, 16, 7, 50, 20, tzinfo=tz)
+
+    class FakePersonalWechatClient(main_module.WechatBridgeNotifyClient):
+        def __init__(self):
+            pass
+
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None, *, target_ids: list[str] | None = None):
+            sent.append((content, target_ids))
+
+        async def send_image(self, image_bytes: bytes, *, target_ids: list[str] | None = None):
+            images.append(target_ids)
+
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(
+        sender_type="lightagent",
+        webhook_url="",
+        lightagent_targets=[{"id": "room-1", "name": "一群"}, {"id": "room-2", "name": "二群"}],
+    )
+    repo.save_daily_duty_config(enabled=False)
+    repo.save_roster_month(2025, 9, [{"name": "沐春宇", "days": {"16": "中"}}], "uploads/month.png")
+    repo.save_monitored_person(
+        name="沐春宇",
+        daily_time="07:50",
+        before_shift_minutes=5,
+        notification_room_id="room-2",
+        notification_room_name="二群",
+        enabled=True,
+    )
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(main_module, "_wecom_webhook_client_from_repo", lambda repo: FakePersonalWechatClient())
+
+    asyncio.run(main_module._send_due_reminders(repo))
+
+    assert sent and sent[0][1] == ["room-2"]
+    assert images == [["room-2"]]
+
+
+def test_due_monitored_reminder_without_room_still_broadcasts_default_targets(tmp_path, monkeypatch):
+    sent: list[list[str] | None] = []
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2025, 9, 16, 7, 50, 20, tzinfo=tz)
+
+    class FakePersonalWechatClient(main_module.WechatBridgeNotifyClient):
+        def __init__(self):
+            pass
+
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None, *, target_ids: list[str] | None = None):
+            sent.append(target_ids)
+
+        async def send_image(self, image_bytes: bytes, *, target_ids: list[str] | None = None):
+            sent.append(target_ids)
+
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(
+        sender_type="lightagent",
+        webhook_url="",
+        lightagent_targets=[{"id": "room-1", "name": "一群"}, {"id": "room-2", "name": "二群"}],
+    )
+    repo.save_daily_duty_config(enabled=False)
+    repo.save_roster_month(2025, 9, [{"name": "商邱宏", "days": {"16": "中"}}], "uploads/month.png")
+    repo.save_monitored_person(name="商邱宏", daily_time="07:50", before_shift_minutes=5, enabled=True)
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(main_module, "_wecom_webhook_client_from_repo", lambda repo: FakePersonalWechatClient())
+
+    asyncio.run(main_module._send_due_reminders(repo))
+
+    assert sent and all(target_ids is None for target_ids in sent)
+
+
+def test_daily_duty_and_patrol_config_room_fields_roundtrip(tmp_path):
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_daily_duty_config(notification_room_id="room-1", notification_room_name="一群")
+    repo.save_patrol_warning_config(notification_room_id="room-2", notification_room_name="二群")
+
+    assert repo.get_daily_duty_config()["notification_room_id"] == "room-1"
+    assert repo.get_daily_duty_config()["notification_room_name"] == "一群"
+    assert repo.get_patrol_warning_config()["notification_room_id"] == "room-2"
+    assert repo.get_patrol_warning_config()["notification_room_name"] == "二群"
+
+
+
+def test_due_custom_reminder_routes_to_configured_wechat_room(tmp_path, monkeypatch):
+    sent: list[list[str] | None] = []
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2025, 9, 16, 7, 50, 20, tzinfo=tz)
+
+    class FakePersonalWechatClient(main_module.WechatBridgeNotifyClient):
+        def __init__(self):
+            pass
+
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None, *, target_ids: list[str] | None = None):
+            sent.append(target_ids)
+
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(
+        sender_type="lightagent",
+        webhook_url="",
+        lightagent_targets=[{"id": "room-1", "name": "一群"}, {"id": "room-2", "name": "二群"}],
+    )
+    repo.save_daily_duty_config(enabled=False)
+    repo.save_roster_month(2025, 9, [{"name": "沐春宇", "days": {"16": "早"}}], "uploads/month.png")
+    repo.save_custom_reminder(
+        name="沐春宇",
+        shift_code="early",
+        reminder_time="07:50",
+        message="开启隧道灯",
+        notification_room_id="room-2",
+        notification_room_name="二群",
+    )
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(main_module, "_wecom_webhook_client_from_repo", lambda repo: FakePersonalWechatClient())
+
+    asyncio.run(main_module._send_due_reminders(repo))
+
+    assert sent == [["room-2"]]
+
+
+def test_due_daily_duty_routes_to_configured_wechat_room(tmp_path, monkeypatch):
+    sent_images: list[list[str] | None] = []
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2025, 9, 16, 7, 50, 20, tzinfo=tz)
+
+    class FakePersonalWechatClient(main_module.WechatBridgeNotifyClient):
+        def __init__(self):
+            pass
+
+        async def send_image(self, image_bytes: bytes, *, target_ids: list[str] | None = None):
+            sent_images.append(target_ids)
+
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(
+        sender_type="lightagent",
+        webhook_url="",
+        lightagent_targets=[{"id": "room-1", "name": "一群"}, {"id": "room-2", "name": "二群"}],
+    )
+    repo.save_daily_duty_config(enabled=True, reminder_time="07:50", notification_room_id="room-1", notification_room_name="一群")
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(main_module, "_wecom_webhook_client_from_repo", lambda repo: FakePersonalWechatClient())
+
+    asyncio.run(main_module._send_due_reminders(repo))
+
+    assert sent_images == [["room-1"]]
+
+
+def test_patrol_warning_message_routes_to_configured_wechat_room(tmp_path):
+    sent: list[list[str] | None] = []
+
+    class FakePersonalWechatClient(main_module.WechatBridgeNotifyClient):
+        def __init__(self):
+            pass
+
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None, *, target_ids: list[str] | None = None):
+            sent.append(target_ids)
+
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(
+        sender_type="lightagent",
+        webhook_url="",
+        lightagent_targets=[{"id": "room-1", "name": "一群"}, {"id": "room-2", "name": "二群"}],
+    )
+    repo.save_patrol_warning_config(send_content_mode="text", notification_room_id="room-1", notification_room_name="一群")
+
+    asyncio.run(main_module._send_patrol_warning_message(
+        repo,
+        FakePersonalWechatClient(),
+        kind="patrol_warning_start_test",
+        target="S41",
+        scheduled_at="2025-09-16T07:50:00+08:00",
+        content="预警测试",
+    ))
+
+    assert sent == [["room-1"]]
+
+
+
+def test_resend_record_uses_original_notification_room(tmp_path, monkeypatch):
+    sent: list[list[str] | None] = []
+
+    class FakePersonalWechatClient(main_module.WechatBridgeNotifyClient):
+        def __init__(self):
+            pass
+
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None, *, target_ids: list[str] | None = None):
+            sent.append(target_ids)
+
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/notification-config",
+        json={
+            "sender_type": "lightagent",
+            "lightagent_targets": [{"id": "room-1", "name": "一群"}, {"id": "room-2", "name": "二群"}],
+        },
+    )
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_send_record(
+        kind="custom",
+        target="沐春宇",
+        status="failed",
+        content="开启隧道灯",
+        notification_room_id="room-2",
+        notification_room_name="二群",
+    )
+    record_id = repo.list_send_records()[0]["id"]
+    monkeypatch.setattr(main_module, "_notification_client_from_repo", lambda repo: FakePersonalWechatClient())
+
+    response = client.post(f"/api/send-records/{record_id}/resend")
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert sent == [["room-2"]]
+    resend = repo.list_send_records()[0]
+    assert resend["notification_room_id"] == "room-2"

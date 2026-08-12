@@ -26,6 +26,8 @@ class ReminderEvent:
     mention_wechat_id: str = ""
     mention_wechat_member_id: str = ""
     key_suffix: str = ""
+    target_room_id: str = ""
+    target_room_name: str = ""
 
 
 def _parse_hhmm(value: str) -> time:
@@ -88,6 +90,8 @@ def _dedupe_reminder_events(events: list[ReminderEvent]) -> list[ReminderEvent]:
                 mention_wechat_id=first.mention_wechat_id,
                 mention_wechat_member_id=first.mention_wechat_member_id,
                 key_suffix=first.key_suffix,
+                target_room_id=first.target_room_id,
+                target_room_name=first.target_room_name,
             )
         )
     return sorted(

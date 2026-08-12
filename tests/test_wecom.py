@@ -310,3 +310,24 @@ async def _webhook_non_json_response_raises_readable_error():
     assert "企业微信机器人返回异常" in str(error.value)
 
 
+
+
+
+def test_lightagent_notify_client_can_send_to_selected_target_only():
+    targets: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode("utf-8"))
+        targets.append(body["target"])
+        return httpx.Response(200, json={"success": True})
+
+    client = LightAgentNotifyClient(
+        endpoint_url="https://lightagent.test/api/push/send",
+        targets=["room-1", "room-2"],
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    asyncio.run(client.send_text("测试", target_ids=["room-2"]))
+    asyncio.run(client.send_image(b"png", target_ids=["room-2"]))
+
+    assert targets == ["room-2", "room-2"]

@@ -94,6 +94,8 @@ def test_saving_monitored_people_replaces_existing_name(tmp_path: Path):
             "rest_reminder_enabled": False,
             "rest_reminder_time": "09:00",
             "rest_message_template": "{name} 不用到岗",
+            "notification_room_id": "",
+            "notification_room_name": "",
             "enabled": False,
         }
     ]
@@ -266,6 +268,8 @@ def test_custom_reminder_roundtrip_updates_personnel_contact(tmp_path: Path):
             "shift_code": "night",
             "reminder_time": "21:00",
             "message": "需要关闭隧道灯",
+            "notification_room_id": "",
+            "notification_room_name": "",
             "enabled": True,
             "created_at": repo.list_custom_reminders()[0]["created_at"],
             "updated_at": repo.list_custom_reminders()[0]["updated_at"],
@@ -306,6 +310,8 @@ def test_daily_duty_config_roundtrip(tmp_path: Path):
         "big_driver_names": ["示例庚"],
         "small_driver_names": ["示例丙"],
         "message_template": "今日 {early} {big_drivers}",
+        "notification_room_id": "",
+        "notification_room_name": "",
     }
 
 
@@ -629,6 +635,8 @@ def test_send_records_roundtrip(tmp_path: Path):
             "status": "failed",
             "content": "今日在岗人员",
             "error": "network down",
+            "notification_room_id": "",
+            "notification_room_name": "",
             "created_at": repo.list_send_records()[0]["created_at"],
         }
     ]

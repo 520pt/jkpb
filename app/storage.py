@@ -167,6 +167,8 @@ class DutyRepository:
                     rest_reminder_enabled INTEGER NOT NULL DEFAULT 0,
                     rest_reminder_time TEXT NOT NULL DEFAULT '08:30',
                     rest_message_template TEXT NOT NULL DEFAULT '',
+                    notification_room_id TEXT NOT NULL DEFAULT '',
+                    notification_room_name TEXT NOT NULL DEFAULT '',
                     enabled INTEGER NOT NULL DEFAULT 1
                 );
 
@@ -241,6 +243,8 @@ class DutyRepository:
                     shift_code TEXT NOT NULL,
                     reminder_time TEXT NOT NULL,
                     message TEXT NOT NULL,
+                    notification_room_id TEXT NOT NULL DEFAULT '',
+                    notification_room_name TEXT NOT NULL DEFAULT '',
                     enabled INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -253,6 +257,8 @@ class DutyRepository:
                     big_driver_names_json TEXT NOT NULL DEFAULT '[]',
                     small_driver_names_json TEXT NOT NULL DEFAULT '[]',
                     message_template TEXT NOT NULL DEFAULT '',
+                    notification_room_id TEXT NOT NULL DEFAULT '',
+                    notification_room_name TEXT NOT NULL DEFAULT '',
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -269,6 +275,8 @@ class DutyRepository:
                     status TEXT NOT NULL,
                     content TEXT NOT NULL DEFAULT '',
                     error TEXT NOT NULL DEFAULT '',
+                    notification_room_id TEXT NOT NULL DEFAULT '',
+                    notification_room_name TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -292,6 +300,8 @@ class DutyRepository:
                     send_content_mode TEXT NOT NULL DEFAULT 'both',
                     start_message_template TEXT NOT NULL DEFAULT '',
                     end_message_template TEXT NOT NULL DEFAULT '',
+                    notification_room_id TEXT NOT NULL DEFAULT '',
+                    notification_room_name TEXT NOT NULL DEFAULT '',
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -346,6 +356,10 @@ class DutyRepository:
                 conn.execute("ALTER TABLE monitored_people ADD COLUMN rest_reminder_time TEXT NOT NULL DEFAULT '08:30'")
             if "rest_message_template" not in columns:
                 conn.execute("ALTER TABLE monitored_people ADD COLUMN rest_message_template TEXT NOT NULL DEFAULT ''")
+            if "notification_room_id" not in columns:
+                conn.execute("ALTER TABLE monitored_people ADD COLUMN notification_room_id TEXT NOT NULL DEFAULT ''")
+            if "notification_room_name" not in columns:
+                conn.execute("ALTER TABLE monitored_people ADD COLUMN notification_room_name TEXT NOT NULL DEFAULT ''")
             config_columns = {row["name"] for row in conn.execute("PRAGMA table_info(notification_config)").fetchall()}
             if "sender_type" not in config_columns:
                 conn.execute("ALTER TABLE notification_config ADD COLUMN sender_type TEXT NOT NULL DEFAULT 'wecom_webhook'")
@@ -390,6 +404,16 @@ class DutyRepository:
                 conn.execute("ALTER TABLE personnel_names ADD COLUMN wechat_group_runtime_sender_id TEXT NOT NULL DEFAULT ''")
             if "wechat_group_member_name" not in personnel_columns:
                 conn.execute("ALTER TABLE personnel_names ADD COLUMN wechat_group_member_name TEXT NOT NULL DEFAULT ''")
+            custom_columns = {row["name"] for row in conn.execute("PRAGMA table_info(custom_reminders)").fetchall()}
+            if "notification_room_id" not in custom_columns:
+                conn.execute("ALTER TABLE custom_reminders ADD COLUMN notification_room_id TEXT NOT NULL DEFAULT ''")
+            if "notification_room_name" not in custom_columns:
+                conn.execute("ALTER TABLE custom_reminders ADD COLUMN notification_room_name TEXT NOT NULL DEFAULT ''")
+            daily_columns = {row["name"] for row in conn.execute("PRAGMA table_info(daily_duty_config)").fetchall()}
+            if "notification_room_id" not in daily_columns:
+                conn.execute("ALTER TABLE daily_duty_config ADD COLUMN notification_room_id TEXT NOT NULL DEFAULT ''")
+            if "notification_room_name" not in daily_columns:
+                conn.execute("ALTER TABLE daily_duty_config ADD COLUMN notification_room_name TEXT NOT NULL DEFAULT ''")
             patrol_state_columns = {row["name"] for row in conn.execute("PRAGMA table_info(patrol_warning_state)").fetchall()}
             if "token" not in patrol_state_columns:
                 conn.execute("ALTER TABLE patrol_warning_state ADD COLUMN token TEXT NOT NULL DEFAULT ''")
@@ -403,6 +427,11 @@ class DutyRepository:
                 conn.execute("ALTER TABLE patrol_warning_state ADD COLUMN backoff_until TEXT NOT NULL DEFAULT ''")
             if "last_error" not in patrol_state_columns:
                 conn.execute("ALTER TABLE patrol_warning_state ADD COLUMN last_error TEXT NOT NULL DEFAULT ''")
+            send_record_columns = {row["name"] for row in conn.execute("PRAGMA table_info(send_records)").fetchall()}
+            if "notification_room_id" not in send_record_columns:
+                conn.execute("ALTER TABLE send_records ADD COLUMN notification_room_id TEXT NOT NULL DEFAULT ''")
+            if "notification_room_name" not in send_record_columns:
+                conn.execute("ALTER TABLE send_records ADD COLUMN notification_room_name TEXT NOT NULL DEFAULT ''")
             patrol_config_columns = {row["name"] for row in conn.execute("PRAGMA table_info(patrol_warning_config)").fetchall()}
             if "mention_mobiles" not in patrol_config_columns:
                 conn.execute("ALTER TABLE patrol_warning_config ADD COLUMN mention_mobiles TEXT NOT NULL DEFAULT ''")
@@ -414,6 +443,10 @@ class DutyRepository:
                 conn.execute("ALTER TABLE patrol_warning_config ADD COLUMN start_message_template TEXT NOT NULL DEFAULT ''")
             if "end_message_template" not in patrol_config_columns:
                 conn.execute("ALTER TABLE patrol_warning_config ADD COLUMN end_message_template TEXT NOT NULL DEFAULT ''")
+            if "notification_room_id" not in patrol_config_columns:
+                conn.execute("ALTER TABLE patrol_warning_config ADD COLUMN notification_room_id TEXT NOT NULL DEFAULT ''")
+            if "notification_room_name" not in patrol_config_columns:
+                conn.execute("ALTER TABLE patrol_warning_config ADD COLUMN notification_room_name TEXT NOT NULL DEFAULT ''")
             tunnel_state_columns = {row["name"] for row in conn.execute("PRAGMA table_info(tunnel_mechanical_state)").fetchall()}
             if "refresh_token" not in tunnel_state_columns:
                 conn.execute("ALTER TABLE tunnel_mechanical_state ADD COLUMN refresh_token TEXT NOT NULL DEFAULT ''")
@@ -825,6 +858,8 @@ class DutyRepository:
         rest_reminder_enabled: bool = False,
         rest_reminder_time: str = "08:30",
         rest_message_template: str = DEFAULT_REST_MESSAGE_TEMPLATE,
+        notification_room_id: str = "",
+        notification_room_name: str = "",
         enabled: bool = True,
     ) -> None:
         clean_name = name.strip()
@@ -835,9 +870,10 @@ class DutyRepository:
                 INSERT INTO monitored_people
                     (
                         name, wecom_userid, mention_text, mention_mobile, daily_time, before_shift_minutes,
-                        rest_reminder_enabled, rest_reminder_time, rest_message_template, enabled
+                        rest_reminder_enabled, rest_reminder_time, rest_message_template,
+                        notification_room_id, notification_room_name, enabled
                     )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(name) DO UPDATE SET
                     wecom_userid = excluded.wecom_userid,
                     mention_text = excluded.mention_text,
@@ -847,6 +883,8 @@ class DutyRepository:
                     rest_reminder_enabled = excluded.rest_reminder_enabled,
                     rest_reminder_time = excluded.rest_reminder_time,
                     rest_message_template = excluded.rest_message_template,
+                    notification_room_id = excluded.notification_room_id,
+                    notification_room_name = excluded.notification_room_name,
                     enabled = excluded.enabled
                 """,
                 (
@@ -859,6 +897,8 @@ class DutyRepository:
                     int(rest_reminder_enabled),
                     rest_reminder_time or "08:30",
                     _normalize_rest_message_template(rest_message_template),
+                    str(notification_room_id or "").strip(),
+                    str(notification_room_name or "").strip(),
                     int(enabled),
                 ),
             )
@@ -915,6 +955,8 @@ class DutyRepository:
                 "rest_reminder_enabled": bool(row["rest_reminder_enabled"]),
                 "rest_reminder_time": row["rest_reminder_time"],
                 "rest_message_template": _normalize_rest_message_template(row["rest_message_template"]),
+                "notification_room_id": row["notification_room_id"],
+                "notification_room_name": row["notification_room_name"],
                 "enabled": bool(row["enabled"]),
             }
             wechat_fields = {
@@ -942,6 +984,8 @@ class DutyRepository:
         wechat_group_member_id: str = "",
         wechat_group_runtime_sender_id: str = "",
         wechat_group_member_name: str = "",
+        notification_room_id: str = "",
+        notification_room_name: str = "",
         enabled: bool = True,
         id: int | None = None,
     ) -> int:
@@ -957,11 +1001,13 @@ class DutyRepository:
                         shift_code = ?,
                         reminder_time = ?,
                         message = ?,
+                        notification_room_id = ?,
+                        notification_room_name = ?,
                         enabled = ?,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                     """,
-                    (clean_name, clean_mobile, shift_code, reminder_time, message, int(enabled), int(id)),
+                    (clean_name, clean_mobile, shift_code, reminder_time, message, str(notification_room_id or "").strip(), str(notification_room_name or "").strip(), int(enabled), int(id)),
                 )
                 if cursor.rowcount > 0:
                     reminder_id = int(id)
@@ -969,20 +1015,20 @@ class DutyRepository:
                     cursor = conn.execute(
                         """
                         INSERT INTO custom_reminders
-                            (name, mention_mobile, shift_code, reminder_time, message, enabled)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                            (name, mention_mobile, shift_code, reminder_time, message, notification_room_id, notification_room_name, enabled)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                        (clean_name, clean_mobile, shift_code, reminder_time, message, int(enabled)),
+                        (clean_name, clean_mobile, shift_code, reminder_time, message, str(notification_room_id or "").strip(), str(notification_room_name or "").strip(), int(enabled)),
                     )
                     reminder_id = int(cursor.lastrowid)
             else:
                 cursor = conn.execute(
                     """
                     INSERT INTO custom_reminders
-                        (name, mention_mobile, shift_code, reminder_time, message, enabled)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                        (name, mention_mobile, shift_code, reminder_time, message, notification_room_id, notification_room_name, enabled)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (clean_name, clean_mobile, shift_code, reminder_time, message, int(enabled)),
+                    (clean_name, clean_mobile, shift_code, reminder_time, message, str(notification_room_id or "").strip(), str(notification_room_name or "").strip(), int(enabled)),
                 )
                 reminder_id = int(cursor.lastrowid)
         self.upsert_personnel_contacts(
@@ -1031,6 +1077,8 @@ class DutyRepository:
                 "shift_code": row["shift_code"],
                 "reminder_time": row["reminder_time"],
                 "message": row["message"],
+                "notification_room_id": row["notification_room_id"],
+                "notification_room_name": row["notification_room_name"],
                 "enabled": bool(row["enabled"]),
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
@@ -1371,19 +1419,23 @@ class DutyRepository:
         big_driver_names: list[str] | None = None,
         small_driver_names: list[str] | None = None,
         message_template: str = DEFAULT_DAILY_DUTY_TEMPLATE,
+        notification_room_id: str = "",
+        notification_room_name: str = "",
     ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO daily_duty_config
-                    (id, enabled, reminder_time, big_driver_names_json, small_driver_names_json, message_template)
-                VALUES (1, ?, ?, ?, ?, ?)
+                    (id, enabled, reminder_time, big_driver_names_json, small_driver_names_json, message_template, notification_room_id, notification_room_name)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     enabled = excluded.enabled,
                     reminder_time = excluded.reminder_time,
                     big_driver_names_json = excluded.big_driver_names_json,
                     small_driver_names_json = excluded.small_driver_names_json,
                     message_template = excluded.message_template,
+                    notification_room_id = excluded.notification_room_id,
+                    notification_room_name = excluded.notification_room_name,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -1392,6 +1444,8 @@ class DutyRepository:
                     json.dumps(big_driver_names or [], ensure_ascii=False),
                     json.dumps(small_driver_names or [], ensure_ascii=False),
                     _normalize_daily_duty_template(message_template),
+                    str(notification_room_id or "").strip(),
+                    str(notification_room_name or "").strip(),
                 ),
             )
 
@@ -1405,6 +1459,8 @@ class DutyRepository:
                 "big_driver_names": [],
                 "small_driver_names": [],
                 "message_template": DEFAULT_DAILY_DUTY_TEMPLATE,
+                "notification_room_id": "",
+                "notification_room_name": "",
             }
         return {
             "enabled": bool(row["enabled"]),
@@ -1412,6 +1468,8 @@ class DutyRepository:
             "big_driver_names": json.loads(row["big_driver_names_json"] or "[]"),
             "small_driver_names": json.loads(row["small_driver_names_json"] or "[]"),
             "message_template": _normalize_daily_duty_template(row["message_template"]),
+            "notification_room_id": row["notification_room_id"],
+            "notification_room_name": row["notification_room_name"],
         }
 
     def save_patrol_warning_config(
@@ -1435,6 +1493,8 @@ class DutyRepository:
         send_content_mode: str = "both",
         start_message_template: str = DEFAULT_PATROL_WARNING_START_TEMPLATE,
         end_message_template: str = DEFAULT_PATROL_WARNING_END_TEMPLATE,
+        notification_room_id: str = "",
+        notification_room_name: str = "",
     ) -> None:
         with self._connect() as conn:
             conn.execute(
@@ -1444,9 +1504,10 @@ class DutyRepository:
                         id, enabled, login_url, warning_url, username, password, project_id, platform,
                         route_code, poll_interval_minutes, rows, end_reminder_enabled, end_reminder_interval_hours,
                         end_reminder_window_hours, mention_all, mention_mobiles,
-                        send_content_mode, start_message_template, end_message_template
+                        send_content_mode, start_message_template, end_message_template,
+                        notification_room_id, notification_room_name
                     )
-                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     enabled = excluded.enabled,
                     login_url = excluded.login_url,
@@ -1466,6 +1527,8 @@ class DutyRepository:
                     send_content_mode = excluded.send_content_mode,
                     start_message_template = excluded.start_message_template,
                     end_message_template = excluded.end_message_template,
+                    notification_room_id = excluded.notification_room_id,
+                    notification_room_name = excluded.notification_room_name,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -1487,6 +1550,8 @@ class DutyRepository:
                     _normalize_patrol_send_content_mode(send_content_mode),
                     start_message_template.strip() or DEFAULT_PATROL_WARNING_START_TEMPLATE,
                     _normalize_patrol_end_template(end_message_template),
+                    str(notification_room_id or "").strip(),
+                    str(notification_room_name or "").strip(),
                 ),
             )
 
@@ -1513,6 +1578,8 @@ class DutyRepository:
                 "send_content_mode": "both",
                 "start_message_template": DEFAULT_PATROL_WARNING_START_TEMPLATE,
                 "end_message_template": DEFAULT_PATROL_WARNING_END_TEMPLATE,
+                "notification_room_id": "",
+                "notification_room_name": "",
             }
         return {
             "enabled": bool(row["enabled"]),
@@ -1533,6 +1600,8 @@ class DutyRepository:
             "send_content_mode": _normalize_patrol_send_content_mode(row["send_content_mode"]),
             "start_message_template": row["start_message_template"] or DEFAULT_PATROL_WARNING_START_TEMPLATE,
             "end_message_template": _normalize_patrol_end_template(row["end_message_template"]),
+            "notification_room_id": row["notification_room_id"],
+            "notification_room_name": row["notification_room_name"],
         }
 
     def get_patrol_warning_state(self) -> dict[str, Any]:
@@ -1787,21 +1856,23 @@ class DutyRepository:
         scheduled_at: str = "",
         content: str = "",
         error: str = "",
+        notification_room_id: str = "",
+        notification_room_name: str = "",
     ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO send_records (kind, target, scheduled_at, status, content, error)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO send_records (kind, target, scheduled_at, status, content, error, notification_room_id, notification_room_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (kind, target, scheduled_at, status, content, error),
+                (kind, target, scheduled_at, status, content, error, str(notification_room_id or "").strip(), str(notification_room_name or "").strip()),
             )
 
     def list_send_records(self, limit: int = 100) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, kind, target, scheduled_at, status, content, error, created_at
+                SELECT id, kind, target, scheduled_at, status, content, error, notification_room_id, notification_room_name, created_at
                 FROM send_records
                 ORDER BY id DESC
                 LIMIT ?
@@ -1817,6 +1888,8 @@ class DutyRepository:
                 "status": row["status"],
                 "content": row["content"],
                 "error": row["error"],
+                "notification_room_id": row["notification_room_id"],
+                "notification_room_name": row["notification_room_name"],
                 "created_at": row["created_at"],
             }
             for row in rows
@@ -1826,7 +1899,7 @@ class DutyRepository:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT id, kind, target, scheduled_at, status, content, error, created_at
+                SELECT id, kind, target, scheduled_at, status, content, error, notification_room_id, notification_room_name, created_at
                 FROM send_records
                 WHERE id = ?
                 """,
@@ -1842,6 +1915,8 @@ class DutyRepository:
             "status": row["status"],
             "content": row["content"],
             "error": row["error"],
+            "notification_room_id": row["notification_room_id"],
+            "notification_room_name": row["notification_room_name"],
             "created_at": row["created_at"],
         }
 
@@ -1849,7 +1924,7 @@ class DutyRepository:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, kind, target, scheduled_at, status, content, error, created_at
+                SELECT id, kind, target, scheduled_at, status, content, error, notification_room_id, notification_room_name, created_at
                 FROM send_records
                 WHERE created_at >= ?
                 ORDER BY id DESC
@@ -1865,6 +1940,8 @@ class DutyRepository:
                 "status": row["status"],
                 "content": row["content"],
                 "error": row["error"],
+                "notification_room_id": row["notification_room_id"],
+                "notification_room_name": row["notification_room_name"],
                 "created_at": row["created_at"],
             }
             for row in rows
