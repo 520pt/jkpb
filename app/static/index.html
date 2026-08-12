@@ -2290,8 +2290,331 @@
       .tunnel-asset-grid .wide { grid-column: auto; }
     }
     @media (max-width: 720px) {
+      html, body {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        overflow-x: hidden;
+      }
+      header {
+        max-width: 100%;
+        overflow: hidden;
+        height: auto;
+        min-height: 52px;
+        padding: 10px 12px;
+        align-items: flex-start;
+        gap: 8px;
+      }
+      header h1 { font-size: 16px; line-height: 30px; }
+      .header-actions {
+        min-width: 0;
+        justify-content: flex-end;
+        gap: 8px;
+        font-size: 12px;
+        text-align: right;
+      }
+      .tabs {
+        gap: 6px;
+        padding: 8px 8px 0;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+      }
+      .tab-button {
+        flex: 0 0 auto;
+        min-width: 86px;
+        height: 34px;
+        padding: 0 10px;
+        font-size: 13px;
+      }
+      main { width: 100%; max-width: 100vw; padding: 0 8px 10px; gap: 10px; overflow: hidden; }
+      .body { padding: 10px; }
+      .section-head {
+        align-items: stretch;
+        flex-direction: column;
+        padding: 10px;
+      }
+      .toolbar,
+      .form-row,
+      .settings-actions {
+        width: 100%;
+        align-items: stretch;
+      }
+      .toolbar > *,
+      .form-row > *,
+      .settings-actions > *,
+      .download-link {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .toolbar label,
+      .form-row label,
+      .settings-actions label {
+        display: grid;
+        gap: 6px;
+      }
+      .toolbar input,
+      .toolbar select,
+      .toolbar button,
+      .form-row input,
+      .form-row select,
+      .form-row button,
+      .settings-actions input,
+      .settings-actions select,
+      .settings-actions button {
+        width: 100%;
+      }
+      button,
+      input,
+      select,
+      textarea {
+        max-width: 100%;
+        font-size: 14px;
+      }
+      p, small, strong, span, div, label {
+        overflow-wrap: anywhere;
+      }
+      .tab-page,
+      section,
+      aside,
+      section > *,
+      aside > *,
+      .body,
+      .item,
+      .today-reminder-item,
+      .today-reminder-group,
+      .settings-panel,
+      .side-block {
+        min-width: 0;
+      }
+      input,
+      select,
+      button {
+        min-height: 36px;
+      }
+      #file,
+      .drop-zone {
+        width: 100%;
+        min-width: 0;
+      }
+      .review-layout {
+        grid-template-columns: 1fr;
+      }
+      .image-frame,
+      .table-wrap {
+        height: min(58vh, 420px);
+      }
+      .panel-head {
+        min-height: 40px;
+        height: auto;
+        flex-wrap: wrap;
+        padding: 6px 8px;
+      }
+      .image-context {
+        min-width: 0;
+        flex: 1 1 100%;
+      }
+      #savedPage .body {
+        height: auto;
+        display: block;
+      }
+      #savedPage .saved-wrap,
+      .saved-wrap {
+        max-height: none;
+        height: auto;
+      }
+      .saved-duty-head,
+      .saved-duty-meta,
+      .date-modal-head,
+      .orange-warning-stats-head,
+      .patrol-warning-title-row {
+        align-items: stretch;
+        flex-direction: column;
+        text-align: left;
+      }
+      .saved-duty-pair,
+      .saved-duty-status-row,
+      .saved-duty-grid {
+        grid-template-columns: 1fr;
+      }
+      .settings-shell {
+        display: block;
+        min-height: 0;
+      }
+      .settings-nav {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        padding: 8px;
+        overflow-x: auto;
+        white-space: nowrap;
+        -webkit-overflow-scrolling: touch;
+      }
+      .settings-nav h3,
+      .settings-nav-group {
+        display: none;
+      }
+      .settings-nav button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: auto;
+        min-width: 92px;
+        margin: 0 6px 0 0;
+        white-space: nowrap;
+        text-align: center;
+      }
+      .settings-grid {
+        padding: 10px;
+        min-width: 0;
+      }
+      .settings-panel,
+      .settings-panel.single,
       .settings-panel.wechat-interaction-panel { grid-template-columns: 1fr; }
+      .settings-panel.reminder-card-panel,
+      .side-block.reminder-list-panel {
+        min-height: 0;
+        max-height: none;
+      }
+      .side-block {
+        padding: 10px;
+        min-width: 0;
+      }
+      .stack > label,
+      .field-grid label {
+        display: grid;
+        gap: 6px;
+        min-width: 0;
+      }
+      .stack input,
+      .stack select,
+      .stack textarea,
+      .field-grid input,
+      .field-grid select,
+      .field-grid textarea {
+        width: 100%;
+      }
       .wechat-interaction-editor .item { grid-template-columns: 1fr; }
+      .settings-card-grid,
+      .field-grid,
+      .lightagent-notify-layout,
+      .daily-duty-layout,
+      .tunnel-mechanical-layout,
+      .tunnel-auth-grid,
+      .tunnel-meta-grid,
+      .tunnel-asset-grid,
+      .driver-tag-grid,
+      .tag-input-row,
+      .record-item {
+        grid-template-columns: 1fr;
+      }
+      .notification-channel-switch {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+      }
+      .notification-channel-switch button {
+        min-width: 0;
+      }
+      .wechat-card-grid,
+      .reminder-card-list,
+      .people-list,
+      .events,
+      .records-list,
+      .version-list {
+        max-height: none;
+      }
+      .today-reminders,
+      .today-reminder-item.has-image,
+      .today-reminder-meta {
+        grid-template-columns: 1fr;
+      }
+      .today-reminder-list,
+      .today-reminder-content,
+      .today-reminder-content *,
+      .today-reminder-main {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+      .today-reminder-content br {
+        display: block;
+        content: "";
+      }
+      #recordsPage {
+        height: auto;
+        min-height: 0;
+      }
+      #recordsPage .body {
+        display: block;
+      }
+      .record-item button {
+        width: 100%;
+      }
+      .orange-warning-layout,
+      .orange-warning-card-body,
+      .orange-warning-date-grid,
+      .patrol-delivery-row {
+        grid-template-columns: 1fr;
+      }
+      .orange-warning-stats-panel {
+        padding: 10px;
+      }
+      .orange-warning-stats-table {
+        min-width: 720px;
+      }
+      .orange-warning-stats-table-wrap,
+      .table-wrap,
+      .saved-wrap,
+      .conflict-wrap {
+        max-width: calc(100vw - 36px);
+        -webkit-overflow-scrolling: touch;
+      }
+      .orange-warning-stats-head small,
+      .patrol-warning-query-meta {
+        text-align: left;
+        justify-content: flex-start;
+        white-space: normal;
+      }
+      .tunnel-workspace {
+        grid-template-columns: 1fr;
+      }
+      .tunnel-subnav {
+        position: sticky;
+        top: 0;
+        z-index: 15;
+        min-height: 0;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        padding: 8px;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .tunnel-subnav h3,
+      .tunnel-subnav .status,
+      .tunnel-subnav .settings-nav-group {
+        grid-column: 1 / -1;
+      }
+      .tunnel-panel-stack {
+        padding: 10px;
+        min-width: 0;
+      }
+      .tunnel-result-box {
+        min-height: 180px;
+        max-height: 55vh;
+      }
+      .date-modal {
+        align-items: flex-end;
+        padding: 10px;
+      }
+      .date-modal-card {
+        width: 100%;
+      }
+      .date-modal-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+      }
     }
   </style>
 </head>
