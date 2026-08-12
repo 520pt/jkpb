@@ -5655,6 +5655,7 @@ def test_monitor_person_test_sends_current_form_with_wechat_member(tmp_path, mon
 
     assert response.status_code == 200
     assert response.json()["success"] is True
+    assert response.json()["content"] == "@Alice今天是你的中班"
     assert sent["mentions"] == []
     assert sent["content"] == "@Alice今天是你的中班"
     assert isinstance(sent["image_bytes"], bytes)

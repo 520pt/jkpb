@@ -6911,6 +6911,7 @@ async def _send_test_reminder_event(
     content = _notification_content_for_event(repo, notification_client, event)
     target = event.person_name or "测试消息"
     target_ids = _notification_target_room_ids_for_event(event)
+    sent_content = content
     try:
         if _should_send_shift_reminder_image(event) and hasattr(notification_client, "send_image"):
             intro_event = ReminderEvent(
@@ -6919,7 +6920,8 @@ async def _send_test_reminder_event(
                 send_at=event.send_at,
                 content=_shift_reminder_intro_content(event, personal_wechat=_is_personal_wechat_notify_client(notification_client)),
             )
-            await _notify_send_text(notification_client, _notification_content_for_event(repo, notification_client, intro_event), mentions, target_ids)
+            sent_content = _notification_content_for_event(repo, notification_client, intro_event)
+            await _notify_send_text(notification_client, sent_content, mentions, target_ids)
             await _notify_send_image(notification_client, render_shift_reminder_image(event), target_ids)
         else:
             await _notify_send_text(notification_client, content, mentions, target_ids)
@@ -6954,7 +6956,7 @@ async def _send_test_reminder_event(
             notification_room_name=event.target_room_name,
         )
         raise HTTPException(status_code=502, detail=_sanitize_wechat_ids_for_display(repo, error)) from exc
-    return {"success": True, "content": content, "mentions": mentions}
+    return {"success": True, "content": sent_content, "mentions": mentions}
 
 
 def _bound_wechat_sender_ids(repo: DutyRepository) -> list[str]:
