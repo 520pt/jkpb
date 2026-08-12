@@ -1163,8 +1163,10 @@ def create_app(
 
     @app.post("/api/feature-channel-config/test")
     async def test_feature_channel_config():
-        config = _feature_channel_config_with_env_defaults(repo.get_feature_channel_config())
-        room_id = next(iter(_feature_channel_config_room_ids(config)), "")
+        room_id = next(iter(_notification_wechat_target_room_ids(repo)), "")
+        if not room_id:
+            config = _feature_channel_config_with_env_defaults(repo.get_feature_channel_config())
+            room_id = next(iter(_feature_channel_config_room_ids(config)), "")
         query = WechatQueryRequest(
             text="隧道机电",
             room_id=room_id,
@@ -5981,7 +5983,7 @@ def _plan_patrol_warning_display_events(repo: DutyRepository, target: date, *, n
             )
         )
 
-    if warning.end_time and bool(config.get("end_reminder_enabled", True)):
+    if warning.end_time:
         interval_hours = max(1, int(config.get("end_reminder_interval_hours") or 6))
         window_hours = max(1, int(config.get("end_reminder_window_hours") or 48))
         deadline = warning.end_time + timedelta(hours=window_hours)
@@ -5997,6 +5999,8 @@ def _plan_patrol_warning_display_events(repo: DutyRepository, target: date, *, n
                     )
                 )
             if slot.date() > target:
+                break
+            if not bool(config.get("end_reminder_enabled", True)):
                 break
             slot += timedelta(hours=interval_hours)
     return events
@@ -6016,11 +6020,34 @@ def _patrol_warning_in_display_window(warning: Any, config: dict[str, Any], *, n
 def _patrol_warning_should_send_start(warning: Any, config: dict[str, Any], *, now: datetime) -> bool:
     if warning is None or not _patrol_warning_in_display_window(warning, config, now=now):
         return False
-    start_time = getattr(warning, "start_time", None) or getattr(warning, "create_time", None)
-    if not start_time:
+    timestamps = [
+        value
+        for value in (
+            getattr(warning, "start_time", None),
+            getattr(warning, "create_time", None),
+        )
+        if value is not None
+    ]
+    if not timestamps:
         return True
-    poll_minutes = max(1, int((config or {}).get("poll_interval_minutes") or 10))
-    return now - start_time <= timedelta(minutes=max(60, poll_minutes * 3))
+    freshness_hours = min(max(1, int((config or {}).get("end_reminder_window_hours") or 48)), 48)
+    return now - max(timestamps) <= timedelta(hours=freshness_hours)
+
+
+def _patrol_warning_due_end_slot(warning: Any, config: dict[str, Any], *, now: datetime) -> datetime | None:
+    if warning is None or not _patrol_warning_in_display_window(warning, config, now=now):
+        return None
+    end_time = getattr(warning, "end_time", None)
+    if not end_time or now < end_time:
+        return None
+    if not bool(config.get("end_reminder_enabled", True)):
+        return end_time
+    return due_end_reminder_slot(
+        warning,
+        now=now,
+        interval_hours=int(config.get("end_reminder_interval_hours") or 6),
+        window_hours=int(config.get("end_reminder_window_hours") or 48),
+    )
 
 
 def _today_reminder_group_statuses(repo: DutyRepository, target: date, events: list[ReminderEvent]) -> list[dict[str, str]]:
@@ -6486,8 +6513,6 @@ async def _check_patrol_warning_monitor(repo: DutyRepository) -> None:
             return
 
     webhook_client = _wecom_webhook_client_from_repo(repo)
-    if webhook_client is None:
-        return
 
     route_code = str(config.get("route_code") or "").strip()
     try:
@@ -6553,8 +6578,18 @@ async def _check_patrol_warning_monitor(repo: DutyRepository) -> None:
     if str(state.get("last_start_sent_key") or "") != latest.key:
         if not _patrol_warning_should_send_start(latest, config, now=now):
             repo.save_patrol_warning_state(last_start_sent_key=latest.key)
-            LOGGER.info("跳过历史公路巡查预警开始提醒：%s start=%s", latest.key, latest.start_time or latest.create_time)
+            LOGGER.info(
+                "跳过历史公路巡查预警开始提醒：key=%s start=%s create=%s end=%s now=%s",
+                latest.key,
+                latest.start_time,
+                latest.create_time,
+                latest.end_time,
+                now,
+            )
         else:
+            if webhook_client is None:
+                LOGGER.warning("已检测到公路巡查预警但通知通道不可用：key=%s", latest.key)
+                return
             content = _build_patrol_warning_content(latest, config, now=now, mode="start")
             try:
                 await _send_patrol_warning_message(
@@ -6574,16 +6609,11 @@ async def _check_patrol_warning_monitor(repo: DutyRepository) -> None:
                 LOGGER.exception("公路巡查预警开始提醒发送失败：%s", exc)
                 return
 
-    if not bool(config.get("end_reminder_enabled", True)):
-        return
-
-    slot = due_end_reminder_slot(
-        latest,
-        now=now,
-        interval_hours=int(config.get("end_reminder_interval_hours") or 6),
-        window_hours=int(config.get("end_reminder_window_hours") or 48),
-    )
+    slot = _patrol_warning_due_end_slot(latest, config, now=now)
     if slot is None:
+        return
+    if webhook_client is None:
+        LOGGER.warning("已检测到公路巡查预警结束但通知通道不可用：key=%s slot=%s", latest.key, slot)
         return
     slot_text = slot.isoformat()
     if slot_text == str(repo.get_patrol_warning_state().get("last_end_reminder_slot") or ""):

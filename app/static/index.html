@@ -2966,11 +2966,11 @@
                 </div>
                 <div class="field-grid">
                   <label>轮询间隔（分钟） <input id="patrolPollInterval" type="number" min="1" max="1440" value="10" /></label>
-                  <label class="checkbox-label"><span>启用结束后巡查提醒</span><input id="patrolEndReminderEnabled" type="checkbox" checked /></label>
+                  <label class="checkbox-label"><span>启用结束后周期巡查提醒</span><input id="patrolEndReminderEnabled" type="checkbox" checked /></label>
                 </div>
                 <div class="field-grid">
-                  <label>结束后提醒频率（小时） <input id="patrolEndInterval" type="number" min="1" max="168" value="6" /></label>
-                  <label>结束后巡查窗口（小时） <input id="patrolEndWindow" type="number" min="1" max="720" value="48" /></label>
+                  <label>结束后周期提醒频率（小时） <input id="patrolEndInterval" type="number" min="1" max="168" value="6" /></label>
+                  <label>结束后周期巡查窗口（小时） <input id="patrolEndWindow" type="number" min="1" max="720" value="48" /></label>
                   <div class="patrol-delivery-row">
                     <label>发送内容
                       <select id="patrolSendContentMode">
@@ -6495,7 +6495,7 @@
       if (!latest || !latest.end_time) return null;
       const config = state.patrolWarningConfig || {};
       if (config.end_reminder_enabled === false) {
-        return { done: true, nextAt: null, countdownMs: 0, text: "结束后巡查提醒已关闭" };
+          return { done: true, nextAt: null, countdownMs: 0, text: "预警结束当次提醒保留，结束后周期巡查提醒已关闭" };
       }
       const endAt = new Date(latest.end_time);
       if (Number.isNaN(endAt.getTime())) return null;

@@ -1280,7 +1280,7 @@ def test_today_reminders_include_patrol_warning_events(tmp_path, monkeypatch):
     assert any("mode=end" in event["image_url"] for event in patrol_events if event["kind"] == "patrol_warning_end")
 
 
-def test_today_reminders_omits_patrol_warning_end_events_when_disabled(tmp_path, monkeypatch):
+def test_today_reminders_keeps_first_patrol_warning_end_event_when_followup_disabled(tmp_path, monkeypatch):
     class FrozenDateTime(datetime):
         @classmethod
         def now(cls, tz=None):
@@ -1322,7 +1322,7 @@ def test_today_reminders_omits_patrol_warning_end_events_when_disabled(tmp_path,
     assert response.status_code == 200
     kinds = [event["kind"] for event in response.json()["events"]]
     assert "patrol_warning_start" in kinds
-    assert "patrol_warning_end" not in kinds
+    assert kinds.count("patrol_warning_end") == 1
 
 
 def test_expired_patrol_warning_is_hidden_after_window(tmp_path, monkeypatch):
@@ -1537,6 +1537,123 @@ def test_patrol_warning_monitor_still_sends_fresh_warning(tmp_path, monkeypatch)
     assert repo.get_patrol_warning_state()["last_start_sent_key"] == "warning-new"
 
 
+def test_patrol_warning_monitor_sends_recent_warning_seen_after_start_window(tmp_path, monkeypatch):
+    sent: list[object] = []
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 8, 12, 8, 32, tzinfo=tz)
+
+    class FakeWebhookClient:
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            sent.append(("text", content, mentioned_mobile_list))
+
+        async def send_image(self, image_bytes: bytes):
+            sent.append(("image", image_bytes))
+
+    warning = warning_from_dict(
+        {
+            "key": "warning-recent-late",
+            "route_code": "S41",
+            "route_name": "南涧－宁洱",
+            "warning_level": "3",
+            "warning_level_label": "橙色预警",
+            "start_time": "2026-08-12T03:45:07+08:00",
+            "create_time": "2026-08-12T04:55:02+08:00",
+            "end_time": "2026-08-12T06:40:17+08:00",
+            "start_stake": "K107.000",
+            "end_stake": "K121.000",
+        },
+        main_module.TZ,
+    )
+
+    async def fake_fetch_latest_warning_result(*args, **kwargs):
+        return SimpleNamespace(
+            warning=warning,
+            stats={"total_rows": 1, "matched_rows": 1},
+            token="token",
+            token_expires_at="2026-08-12T17:00:00+08:00",
+            token_reused=False,
+        )
+
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(webhook_url="https://example.test/cgi-bin/webhook/send?key=unit-test")
+    repo.save_patrol_warning_config(
+        enabled=True,
+        login_url="https://example.test/login",
+        warning_url="https://example.test/warninginfo/findPage",
+        username="station-user",
+        password="secret",
+        route_code="S41",
+        end_reminder_enabled=False,
+    )
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(main_module, "fetch_latest_warning_result", fake_fetch_latest_warning_result)
+    monkeypatch.setattr(main_module, "_wecom_webhook_client_from_repo", lambda repo: FakeWebhookClient())
+    monkeypatch.setattr(main_module, "next_poll_time", lambda now, interval_minutes: now)
+
+    asyncio.run(main_module._check_patrol_warning_monitor(repo))
+
+    assert any(item[0] == "text" for item in sent)
+    assert any(item[0] == "image" for item in sent)
+    state = repo.get_patrol_warning_state()
+    assert state["last_start_sent_key"] == "warning-recent-late"
+    assert state["last_end_reminder_slot"] == "2026-08-12T06:40:17+08:00"
+    assert [record["kind"] for record in repo.list_send_records()] == ["patrol_warning_end", "patrol_warning_start"]
+
+
+def test_patrol_warning_monitor_updates_state_without_notification_channel(tmp_path, monkeypatch):
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 8, 12, 8, 32, tzinfo=tz)
+
+    warning = warning_from_dict(
+        {
+            "key": "warning-no-channel",
+            "route_code": "S41",
+            "warning_level": "3",
+            "warning_level_label": "橙色预警",
+            "start_time": "2026-08-12T08:00:00+08:00",
+            "create_time": "2026-08-12T08:05:00+08:00",
+        },
+        main_module.TZ,
+    )
+
+    async def fake_fetch_latest_warning_result(*args, **kwargs):
+        return SimpleNamespace(
+            warning=warning,
+            stats={"total_rows": 1, "matched_rows": 1},
+            token="token",
+            token_expires_at="2026-08-12T17:00:00+08:00",
+            token_reused=False,
+        )
+
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_patrol_warning_config(
+        enabled=True,
+        login_url="https://example.test/login",
+        warning_url="https://example.test/warninginfo/findPage",
+        username="station-user",
+        password="secret",
+        route_code="S41",
+    )
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(main_module, "fetch_latest_warning_result", fake_fetch_latest_warning_result)
+    monkeypatch.setattr(main_module, "_wecom_webhook_client_from_repo", lambda repo: None)
+    monkeypatch.setattr(main_module, "next_poll_time", lambda now, interval_minutes: now)
+
+    asyncio.run(main_module._check_patrol_warning_monitor(repo))
+
+    state = repo.get_patrol_warning_state()
+    assert state["warning_key"] == "warning-no-channel"
+    assert state["warning"]["key"] == "warning-no-channel"
+    assert state["last_checked_at"]
+    assert state["last_start_sent_key"] == ""
+    assert repo.list_send_records() == []
+
+
 def test_confirm_roster_prunes_nonexistent_days_for_common_february(tmp_path):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
@@ -1610,7 +1727,7 @@ def test_review_busy_overlay_is_hidden_until_import_starts(tmp_path):
     html = response.text
     assert 'id="reviewBusyOverlay" class="review-busy-overlay" hidden' in html
     assert ".review-busy-overlay[hidden]" in html
-    assert ".review-busy-overlay[hidden] {\n      display: none;" in html
+    assert re.search(r"\.review-busy-overlay\[hidden\]\s*\{\s*display:\s*none;", html)
 
 
 def test_health_check(tmp_path):
@@ -2782,6 +2899,35 @@ def test_feature_channel_legacy_enabled_switch_does_not_disable_wechat_commands(
     assert response.status_code == 200
     assert response.json()["query_type"] == "patrol_record_template"
     assert client.get("/api/feature-channel-config").json()["config"]["enabled"] is True
+
+
+def test_feature_channel_test_uses_notification_room_when_channels_differ(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/feature-channel-config",
+        json={
+            "wechat_group_room_id": "wgr_old_feature",
+            "wechat_group_room_name": "旧功能群",
+        },
+    )
+    client.post(
+        "/api/notification-config",
+        json={
+            "sender_type": "lightagent",
+            "lightagent_url": "http://lightagent.test/api/push/send",
+            "lightagent_target": "wgr_notify",
+            "lightagent_targets": [{"id": "wgr_notify", "name": "通知群"}],
+        },
+    )
+
+    response = client.post("/api/feature-channel-config/test")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["result"]["query_type"] == "tunnel_mechanical_template"
 
 
 def test_wechat_interaction_config_controls_triggers_and_templates(tmp_path, monkeypatch):
@@ -5161,7 +5307,7 @@ def test_patrol_warning_monitor_refreshes_same_warning_without_resending(tmp_pat
     assert sent == []
 
 
-def test_patrol_warning_monitor_skips_end_reminder_when_disabled(tmp_path, monkeypatch):
+def test_patrol_warning_monitor_still_sends_first_end_reminder_when_followup_disabled(tmp_path, monkeypatch):
     sent: list[object] = []
 
     class FrozenDateTime(datetime):
@@ -5225,8 +5371,12 @@ def test_patrol_warning_monitor_skips_end_reminder_when_disabled(tmp_path, monke
 
     asyncio.run(main_module._check_patrol_warning_monitor(repo))
 
-    assert sent == []
-    assert repo.get_patrol_warning_state()["last_end_reminder_slot"] == ""
+    assert any(item[0] == "text" for item in sent)
+    assert any(item[0] == "image" for item in sent)
+    assert repo.get_patrol_warning_state()["last_end_reminder_slot"] == "2026-07-22T02:00:00+08:00"
+    records = repo.list_send_records()
+    assert len(records) == 1
+    assert records[0]["kind"] == "patrol_warning_end"
 
 
 def test_patrol_warning_monitor_uses_specific_mentions_and_template(tmp_path, monkeypatch):
