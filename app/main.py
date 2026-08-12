@@ -6849,6 +6849,33 @@ def _should_send_shift_reminder_image(event: ReminderEvent) -> bool:
     return _is_shift_reminder_kind(event.kind)
 
 
+def _shift_reminder_intro_content(event: ReminderEvent, *, include_person: bool = True) -> str:
+    lines: list[str] = []
+    for raw_line in str(event.content or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        match = _NEXT_REMINDER_CONTENT_RE.match(line)
+        if match:
+            shift_label = "晚班" if match.group("shift_label") == "夜班" else match.group("shift_label")
+            today = datetime.now(TZ).date()
+            try:
+                reminder_date = date.fromisoformat(match.group("date"))
+            except ValueError:
+                reminder_date = None
+            if event.kind == "monitor_test" or reminder_date == today:
+                day_text = "今天"
+            elif reminder_date == today + timedelta(days=1):
+                day_text = "明天"
+            else:
+                day_text = match.group("date")
+            person = match.group("name").strip() or event.person_name
+            lines.append(f"{person if include_person else ''}{day_text}是你的{shift_label}")
+        else:
+            lines.append(line)
+    return "\n".join(lines) or str(event.content or "").strip() or "监控班提醒"
+
+
 def _is_shift_reminder_kind(kind: str) -> bool:
     value = str(kind or "").strip()
     while value.endswith("_resend"):
@@ -6885,7 +6912,13 @@ async def _send_test_reminder_event(
     target_ids = _notification_target_room_ids_for_event(event)
     try:
         if _should_send_shift_reminder_image(event) and hasattr(notification_client, "send_image"):
-            await _notify_send_text(notification_client, _notification_content_for_event(repo, notification_client, ReminderEvent(kind=event.kind, person_name=event.person_name, send_at=event.send_at, content="监控班提醒图片如下：")), mentions, target_ids)
+            intro_event = ReminderEvent(
+                kind=event.kind,
+                person_name=event.person_name,
+                send_at=event.send_at,
+                content=_shift_reminder_intro_content(event, include_person=not _is_personal_wechat_notify_client(notification_client)),
+            )
+            await _notify_send_text(notification_client, _notification_content_for_event(repo, notification_client, intro_event), mentions, target_ids)
             await _notify_send_image(notification_client, render_shift_reminder_image(event), target_ids)
         else:
             await _notify_send_text(notification_client, content, mentions, target_ids)
@@ -7214,7 +7247,13 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
             )
             mentions = _notification_true_mentions_for_event(repo, client, fake_event)
             resend_target_ids = record_target_ids or _configured_person_target_room_ids(repo, target)
-            await _notify_send_text(client, _notification_content_for_event(repo, client, ReminderEvent(kind=kind, person_name=target, send_at=datetime.now(TZ), content="监控班提醒图片如下：")), mentions, resend_target_ids)
+            intro_event = ReminderEvent(
+                kind=kind,
+                person_name=target,
+                send_at=datetime.now(TZ),
+                content=_shift_reminder_intro_content(fake_event, include_person=not _is_personal_wechat_notify_client(client)),
+            )
+            await _notify_send_text(client, _notification_content_for_event(repo, client, intro_event), mentions, resend_target_ids)
             await _notify_send_image(client, render_shift_reminder_image(fake_event), resend_target_ids)
         else:
             mobile_lookup = _person_mobile_lookup(repo)
@@ -7302,7 +7341,16 @@ async def _send_due_reminders(repo: DutyRepository) -> None:
                 mentions = _notification_true_mentions_for_event(repo, webhook_client, event)
                 await _notify_send_text(
                     webhook_client,
-                    _notification_content_for_event(repo, webhook_client, ReminderEvent(kind=event.kind, person_name=event.person_name, send_at=event.send_at, content="监控班提醒图片如下：")),
+                    _notification_content_for_event(
+                        repo,
+                        webhook_client,
+                        ReminderEvent(
+                            kind=event.kind,
+                            person_name=event.person_name,
+                            send_at=event.send_at,
+                            content=_shift_reminder_intro_content(event, include_person=not _is_personal_wechat_notify_client(webhook_client)),
+                        ),
+                    ),
                     mentions,
                     target_ids,
                 )

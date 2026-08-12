@@ -5656,8 +5656,7 @@ def test_monitor_person_test_sends_current_form_with_wechat_member(tmp_path, mon
     assert response.status_code == 200
     assert response.json()["success"] is True
     assert sent["mentions"] == []
-    assert sent["content"].startswith("@Alice\n")
-    assert sent["content"].endswith("监控班提醒图片如下：")
+    assert sent["content"] == "@Alice\n今天是你的中班"
     assert isinstance(sent["image_bytes"], bytes)
     assert sent["image_bytes"].startswith(b"\x89PNG")
     records = client.get("/api/send-records").json()["records"]
@@ -6218,8 +6217,7 @@ def test_due_monitored_reminder_uses_saved_wechat_member_for_personal_wechat(tmp
     asyncio.run(main_module._send_due_reminders(repo))
 
     assert sent["mentions"] == []
-    assert sent["content"].startswith("@Alice\n")
-    assert sent["content"].endswith("监控班提醒图片如下：")
+    assert sent["content"] == "@Alice\n今天是你的中班"
     assert isinstance(sent["image_bytes"], bytes)
     assert sent["image_bytes"].startswith(b"\x89PNG")
     records = repo.list_send_records()
@@ -6918,7 +6916,7 @@ def test_resend_failed_text_record_sends_again_and_records_result(tmp_path, monk
 
     assert response.status_code == 200
     assert response.json()["success"] is True
-    assert sent["content"] == "监控班提醒图片如下："
+    assert sent["content"] == "补发内容"
     assert sent["mobiles"] == ["10000000000"]
     assert sent["image_bytes"].startswith(b"\x89PNG")
     records = client.get("/api/send-records").json()["records"]
