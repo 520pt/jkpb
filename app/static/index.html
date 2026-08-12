@@ -2296,43 +2296,120 @@
         min-width: 0;
         overflow-x: hidden;
       }
+      body {
+        background: #f3f6fb;
+        padding-bottom: calc(86px + env(safe-area-inset-bottom));
+      }
       header {
+        position: sticky;
+        top: 0;
+        z-index: 60;
         max-width: 100%;
         overflow: hidden;
         height: auto;
         min-height: 52px;
-        padding: 10px 12px;
-        align-items: flex-start;
+        padding: 10px 14px;
+        align-items: center;
         gap: 8px;
+        background: rgba(255, 255, 255, 0.94);
+        color: var(--ink);
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+        backdrop-filter: blur(14px);
       }
-      header h1 { font-size: 16px; line-height: 30px; }
+      header h1 { font-size: 18px; line-height: 30px; }
       .header-actions {
         min-width: 0;
         justify-content: flex-end;
         gap: 8px;
         font-size: 12px;
         text-align: right;
+        color: var(--muted);
+      }
+      .logout-link {
+        color: var(--blue);
+        background: #eff6ff;
+        border-radius: 999px;
+        padding: 6px 10px;
       }
       .tabs {
-        gap: 6px;
-        padding: 8px 8px 0;
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 70;
+        gap: 4px;
+        min-height: calc(74px + env(safe-area-inset-bottom));
+        padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+        background: rgba(255, 255, 255, 0.96);
+        border-top: 1px solid rgba(216, 222, 232, 0.9);
+        box-shadow: 0 -12px 30px rgba(15, 23, 42, 0.12);
         overflow-x: auto;
+        overflow-y: hidden;
         -webkit-overflow-scrolling: touch;
-        scrollbar-width: thin;
+        scrollbar-width: none;
+        backdrop-filter: blur(16px);
+      }
+      .tabs::-webkit-scrollbar {
+        display: none;
       }
       .tab-button {
         flex: 0 0 auto;
-        min-width: 86px;
-        height: 34px;
-        padding: 0 10px;
-        font-size: 13px;
+        display: inline-grid;
+        place-items: center;
+        align-content: center;
+        gap: 3px;
+        min-width: 64px;
+        height: 58px;
+        padding: 5px 8px;
+        border: 0;
+        border-radius: 18px;
+        background: transparent;
+        color: #64748b;
+        font-size: 0;
+        line-height: 1;
       }
-      main { width: 100%; max-width: 100vw; padding: 0 8px 10px; gap: 10px; overflow: hidden; }
+      .tab-button::before {
+        content: attr(data-icon);
+        display: block;
+        font-size: 20px;
+        line-height: 24px;
+      }
+      .tab-button::after {
+        content: attr(data-mobile-label);
+        display: block;
+        max-width: 56px;
+        font-size: 11px;
+        line-height: 14px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .tab-button.active {
+        background: #eff6ff;
+        color: var(--blue);
+        box-shadow: inset 0 0 0 1px #bfdbfe;
+      }
+      main {
+        width: 100%;
+        max-width: 100vw;
+        padding: 10px 10px 12px;
+        gap: 12px;
+        overflow: hidden;
+      }
+      section, aside {
+        border-radius: 18px;
+        border-color: #e2e8f0;
+        box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+      }
       .body { padding: 10px; }
       .section-head {
         align-items: stretch;
         flex-direction: column;
-        padding: 10px;
+        padding: 12px;
+        border-bottom-color: #edf2f7;
+      }
+      .section-head h2 {
+        font-size: 18px;
       }
       .toolbar,
       .form-row,
@@ -2678,14 +2755,14 @@
   </div>
 
   <nav class="tabs">
-    <button class="tab-button active" data-tab="today">今日提醒</button>
-    <button class="tab-button" data-tab="review">排班核对</button>
-    <button class="tab-button" data-tab="saved">已导入排班</button>
-    <button class="tab-button" data-tab="tunnelMechanical">隧道机电</button>
-    <button class="tab-button" data-tab="orangeWarning">橙色预警查询</button>
-    <button class="tab-button" data-tab="settings">配置中心</button>
-    <button class="tab-button" data-tab="records">发送记录</button>
-    <button class="tab-button" data-tab="status">系统状态</button>
+    <button class="tab-button active" data-tab="today" data-icon="🔔" data-mobile-label="提醒">今日提醒</button>
+    <button class="tab-button" data-tab="review" data-icon="📷" data-mobile-label="核对">排班核对</button>
+    <button class="tab-button" data-tab="saved" data-icon="📅" data-mobile-label="排班">已导入排班</button>
+    <button class="tab-button" data-tab="tunnelMechanical" data-icon="📝" data-mobile-label="机电">隧道机电</button>
+    <button class="tab-button" data-tab="orangeWarning" data-icon="🚧" data-mobile-label="预警">橙色预警查询</button>
+    <button class="tab-button" data-tab="settings" data-icon="⚙️" data-mobile-label="配置">配置中心</button>
+    <button class="tab-button" data-tab="records" data-icon="📨" data-mobile-label="记录">发送记录</button>
+    <button class="tab-button" data-tab="status" data-icon="📊" data-mobile-label="状态">系统状态</button>
   </nav>
 
   <main>

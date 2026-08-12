@@ -76,7 +76,7 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-cache, max-age=0, must-revalidate"
     html = response.text
-    assert 'data-tab="today">今日提醒' in html
+    assert 'data-tab="today" data-icon="🔔" data-mobile-label="提醒">今日提醒' in html
     assert '<section id="todayPage" class="tab-page">' in html
     assert '<section id="reviewPage" class="tab-page hidden">' in html
     assert 'id="personName" list="personnelNameOptions" placeholder="选择或输入姓名"' in html
@@ -115,9 +115,9 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert "await loadTodayReminders();" in html
     assert 'id="patrolSendContentMode"' in html
     assert '<option value="image">仅图片</option>' in html
-    assert 'data-tab="tunnelMechanical">隧道机电' in html
-    assert 'data-tab="orangeWarning">橙色预警查询' in html
-    assert 'data-tab="settings">配置中心' in html
+    assert 'data-tab="tunnelMechanical" data-icon="📝" data-mobile-label="机电">隧道机电' in html
+    assert 'data-tab="orangeWarning" data-icon="🚧" data-mobile-label="预警">橙色预警查询' in html
+    assert 'data-tab="settings" data-icon="⚙️" data-mobile-label="配置">配置中心' in html
     assert 'id="settingsOverview"' in html
     assert 'id="exportConfigBtn"' in html
     assert 'id="importConfigBtn"' in html
