@@ -6849,7 +6849,7 @@ def _should_send_shift_reminder_image(event: ReminderEvent) -> bool:
     return _is_shift_reminder_kind(event.kind)
 
 
-def _shift_reminder_intro_content(event: ReminderEvent, *, include_person: bool = True) -> str:
+def _shift_reminder_intro_content(event: ReminderEvent, *, personal_wechat: bool = False) -> str:
     lines: list[str] = []
     for raw_line in str(event.content or "").splitlines():
         line = raw_line.strip()
@@ -6870,7 +6870,8 @@ def _shift_reminder_intro_content(event: ReminderEvent, *, include_person: bool 
             else:
                 day_text = match.group("date")
             person = match.group("name").strip() or event.person_name
-            lines.append(f"{person if include_person else ''}{day_text}是你的{shift_label}")
+            prefix = f"@{person}" if personal_wechat and person else f"{person}"
+            lines.append(f"{prefix}{day_text}是你的{shift_label}")
         else:
             lines.append(line)
     return "\n".join(lines) or str(event.content or "").strip() or "监控班提醒"
@@ -6916,7 +6917,7 @@ async def _send_test_reminder_event(
                 kind=event.kind,
                 person_name=event.person_name,
                 send_at=event.send_at,
-                content=_shift_reminder_intro_content(event, include_person=not _is_personal_wechat_notify_client(notification_client)),
+                content=_shift_reminder_intro_content(event, personal_wechat=_is_personal_wechat_notify_client(notification_client)),
             )
             await _notify_send_text(notification_client, _notification_content_for_event(repo, notification_client, intro_event), mentions, target_ids)
             await _notify_send_image(notification_client, render_shift_reminder_image(event), target_ids)
@@ -7251,7 +7252,7 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
                 kind=kind,
                 person_name=target,
                 send_at=datetime.now(TZ),
-                content=_shift_reminder_intro_content(fake_event, include_person=not _is_personal_wechat_notify_client(client)),
+                content=_shift_reminder_intro_content(fake_event, personal_wechat=_is_personal_wechat_notify_client(client)),
             )
             await _notify_send_text(client, _notification_content_for_event(repo, client, intro_event), mentions, resend_target_ids)
             await _notify_send_image(client, render_shift_reminder_image(fake_event), resend_target_ids)
@@ -7348,7 +7349,7 @@ async def _send_due_reminders(repo: DutyRepository) -> None:
                             kind=event.kind,
                             person_name=event.person_name,
                             send_at=event.send_at,
-                            content=_shift_reminder_intro_content(event, include_person=not _is_personal_wechat_notify_client(webhook_client)),
+                            content=_shift_reminder_intro_content(event, personal_wechat=_is_personal_wechat_notify_client(webhook_client)),
                         ),
                     ),
                     mentions,
