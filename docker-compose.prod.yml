@@ -27,6 +27,11 @@ services:
       # 可选：只给智慧养护/隧道机电接口使用的代理出口。
       # 留空不会启用；不会影响企业微信、个人微信群、GitHub 或其他外联。
       DUTY_REMINDER_TUNNEL_PROXY: "${DUTY_REMINDER_TUNNEL_PROXY:-}"
+
+      # 可选：企业微信智能机器人双向交互。也可以部署后在网页「配置中心 → 消息通知渠道」填写。
+      WECOM_AIBOT_ENABLED: "${WECOM_AIBOT_ENABLED:-false}"
+      WECOM_AIBOT_ID: "${WECOM_AIBOT_ID:-}"
+      WECOM_AIBOT_SECRET: "${WECOM_AIBOT_SECRET:-}"
     volumes:
       # 保存数据库、提醒配置、排班数据、隧道机电配置、公路巡查配置。
       - ./data:/app/data

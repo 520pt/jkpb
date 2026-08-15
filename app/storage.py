@@ -176,6 +176,9 @@ class DutyRepository:
                     id INTEGER PRIMARY KEY CHECK (id = 1),
                     sender_type TEXT NOT NULL DEFAULT 'wecom_webhook',
                     webhook_url TEXT NOT NULL DEFAULT '',
+                    wecom_aibot_enabled INTEGER NOT NULL DEFAULT 0,
+                    wecom_aibot_id TEXT NOT NULL DEFAULT '',
+                    wecom_aibot_secret TEXT NOT NULL DEFAULT '',
                     lightagent_url TEXT NOT NULL DEFAULT '',
                     lightagent_token TEXT NOT NULL DEFAULT '',
                     lightagent_target TEXT NOT NULL DEFAULT '',
@@ -228,6 +231,7 @@ class DutyRepository:
                 CREATE TABLE IF NOT EXISTS personnel_names (
                     name TEXT PRIMARY KEY,
                     mention_mobile TEXT NOT NULL DEFAULT '',
+                    wecom_userid TEXT NOT NULL DEFAULT '',
                     wechat_group_room_id TEXT NOT NULL DEFAULT '',
                     wechat_group_room_name TEXT NOT NULL DEFAULT '',
                     wechat_group_member_id TEXT NOT NULL DEFAULT '',
@@ -365,6 +369,12 @@ class DutyRepository:
                 conn.execute("ALTER TABLE notification_config ADD COLUMN sender_type TEXT NOT NULL DEFAULT 'wecom_webhook'")
             if "message_template" not in config_columns:
                 conn.execute("ALTER TABLE notification_config ADD COLUMN message_template TEXT NOT NULL DEFAULT ''")
+            if "wecom_aibot_enabled" not in config_columns:
+                conn.execute("ALTER TABLE notification_config ADD COLUMN wecom_aibot_enabled INTEGER NOT NULL DEFAULT 0")
+            if "wecom_aibot_id" not in config_columns:
+                conn.execute("ALTER TABLE notification_config ADD COLUMN wecom_aibot_id TEXT NOT NULL DEFAULT ''")
+            if "wecom_aibot_secret" not in config_columns:
+                conn.execute("ALTER TABLE notification_config ADD COLUMN wecom_aibot_secret TEXT NOT NULL DEFAULT ''")
             if "lightagent_url" not in config_columns:
                 conn.execute("ALTER TABLE notification_config ADD COLUMN lightagent_url TEXT NOT NULL DEFAULT ''")
             if "lightagent_token" not in config_columns:
@@ -377,6 +387,9 @@ class DutyRepository:
                 conn.execute("ALTER TABLE notification_config ADD COLUMN mention_mode TEXT NOT NULL DEFAULT 'person'")
             if "mention_targets" not in config_columns:
                 conn.execute("ALTER TABLE notification_config ADD COLUMN mention_targets TEXT NOT NULL DEFAULT ''")
+            personnel_columns = {row["name"] for row in conn.execute("PRAGMA table_info(personnel_names)").fetchall()}
+            if "wecom_userid" not in personnel_columns:
+                conn.execute("ALTER TABLE personnel_names ADD COLUMN wecom_userid TEXT NOT NULL DEFAULT ''")
             feature_columns = {row["name"] for row in conn.execute("PRAGMA table_info(feature_channel_config)").fetchall()}
             for column, definition in {
                 "enabled": "INTEGER NOT NULL DEFAULT 1",
@@ -664,6 +677,7 @@ class DutyRepository:
                 continue
             values = {
                 "mention_mobile": str(contact.get("mention_mobile") or "").strip(),
+                "wecom_userid": str(contact.get("wecom_userid") or "").strip(),
                 "wechat_group_room_id": str(contact.get("wechat_group_room_id") or "").strip(),
                 "wechat_group_room_name": str(contact.get("wechat_group_room_name") or "").strip(),
                 "wechat_group_member_id": str(contact.get("wechat_group_member_id") or "").strip(),
@@ -674,6 +688,7 @@ class DutyRepository:
                 name,
                 {
                     "mention_mobile": "",
+                    "wecom_userid": "",
                     "wechat_group_room_id": "",
                     "wechat_group_room_name": "",
                     "wechat_group_member_id": "",
@@ -689,14 +704,18 @@ class DutyRepository:
                 conn.execute(
                     """
                     INSERT INTO personnel_names (
-                        name, mention_mobile, wechat_group_room_id, wechat_group_room_name,
+                        name, mention_mobile, wecom_userid, wechat_group_room_id, wechat_group_room_name,
                         wechat_group_member_id, wechat_group_runtime_sender_id, wechat_group_member_name
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(name) DO UPDATE SET
                         mention_mobile = CASE
                             WHEN excluded.mention_mobile != '' THEN excluded.mention_mobile
                             ELSE personnel_names.mention_mobile
+                        END,
+                        wecom_userid = CASE
+                            WHEN excluded.wecom_userid != '' THEN excluded.wecom_userid
+                            ELSE personnel_names.wecom_userid
                         END,
                         wechat_group_room_id = CASE
                             WHEN excluded.wechat_group_room_id != '' THEN excluded.wechat_group_room_id
@@ -723,6 +742,7 @@ class DutyRepository:
                     (
                         name,
                         values["mention_mobile"],
+                        values["wecom_userid"],
                         values["wechat_group_room_id"],
                         values["wechat_group_room_name"],
                         values["wechat_group_member_id"],
@@ -757,12 +777,13 @@ class DutyRepository:
                 conn.execute(
                     """
                     INSERT INTO personnel_names (
-                        name, mention_mobile, wechat_group_room_id, wechat_group_room_name,
+                        name, mention_mobile, wecom_userid, wechat_group_room_id, wechat_group_room_name,
                         wechat_group_member_id, wechat_group_runtime_sender_id, wechat_group_member_name
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(name) DO UPDATE SET
                         mention_mobile = excluded.mention_mobile,
+                        wecom_userid = excluded.wecom_userid,
                         wechat_group_room_id = excluded.wechat_group_room_id,
                         wechat_group_room_name = excluded.wechat_group_room_name,
                         wechat_group_member_id = excluded.wechat_group_member_id,
@@ -773,6 +794,7 @@ class DutyRepository:
                     (
                         name,
                         str(contact.get("mention_mobile") or "").strip(),
+                        str(contact.get("wecom_userid") or "").strip(),
                         str(contact.get("wechat_group_room_id") or "").strip(),
                         str(contact.get("wechat_group_room_name") or "").strip(),
                         str(contact.get("wechat_group_member_id") or "").strip(),
@@ -809,6 +831,26 @@ class DutyRepository:
                 params,
             )
 
+    def clear_wecom_binding_for_userid(self, userid: str, *, except_name: str = "") -> None:
+        clean = str(userid or "").strip()
+        if not clean:
+            return
+        params = [clean]
+        where_name = ""
+        if except_name.strip():
+            where_name = " AND name != ?"
+            params.append(except_name.strip())
+        with self._connect() as conn:
+            conn.execute(
+                f"""
+                UPDATE personnel_names
+                SET wecom_userid = '',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE wecom_userid = ?{where_name}
+                """,
+                params,
+            )
+
     def list_personnel_names(self) -> list[str]:
         with self._connect() as conn:
             rows = conn.execute("SELECT name FROM personnel_names ORDER BY name").fetchall()
@@ -819,7 +861,7 @@ class DutyRepository:
             rows = conn.execute(
                 """
                 SELECT
-                    name, mention_mobile, wechat_group_room_id, wechat_group_room_name,
+                    name, mention_mobile, wecom_userid, wechat_group_room_id, wechat_group_room_name,
                     wechat_group_member_id, wechat_group_runtime_sender_id, wechat_group_member_name
                 FROM personnel_names
                 ORDER BY name
@@ -828,6 +870,8 @@ class DutyRepository:
         people = []
         for row in rows:
             item = {"name": row["name"], "mention_mobile": row["mention_mobile"]}
+            if str(row["wecom_userid"] or "").strip():
+                item["wecom_userid"] = row["wecom_userid"]
             wechat_fields = {
                 "wechat_group_room_id": row["wechat_group_room_id"],
                 "wechat_group_room_name": row["wechat_group_room_name"],
@@ -1099,6 +1143,9 @@ class DutyRepository:
         self,
         *,
         webhook_url: str,
+        wecom_aibot_enabled: bool = False,
+        wecom_aibot_id: str = "",
+        wecom_aibot_secret: str = "",
         message_template: str = DEFAULT_MESSAGE_TEMPLATE,
         sender_type: str = "wecom_webhook",
         lightagent_url: str = "",
@@ -1116,11 +1163,14 @@ class DutyRepository:
             conn.execute(
                 """
                 INSERT INTO notification_config
-                    (id, sender_type, webhook_url, lightagent_url, lightagent_token, lightagent_target, lightagent_targets_json, mention_mode, mention_targets, message_template)
-                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, sender_type, webhook_url, wecom_aibot_enabled, wecom_aibot_id, wecom_aibot_secret, lightagent_url, lightagent_token, lightagent_target, lightagent_targets_json, mention_mode, mention_targets, message_template)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     sender_type = excluded.sender_type,
                     webhook_url = excluded.webhook_url,
+                    wecom_aibot_enabled = excluded.wecom_aibot_enabled,
+                    wecom_aibot_id = excluded.wecom_aibot_id,
+                    wecom_aibot_secret = excluded.wecom_aibot_secret,
                     lightagent_url = excluded.lightagent_url,
                     lightagent_token = excluded.lightagent_token,
                     lightagent_target = excluded.lightagent_target,
@@ -1133,6 +1183,9 @@ class DutyRepository:
                 (
                     _normalize_notification_sender_type(sender_type),
                     webhook_url,
+                    int(bool(wecom_aibot_enabled)),
+                    str(wecom_aibot_id or "").strip(),
+                    str(wecom_aibot_secret or "").strip(),
                     lightagent_url,
                     lightagent_token,
                     primary_target,
@@ -1147,7 +1200,7 @@ class DutyRepository:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT sender_type, webhook_url, lightagent_url, lightagent_token, lightagent_target, lightagent_targets_json, mention_mode, mention_targets, message_template
+                SELECT sender_type, webhook_url, wecom_aibot_enabled, wecom_aibot_id, wecom_aibot_secret, lightagent_url, lightagent_token, lightagent_target, lightagent_targets_json, mention_mode, mention_targets, message_template
                 FROM notification_config
                 WHERE id = 1
                 """
@@ -1156,6 +1209,9 @@ class DutyRepository:
             return {
                 "sender_type": "wecom_webhook",
                 "webhook_url": "",
+                "wecom_aibot_enabled": False,
+                "wecom_aibot_id": "",
+                "wecom_aibot_secret": "",
                 "lightagent_url": "",
                 "lightagent_token": "",
                 "lightagent_target": "",
@@ -1170,6 +1226,9 @@ class DutyRepository:
         return {
             "sender_type": _normalize_notification_sender_type(row["sender_type"]),
             "webhook_url": row["webhook_url"],
+            "wecom_aibot_enabled": bool(row["wecom_aibot_enabled"]),
+            "wecom_aibot_id": row["wecom_aibot_id"],
+            "wecom_aibot_secret": row["wecom_aibot_secret"],
             "lightagent_url": row["lightagent_url"],
             "lightagent_token": row["lightagent_token"],
             "lightagent_target": row["lightagent_target"],

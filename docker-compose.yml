@@ -22,6 +22,9 @@ services:
       WECOM_CORP_ID: "${WECOM_CORP_ID:-}"
       WECOM_CORP_SECRET: "${WECOM_CORP_SECRET:-}"
       WECOM_AGENT_ID: "${WECOM_AGENT_ID:-}"
+      WECOM_AIBOT_ENABLED: "${WECOM_AIBOT_ENABLED:-false}"
+      WECOM_AIBOT_ID: "${WECOM_AIBOT_ID:-}"
+      WECOM_AIBOT_SECRET: "${WECOM_AIBOT_SECRET:-}"
     ports:
       - "${APP_PORT:-8080}:8080"
     volumes:

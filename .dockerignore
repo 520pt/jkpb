@@ -2,6 +2,7 @@
 .git
 .pytest-tmp
 __pycache__
+node_modules
 .pytest_cache
 LightAgent
 data

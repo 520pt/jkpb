@@ -216,6 +216,35 @@ def test_clear_wechat_binding_for_member_preserves_mobile_and_except_name(tmp_pa
     ]
 
 
+def test_wecom_userid_binding_is_independent_from_personal_wechat_binding(tmp_path: Path):
+    repo = DutyRepository(tmp_path / "duty.db")
+    repo.upsert_personnel_contacts(
+        [
+            {
+                "name": "Alice",
+                "wecom_userid": "alice.wecom",
+                "wechat_group_member_id": "stable-member-1",
+            },
+            {"name": "Bob", "wecom_userid": "alice.wecom"},
+        ]
+    )
+
+    repo.clear_wecom_binding_for_userid("alice.wecom", except_name="Bob")
+
+    assert repo.list_personnel() == [
+        {
+            "name": "Alice",
+            "mention_mobile": "",
+            "wechat_group_room_id": "",
+            "wechat_group_room_name": "",
+            "wechat_group_member_id": "stable-member-1",
+            "wechat_group_runtime_sender_id": "",
+            "wechat_group_member_name": "",
+        },
+        {"name": "Bob", "mention_mobile": "", "wecom_userid": "alice.wecom"},
+    ]
+
+
 def test_monitored_people_include_saved_wechat_binding(tmp_path: Path):
     repo = DutyRepository(tmp_path / "duty.db")
 
@@ -439,6 +468,9 @@ def test_saving_notification_config_replaces_existing_value(tmp_path: Path):
     assert config == {
         "sender_type": "wecom_webhook",
         "webhook_url": "https://example.test/new",
+        "wecom_aibot_enabled": False,
+        "wecom_aibot_id": "",
+        "wecom_aibot_secret": "",
         "lightagent_url": "",
         "lightagent_token": "",
         "lightagent_target": "",
@@ -447,6 +479,22 @@ def test_saving_notification_config_replaces_existing_value(tmp_path: Path):
         "mention_targets": "",
         "message_template": "new {name}",
     }
+
+
+def test_notification_config_roundtrips_wecom_aibot_credentials(tmp_path: Path):
+    repo = DutyRepository(tmp_path / "duty.db")
+
+    repo.save_notification_config(
+        webhook_url="https://example.test/webhook",
+        wecom_aibot_enabled=True,
+        wecom_aibot_id="bot-id",
+        wecom_aibot_secret="bot-secret",
+    )
+
+    config = repo.get_notification_config()
+    assert config["wecom_aibot_enabled"] is True
+    assert config["wecom_aibot_id"] == "bot-id"
+    assert config["wecom_aibot_secret"] == "bot-secret"
 
 
 def test_notification_config_roundtrips_multiple_lightagent_targets(tmp_path: Path):

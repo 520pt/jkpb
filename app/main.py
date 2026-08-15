@@ -58,6 +58,7 @@ from app.storage import (
 )
 from app.tunnel_mechanical_image import render_tunnel_mechanical_result_image
 from app.wecom import LightAgentNotifyClient, WeComClient, WeComError, WeComWebhookClient
+from app.wecom_aibot import WeComAiBotManager
 from app.wechat_query_image import render_wechat_query_image
 from app.wechat_bridge.manager import get_wechat_bridge_manager, wechat_bridge_enabled
 from app.wechat_bridge.notify import WechatBridgeNotifyClient
@@ -153,6 +154,9 @@ class LightAgentTargetRequest(BaseModel):
 class NotificationConfigRequest(BaseModel):
     sender_type: str = ""
     webhook_url: str = ""
+    wecom_aibot_enabled: bool = False
+    wecom_aibot_id: str = ""
+    wecom_aibot_secret: str = ""
     lightagent_url: str = ""
     lightagent_token: str = ""
     lightagent_target: str = ""
@@ -211,6 +215,7 @@ class PreviewRequest(BaseModel):
 class PersonnelContactRequest(BaseModel):
     name: str
     mention_mobile: str = ""
+    wecom_userid: str = ""
     wechat_group_room_id: str = ""
     wechat_group_room_name: str = ""
     wechat_group_member_id: str = ""
@@ -388,6 +393,7 @@ class TunnelMechanicalLoginRequest(BaseModel):
 
 class WechatQueryRequest(BaseModel):
     text: str = ""
+    channel: str = ""
     room_id: str = ""
     stable_room_id: str = ""
     room_name: str = ""
@@ -434,6 +440,11 @@ def create_app(
     app.state.wechat_bridge = get_wechat_bridge_manager() if app.state.wechat_bridge_enabled else None
     if app.state.wechat_bridge:
         app.state.wechat_bridge.set_message_handler(lambda message: _handle_wechat_bridge_message(repo, uploads, message))
+    app.state.wecom_aibot = WeComAiBotManager()
+    app.state.wecom_aibot.set_message_handler(
+        lambda message: _handle_wecom_aibot_message(repo, uploads, app.state.wecom_aibot, message)
+    )
+    _configure_wecom_aibot_manager(app.state.wecom_aibot, repo.get_notification_config(), restart=False)
     if not app.state.cjk_font_ready:
         LOGGER.warning("未检测到中文字体，今日在岗图片可能出现乱码或方块")
 
@@ -537,6 +548,7 @@ def create_app(
             result = repo.import_config_snapshot(data)
             if app.state.wechat_bridge:
                 app.state.wechat_bridge.import_identity_snapshot(data.get("wechat_bridge_identity") or {})
+            _configure_wecom_aibot_manager(app.state.wecom_aibot, repo.get_notification_config())
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=400, detail="配置 JSON 格式不正确") from exc
         except ValueError as exc:
@@ -1059,6 +1071,8 @@ def create_app(
         existing = _notification_config_with_env_defaults(repo.get_notification_config())
         sender_type = request.sender_type.strip() or str(existing.get("sender_type", "wecom_webhook"))
         webhook_url = request.webhook_url.strip() or str(existing.get("webhook_url", "")).strip()
+        wecom_aibot_id = request.wecom_aibot_id.strip() or str(existing.get("wecom_aibot_id", "")).strip()
+        wecom_aibot_secret = request.wecom_aibot_secret.strip() or str(existing.get("wecom_aibot_secret", "")).strip()
         lightagent_url = request.lightagent_url.strip() or str(existing.get("lightagent_url", "")).strip()
         lightagent_token = request.lightagent_token.strip() or str(existing.get("lightagent_token", "")).strip()
         request_targets = _normalize_feature_channel_rooms(
@@ -1080,6 +1094,9 @@ def create_app(
         repo.save_notification_config(
             sender_type=sender_type,
             webhook_url=webhook_url,
+            wecom_aibot_enabled=request.wecom_aibot_enabled,
+            wecom_aibot_id=wecom_aibot_id,
+            wecom_aibot_secret=wecom_aibot_secret,
             lightagent_url=lightagent_url,
             lightagent_token=lightagent_token,
             lightagent_target=lightagent_target,
@@ -1088,12 +1105,28 @@ def create_app(
             mention_targets=request.mention_targets,
             message_template=request.message_template.strip() or DEFAULT_MESSAGE_TEMPLATE,
         )
+        _configure_wecom_aibot_manager(app.state.wecom_aibot, repo.get_notification_config())
         lightagent_sync = _sync_lightagent_notification_targets(repo, sender_type, lightagent_targets)
         return {
             "success": True,
             "config": _public_notification_config(repo.get_notification_config()),
+            "wecom_aibot": app.state.wecom_aibot.status_snapshot(),
             "lightagent_sync": lightagent_sync,
         }
+
+    @app.get("/api/wecom-aibot/status")
+    def get_wecom_aibot_status():
+        return app.state.wecom_aibot.status_snapshot()
+
+    @app.post("/api/wecom-aibot/reconnect")
+    def reconnect_wecom_aibot():
+        config = _notification_config_with_env_defaults(repo.get_notification_config())
+        _configure_wecom_aibot_manager(app.state.wecom_aibot, config, restart=False)
+        try:
+            app.state.wecom_aibot.reconnect()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"企业微信智能机器人连接失败：{exc}") from exc
+        return app.state.wecom_aibot.status_snapshot()
 
     @app.post("/api/notification-config/test")
     async def test_notification_config(request: NotificationTestRequest):
@@ -1451,6 +1484,17 @@ def create_app(
         def stop_wechat_bridge():
             app.state.wechat_bridge.stop()
 
+    @app.on_event("startup")
+    def start_wecom_aibot():
+        try:
+            app.state.wecom_aibot.start()
+        except Exception:
+            LOGGER.exception("企业微信智能机器人启动失败")
+
+    @app.on_event("shutdown")
+    def stop_wecom_aibot():
+        app.state.wecom_aibot.stop()
+
     if start_scheduler:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -1693,6 +1737,9 @@ def _env_notification_config_defaults() -> dict[str, Any]:
     return {
         "sender_type": os.getenv("NOTIFICATION_SENDER_TYPE", "").strip(),
         "webhook_url": os.getenv("WECOM_WEBHOOK_URL", "").strip(),
+        "wecom_aibot_enabled": os.getenv("WECOM_AIBOT_ENABLED", "").strip(),
+        "wecom_aibot_id": os.getenv("WECOM_AIBOT_ID", "").strip(),
+        "wecom_aibot_secret": os.getenv("WECOM_AIBOT_SECRET", "").strip(),
         "lightagent_url": (
             os.getenv("LIGHTAGENT_NOTIFY_URL", "").strip()
             or os.getenv("LIGHTAGENT_PUSH_URL", "").strip()
@@ -1717,8 +1764,13 @@ def _notification_config_with_env_defaults(config: dict[str, Any]) -> dict[str, 
     legacy_target = str(merged.get("lightagent_target", "")).strip()
     if legacy_target:
         lightagent_targets = _normalize_feature_channel_rooms(lightagent_targets + [{"id": legacy_target}])
+    has_wecom_aibot_config = bool(
+        merged.get("wecom_aibot_enabled")
+        and str(merged.get("wecom_aibot_id") or "").strip()
+        and str(merged.get("wecom_aibot_secret") or "").strip()
+    )
     has_active_config = (
-        bool(str(merged.get("webhook_url", "")).strip())
+        bool(str(merged.get("webhook_url", "")).strip()) or has_wecom_aibot_config
         if sender_type == "wecom_webhook"
         else bool(lightagent_targets and (wechat_bridge_enabled() or str(merged.get("lightagent_url", "")).strip()))
     )
@@ -1735,6 +1787,11 @@ def _notification_config_with_env_defaults(config: dict[str, Any]) -> dict[str, 
     for key in ("webhook_url", "lightagent_url", "lightagent_token", "lightagent_target", "mention_mode", "mention_targets"):
         if env_config[key] and (env_can_select_sender or not str(merged.get(key, "")).strip()):
             merged[key] = env_config[key]
+    for key in ("wecom_aibot_id", "wecom_aibot_secret"):
+        if env_config[key] and not str(merged.get(key, "")).strip():
+            merged[key] = env_config[key]
+    if env_config["wecom_aibot_enabled"]:
+        merged["wecom_aibot_enabled"] = env_config["wecom_aibot_enabled"].lower() in {"1", "true", "yes", "on"}
     if env_config["lightagent_targets"] and (
         env_can_select_sender or not _normalize_feature_channel_rooms(merged.get("lightagent_targets"))
     ):
@@ -2450,6 +2507,8 @@ def _require_feature_channel_for_wechat_query(
     query: WechatQueryRequest,
     permission_key: str,
 ) -> None:
+    if str(query.channel or "").strip() == "wecom_aibot":
+        return
     configured_room_ids = _notification_wechat_target_room_ids(repo)
     if configured_room_ids and not (configured_room_ids & _feature_channel_query_room_ids(query)):
         room_name = _notification_wechat_target_room_label(repo) or "未命名微信群"
@@ -2613,13 +2672,22 @@ async def _build_wechat_query_response(
     if _is_wechat_binding_query(text):
         if not person:
             return _wechat_query_unbound_response(query)
+        if str(query.channel or "").strip() == "wecom_aibot":
+            member_label = str(person.get("wecom_userid") or query.sender_name or "已绑定").strip()
+            member_kind = "企业微信成员"
+        else:
+            member_label = _clean_wechat_member_display_name(
+                str(person.get("wechat_group_member_name") or query.sender_name or ""),
+                str(person.get("wechat_group_runtime_sender_id") or query.runtime_sender_id or query.sender_id or ""),
+            ) or "已绑定"
+            member_kind = "微信成员"
         return {
             "success": True,
             "query_type": "binding",
             "person_name": person["name"],
             "reply": (
                 f"已绑定：{person['name']}\n"
-                f"微信成员：{_clean_wechat_member_display_name(str(person.get('wechat_group_member_name') or query.sender_name or ''), str(person.get('wechat_group_runtime_sender_id') or query.runtime_sender_id or query.sender_id or '')) or '已绑定'}"
+                f"{member_kind}：{member_label}"
             ),
         }
     if _is_wechat_self_bind_command(text):
@@ -2702,6 +2770,74 @@ def _handle_wechat_bridge_message(repo: DutyRepository, uploads: Path, message: 
             manager.send_image(room_id, str(image_path))
     except Exception:
         LOGGER.exception("内置微信桥发送查询回复失败")
+
+
+def _configure_wecom_aibot_manager(
+    manager: WeComAiBotManager,
+    config: dict[str, Any],
+    *,
+    restart: bool = True,
+) -> None:
+    merged = _notification_config_with_env_defaults(config)
+    try:
+        manager.configure(
+            enabled=bool(merged.get("wecom_aibot_enabled")),
+            bot_id=str(merged.get("wecom_aibot_id") or ""),
+            secret=str(merged.get("wecom_aibot_secret") or ""),
+            restart=restart,
+        )
+    except Exception:
+        LOGGER.exception("企业微信智能机器人配置已保存，但连接启动失败")
+
+
+def _handle_wecom_aibot_message(
+    repo: DutyRepository,
+    uploads: Path,
+    manager: WeComAiBotManager,
+    message: dict[str, Any],
+) -> None:
+    text = str(message.get("text") or "").strip()
+    normalized = _normalize_wechat_query_text(text)
+    if not text or not _looks_like_duty_wechat_command(normalized, repo):
+        return
+    userid = str(message.get("userid") or "").strip()
+    chatid = str(message.get("chatid") or "").strip()
+    chattype = str(message.get("chattype") or "").strip()
+    room_id = f"wecom_chat:{chatid}" if chatid else f"wecom_user:{userid}"
+    sender_id = f"wecom_user:{userid}" if userid else ""
+    query = WechatQueryRequest(
+        text=text,
+        channel="wecom_aibot",
+        room_id=room_id,
+        stable_room_id=room_id,
+        room_name="企业微信群" if chattype == "group" else "企业微信单聊",
+        sender_id=sender_id,
+        runtime_sender_id=sender_id,
+        stable_member_id=sender_id,
+        sender_name=userid,
+    )
+    try:
+        manager.reply_progress(message)
+    except Exception:
+        LOGGER.exception("企业微信智能机器人发送查询进度失败")
+        return
+    try:
+        result = asyncio.run(_build_wechat_query_response_with_log(repo, query, uploads=uploads))
+    except HTTPException as exc:
+        result = {"success": False, "reply": str(exc.detail)}
+    except Exception as exc:
+        LOGGER.exception("企业微信智能机器人处理消息失败")
+        result = {"success": False, "reply": f"查询失败：{exc}"}
+    replies = [str(item or "").strip() for item in (result.get("replies") or []) if str(item or "").strip()]
+    reply = str(result.get("reply") or "").strip()
+    if not replies and reply:
+        replies = [reply]
+    content = "\n".join(replies).strip() or ("查询完成" if result.get("success") else "没有查询到结果")
+    image_path = _wechat_query_result_image_path(result, uploads)
+    try:
+        manager.reply_result(message, content, image_path=str(image_path or ""))
+    except Exception:
+        LOGGER.exception("企业微信智能机器人发送查询结果失败")
 
 
 def _looks_like_duty_wechat_command(text: str, repo: DutyRepository | None = None) -> bool:
@@ -3882,6 +4018,19 @@ def _wechat_query_unbound_response(query: WechatQueryRequest) -> dict[str, Any]:
 
 
 def _person_for_wechat_query(repo: DutyRepository, query: WechatQueryRequest) -> dict[str, str] | None:
+    if str(query.channel or "").strip() == "wecom_aibot":
+        userid = str(query.runtime_sender_id or query.sender_id or "").strip()
+        if userid.startswith("wecom_user:"):
+            userid = userid.removeprefix("wecom_user:")
+        for person in repo.list_personnel():
+            if userid and str(person.get("wecom_userid") or "").strip() == userid:
+                return person
+        for monitored in repo.list_monitored_people():
+            if userid and str(monitored.get("wecom_userid") or "").strip() == userid:
+                return next(
+                    (person for person in repo.list_personnel() if person.get("name") == monitored.get("name")),
+                    {"name": str(monitored.get("name") or ""), "wecom_userid": userid},
+                )
     runtime_ids = {
         str(query.runtime_sender_id or "").strip(),
         str(query.sender_id or "").strip(),
@@ -3943,6 +4092,22 @@ def _build_wechat_self_bind_response(repo: DutyRepository, query: WechatQueryReq
     sender_name = _clean_wechat_member_display_name(str(query.sender_name or ""), runtime_sender_id or stable_member_id)
     room_id = str(query.stable_room_id or query.room_id or "").strip()
     room_name = _clean_wechat_member_display_name(str(query.room_name or ""), room_id)
+    if str(query.channel or "").strip() == "wecom_aibot":
+        userid = runtime_sender_id.removeprefix("wecom_user:")
+        if not userid:
+            return {
+                "success": False,
+                "query_type": "binding_update",
+                "reply": "没有识别到当前企业微信成员，请重新发送：绑定姓名。",
+            }
+        repo.clear_wecom_binding_for_userid(userid, except_name=requested_name)
+        repo.upsert_personnel_contacts([{"name": requested_name, "wecom_userid": userid}])
+        return {
+            "success": True,
+            "query_type": "binding_update",
+            "person_name": requested_name,
+            "reply": f"绑定成功：{requested_name}\n企业微信成员：{userid}\n现在可以发送“查询我的监控”或“查询我的绑定”。",
+        }
     repo.clear_wechat_binding_for_member(member_ids, except_name=requested_name)
     repo.upsert_personnel_contacts(
         [
@@ -4350,6 +4515,8 @@ def _login_page_response(static_dir: Path, *, error: str = "", next_url: str = "
 def _public_notification_config(config: dict[str, Any]) -> dict[str, Any]:
     config = _notification_config_with_env_defaults(config)
     webhook_url = str(config.get("webhook_url", "")).strip()
+    wecom_aibot_id = str(config.get("wecom_aibot_id", "")).strip()
+    wecom_aibot_secret = str(config.get("wecom_aibot_secret", "")).strip()
     lightagent_url = str(config.get("lightagent_url", "")).strip()
     lightagent_targets = _normalize_feature_channel_rooms(config.get("lightagent_targets"))
     lightagent_target = str(config.get("lightagent_target", "")).strip()
@@ -4369,6 +4536,11 @@ def _public_notification_config(config: dict[str, Any]) -> dict[str, Any]:
         "webhook_configured": bool(webhook_url),
         "webhook_active": webhook_active and bool(webhook_url),
         "webhook_display": "已配置" if webhook_url else "未配置",
+        "wecom_aibot_enabled": bool(config.get("wecom_aibot_enabled")),
+        "wecom_aibot_id": wecom_aibot_id,
+        "wecom_aibot_configured": bool(wecom_aibot_id and wecom_aibot_secret),
+        "wecom_aibot_secret": "",
+        "wecom_aibot_secret_configured": bool(wecom_aibot_secret),
         "lightagent_url": lightagent_url,
         "lightagent_configured": bool(lightagent_targets and (lightagent_url or wechat_bridge_enabled())),
         "lightagent_active": lightagent_active and bool(lightagent_targets and (lightagent_url or wechat_bridge_enabled())),
