@@ -67,6 +67,12 @@ def test_public_notification_config_masks_wecom_aibot_secret():
             "wecom_aibot_enabled": True,
             "wecom_aibot_id": "bot-id",
             "wecom_aibot_secret": "secret-value",
+            "wecom_app_enabled": True,
+            "wecom_app_corp_id": "ww-test",
+            "wecom_app_agent_id": "1000002",
+            "wecom_app_secret": "app-secret",
+            "wecom_app_token": "token",
+            "wecom_app_encoding_aes_key": "aes-key",
         }
     )
 
@@ -75,3 +81,10 @@ def test_public_notification_config_masks_wecom_aibot_secret():
     assert public["wecom_aibot_configured"] is True
     assert public["wecom_aibot_secret"] == ""
     assert public["wecom_aibot_secret_configured"] is True
+    assert public["wecom_app_configured"] is True
+    assert public["wecom_app_secret"] == ""
+    assert public["wecom_app_secret_configured"] is True
+    assert public["wecom_app_token"] == ""
+    assert public["wecom_app_token_configured"] is True
+    assert public["wecom_app_encoding_aes_key"] == ""
+    assert public["wecom_app_encoding_aes_key_configured"] is True

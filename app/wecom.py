@@ -60,6 +60,43 @@ class WeComClient:
         if data.get("errcode") != 0:
             raise WeComError(f"WeCom send failed: {data.get('errmsg', 'unknown error')}")
 
+    async def upload_media(self, media_type: str, filename: str, content: bytes) -> str:
+        token = await self.get_access_token()
+        try:
+            response = await self.http_client.post(
+                f"{self.base_url}/media/upload",
+                params={"access_token": token, "type": media_type},
+                files={"media": (filename, content)},
+            )
+        except httpx.HTTPError as exc:
+            raise WeComError(f"WeCom media upload failed: {exc.__class__.__name__}") from exc
+        data = response.json()
+        if data.get("errcode") != 0:
+            raise WeComError(f"WeCom media upload failed: {data.get('errmsg', 'unknown error')}")
+        media_id = str(data.get("media_id") or "").strip()
+        if not media_id:
+            raise WeComError("WeCom media upload failed: media_id missing")
+        return media_id
+
+    async def send_image(self, touser: str, image_bytes: bytes) -> None:
+        media_id = await self.upload_media("image", "query.png", image_bytes)
+        token = await self.get_access_token()
+        payload = {
+            "touser": touser,
+            "msgtype": "image",
+            "agentid": self.agent_id,
+            "image": {"media_id": media_id},
+            "enable_duplicate_check": 0,
+        }
+        response = await self.http_client.post(
+            f"{self.base_url}/message/send",
+            params={"access_token": token},
+            json=payload,
+        )
+        data = response.json()
+        if data.get("errcode") != 0:
+            raise WeComError(f"WeCom image send failed: {data.get('errmsg', 'unknown error')}")
+
 
 class WeComWebhookClient:
     def __init__(

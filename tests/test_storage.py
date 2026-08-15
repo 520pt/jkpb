@@ -41,6 +41,28 @@ def test_initializes_sqlite_schema(tmp_path: Path):
     } <= tables
 
 
+def test_notification_config_persists_wecom_app_fields(tmp_path: Path):
+    repo = DutyRepository(tmp_path / "duty.db")
+
+    repo.save_notification_config(
+        webhook_url="",
+        wecom_app_enabled=True,
+        wecom_app_corp_id="ww-test",
+        wecom_app_agent_id="1000002",
+        wecom_app_secret="secret",
+        wecom_app_token="token",
+        wecom_app_encoding_aes_key="aes-key",
+    )
+
+    config = repo.get_notification_config()
+    assert config["wecom_app_enabled"] is True
+    assert config["wecom_app_corp_id"] == "ww-test"
+    assert config["wecom_app_agent_id"] == "1000002"
+    assert config["wecom_app_secret"] == "secret"
+    assert config["wecom_app_token"] == "token"
+    assert config["wecom_app_encoding_aes_key"] == "aes-key"
+
+
 def test_saving_roster_replaces_same_month(tmp_path: Path):
     repo = DutyRepository(tmp_path / "duty.db")
     repo.save_roster_month(2025, 9, [{"name": "示例甲", "days": {"16": "中"}}], "uploads/a.png")
@@ -471,6 +493,12 @@ def test_saving_notification_config_replaces_existing_value(tmp_path: Path):
         "wecom_aibot_enabled": False,
         "wecom_aibot_id": "",
         "wecom_aibot_secret": "",
+        "wecom_app_enabled": False,
+        "wecom_app_corp_id": "",
+        "wecom_app_agent_id": "",
+        "wecom_app_secret": "",
+        "wecom_app_token": "",
+        "wecom_app_encoding_aes_key": "",
         "lightagent_url": "",
         "lightagent_token": "",
         "lightagent_target": "",

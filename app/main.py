@@ -23,7 +23,7 @@ from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 import httpx
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -58,6 +58,7 @@ from app.storage import (
 )
 from app.tunnel_mechanical_image import render_tunnel_mechanical_result_image
 from app.wecom import LightAgentNotifyClient, WeComClient, WeComError, WeComWebhookClient
+from app.wecom_app import WeComAppCrypto, WeComAppCryptoError, encrypted_text_from_xml, parse_wecom_app_message
 from app.wecom_aibot import WeComAiBotManager
 from app.wechat_query_image import render_wechat_query_image
 from app.wechat_bridge.manager import get_wechat_bridge_manager, wechat_bridge_enabled
@@ -157,6 +158,12 @@ class NotificationConfigRequest(BaseModel):
     wecom_aibot_enabled: bool = False
     wecom_aibot_id: str = ""
     wecom_aibot_secret: str = ""
+    wecom_app_enabled: bool = False
+    wecom_app_corp_id: str = ""
+    wecom_app_agent_id: str = ""
+    wecom_app_secret: str = ""
+    wecom_app_token: str = ""
+    wecom_app_encoding_aes_key: str = ""
     lightagent_url: str = ""
     lightagent_token: str = ""
     lightagent_target: str = ""
@@ -458,6 +465,8 @@ def create_app(
             if request.url.path == "/health":
                 return await call_next(request)
             if request.url.path in {"/login", "/logout"}:
+                return await call_next(request)
+            if request.url.path == "/api/wecom-app/callback":
                 return await call_next(request)
             if _is_wechat_internal_api_request(request):
                 return await call_next(request)
@@ -1073,6 +1082,14 @@ def create_app(
         webhook_url = request.webhook_url.strip() or str(existing.get("webhook_url", "")).strip()
         wecom_aibot_id = request.wecom_aibot_id.strip() or str(existing.get("wecom_aibot_id", "")).strip()
         wecom_aibot_secret = request.wecom_aibot_secret.strip() or str(existing.get("wecom_aibot_secret", "")).strip()
+        wecom_app_corp_id = request.wecom_app_corp_id.strip() or str(existing.get("wecom_app_corp_id", "")).strip()
+        wecom_app_agent_id = request.wecom_app_agent_id.strip() or str(existing.get("wecom_app_agent_id", "")).strip()
+        wecom_app_secret = request.wecom_app_secret.strip() or str(existing.get("wecom_app_secret", "")).strip()
+        wecom_app_token = request.wecom_app_token.strip() or str(existing.get("wecom_app_token", "")).strip()
+        wecom_app_encoding_aes_key = (
+            request.wecom_app_encoding_aes_key.strip()
+            or str(existing.get("wecom_app_encoding_aes_key", "")).strip()
+        )
         lightagent_url = request.lightagent_url.strip() or str(existing.get("lightagent_url", "")).strip()
         lightagent_token = request.lightagent_token.strip() or str(existing.get("lightagent_token", "")).strip()
         request_targets = _normalize_feature_channel_rooms(
@@ -1097,6 +1114,12 @@ def create_app(
             wecom_aibot_enabled=request.wecom_aibot_enabled,
             wecom_aibot_id=wecom_aibot_id,
             wecom_aibot_secret=wecom_aibot_secret,
+            wecom_app_enabled=request.wecom_app_enabled,
+            wecom_app_corp_id=wecom_app_corp_id,
+            wecom_app_agent_id=wecom_app_agent_id,
+            wecom_app_secret=wecom_app_secret,
+            wecom_app_token=wecom_app_token,
+            wecom_app_encoding_aes_key=wecom_app_encoding_aes_key,
             lightagent_url=lightagent_url,
             lightagent_token=lightagent_token,
             lightagent_target=lightagent_target,
@@ -1127,6 +1150,36 @@ def create_app(
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"企业微信智能机器人连接失败：{exc}") from exc
         return app.state.wecom_aibot.status_snapshot()
+
+    @app.get("/api/wecom-app/callback")
+    def verify_wecom_app_callback(
+        msg_signature: str = "",
+        timestamp: str = "",
+        nonce: str = "",
+        echostr: str = "",
+    ):
+        crypto = _wecom_app_crypto_from_repo(repo)
+        if not crypto.verify_signature(msg_signature, timestamp, nonce, echostr):
+            raise HTTPException(status_code=403, detail="企业微信自建应用回调签名不正确")
+        return Response(crypto.decrypt(echostr), media_type="text/plain")
+
+    @app.post("/api/wecom-app/callback")
+    async def receive_wecom_app_callback(
+        request: Request,
+        background_tasks: BackgroundTasks,
+        msg_signature: str = "",
+        timestamp: str = "",
+        nonce: str = "",
+    ):
+        raw = await request.body()
+        encrypted = encrypted_text_from_xml(raw.decode("utf-8"))
+        crypto = _wecom_app_crypto_from_repo(repo)
+        if not crypto.verify_signature(msg_signature, timestamp, nonce, encrypted):
+            raise HTTPException(status_code=403, detail="企业微信自建应用消息签名不正确")
+        message = parse_wecom_app_message(crypto.decrypt(encrypted))
+        if message.msg_type in {"text", "voice"} and _looks_like_duty_wechat_command(_normalize_wechat_query_text(message.content), repo):
+            background_tasks.add_task(_handle_wecom_app_message, repo, uploads, message)
+        return Response("success", media_type="text/plain")
 
     @app.post("/api/notification-config/test")
     async def test_notification_config(request: NotificationTestRequest):
@@ -1740,6 +1793,12 @@ def _env_notification_config_defaults() -> dict[str, Any]:
         "wecom_aibot_enabled": os.getenv("WECOM_AIBOT_ENABLED", "").strip(),
         "wecom_aibot_id": os.getenv("WECOM_AIBOT_ID", "").strip(),
         "wecom_aibot_secret": os.getenv("WECOM_AIBOT_SECRET", "").strip(),
+        "wecom_app_enabled": os.getenv("WECOM_APP_ENABLED", "").strip(),
+        "wecom_app_corp_id": os.getenv("WECOM_APP_CORP_ID", "").strip() or os.getenv("WECOM_CORP_ID", "").strip(),
+        "wecom_app_agent_id": os.getenv("WECOM_APP_AGENT_ID", "").strip() or os.getenv("WECOM_AGENT_ID", "").strip(),
+        "wecom_app_secret": os.getenv("WECOM_APP_SECRET", "").strip() or os.getenv("WECOM_CORP_SECRET", "").strip(),
+        "wecom_app_token": os.getenv("WECOM_APP_TOKEN", "").strip(),
+        "wecom_app_encoding_aes_key": os.getenv("WECOM_APP_ENCODING_AES_KEY", "").strip(),
         "lightagent_url": (
             os.getenv("LIGHTAGENT_NOTIFY_URL", "").strip()
             or os.getenv("LIGHTAGENT_PUSH_URL", "").strip()
@@ -1792,6 +1851,11 @@ def _notification_config_with_env_defaults(config: dict[str, Any]) -> dict[str, 
             merged[key] = env_config[key]
     if env_config["wecom_aibot_enabled"]:
         merged["wecom_aibot_enabled"] = env_config["wecom_aibot_enabled"].lower() in {"1", "true", "yes", "on"}
+    for key in ("wecom_app_corp_id", "wecom_app_agent_id", "wecom_app_secret", "wecom_app_token", "wecom_app_encoding_aes_key"):
+        if env_config[key] and not str(merged.get(key, "")).strip():
+            merged[key] = env_config[key]
+    if env_config["wecom_app_enabled"]:
+        merged["wecom_app_enabled"] = env_config["wecom_app_enabled"].lower() in {"1", "true", "yes", "on"}
     if env_config["lightagent_targets"] and (
         env_can_select_sender or not _normalize_feature_channel_rooms(merged.get("lightagent_targets"))
     ):
@@ -2507,7 +2571,7 @@ def _require_feature_channel_for_wechat_query(
     query: WechatQueryRequest,
     permission_key: str,
 ) -> None:
-    if str(query.channel or "").strip() == "wecom_aibot":
+    if str(query.channel or "").strip() in {"wecom_aibot", "wecom_app"}:
         return
     configured_room_ids = _notification_wechat_target_room_ids(repo)
     if configured_room_ids and not (configured_room_ids & _feature_channel_query_room_ids(query)):
@@ -2672,7 +2736,7 @@ async def _build_wechat_query_response(
     if _is_wechat_binding_query(text):
         if not person:
             return _wechat_query_unbound_response(query)
-        if str(query.channel or "").strip() == "wecom_aibot":
+        if str(query.channel or "").strip() in {"wecom_aibot", "wecom_app"}:
             member_label = str(person.get("wecom_userid") or query.sender_name or "已绑定").strip()
             member_kind = "企业微信成员"
         else:
@@ -2788,6 +2852,68 @@ def _configure_wecom_aibot_manager(
         )
     except Exception:
         LOGGER.exception("企业微信智能机器人配置已保存，但连接启动失败")
+
+
+def _wecom_app_crypto_from_repo(repo: DutyRepository) -> WeComAppCrypto:
+    config = _notification_config_with_env_defaults(repo.get_notification_config())
+    if not bool(config.get("wecom_app_enabled")):
+        raise HTTPException(status_code=400, detail="企业微信自建应用交互未启用")
+    try:
+        return WeComAppCrypto(
+            token=str(config.get("wecom_app_token") or ""),
+            encoding_aes_key=str(config.get("wecom_app_encoding_aes_key") or ""),
+            corp_id=str(config.get("wecom_app_corp_id") or ""),
+        )
+    except WeComAppCryptoError as exc:
+        raise HTTPException(status_code=400, detail=f"企业微信自建应用回调配置不正确：{exc}") from exc
+
+
+def _wecom_app_client_from_repo(repo: DutyRepository) -> WeComClient:
+    config = _notification_config_with_env_defaults(repo.get_notification_config())
+    corp_id = str(config.get("wecom_app_corp_id") or "").strip()
+    secret = str(config.get("wecom_app_secret") or "").strip()
+    agent_id = str(config.get("wecom_app_agent_id") or "").strip()
+    if not bool(config.get("wecom_app_enabled")) or not corp_id or not secret or not agent_id:
+        raise WeComError("企业微信自建应用 CorpID / AgentId / Secret 未配置")
+    return WeComClient(corp_id=corp_id, corp_secret=secret, agent_id=int(agent_id))
+
+
+async def _handle_wecom_app_message(repo: DutyRepository, uploads: Path, message) -> None:
+    text = str(message.content or "").strip()
+    userid = str(message.from_user or "").strip()
+    if not text or not userid:
+        return
+    query = WechatQueryRequest(
+        text=text,
+        channel="wecom_app",
+        room_id=f"wecom_app_user:{userid}",
+        stable_room_id=f"wecom_app_user:{userid}",
+        room_name="企业微信自建应用",
+        sender_id=f"wecom_user:{userid}",
+        runtime_sender_id=f"wecom_user:{userid}",
+        stable_member_id=f"wecom_user:{userid}",
+        sender_name=userid,
+    )
+    client = _wecom_app_client_from_repo(repo)
+    try:
+        await client.send_text(userid, "正在查询，请稍候…")
+        result = await _build_wechat_query_response_with_log(repo, query, uploads=uploads)
+        replies = [str(item or "").strip() for item in (result.get("replies") or []) if str(item or "").strip()]
+        reply = str(result.get("reply") or "").strip()
+        if not replies and reply:
+            replies = [reply]
+        content = "\n".join(replies).strip() or ("查询完成" if result.get("success") else "没有查询到结果")
+        if content:
+            await client.send_text(userid, content)
+        image_path = _wechat_query_result_image_path(result, uploads)
+        if image_path:
+            await client.send_image(userid, image_path.read_bytes())
+    except Exception:
+        LOGGER.exception("企业微信自建应用处理消息失败")
+        try:
+            await client.send_text(userid, "查询失败，请稍后再试或联系管理员查看后台日志。")
+        except Exception:
+            LOGGER.exception("企业微信自建应用发送失败提示失败")
 
 
 def _handle_wecom_aibot_message(
@@ -4018,7 +4144,7 @@ def _wechat_query_unbound_response(query: WechatQueryRequest) -> dict[str, Any]:
 
 
 def _person_for_wechat_query(repo: DutyRepository, query: WechatQueryRequest) -> dict[str, str] | None:
-    if str(query.channel or "").strip() == "wecom_aibot":
+    if str(query.channel or "").strip() in {"wecom_aibot", "wecom_app"}:
         userid = str(query.runtime_sender_id or query.sender_id or "").strip()
         if userid.startswith("wecom_user:"):
             userid = userid.removeprefix("wecom_user:")
@@ -4092,7 +4218,7 @@ def _build_wechat_self_bind_response(repo: DutyRepository, query: WechatQueryReq
     sender_name = _clean_wechat_member_display_name(str(query.sender_name or ""), runtime_sender_id or stable_member_id)
     room_id = str(query.stable_room_id or query.room_id or "").strip()
     room_name = _clean_wechat_member_display_name(str(query.room_name or ""), room_id)
-    if str(query.channel or "").strip() == "wecom_aibot":
+    if str(query.channel or "").strip() in {"wecom_aibot", "wecom_app"}:
         userid = runtime_sender_id.removeprefix("wecom_user:")
         if not userid:
             return {
@@ -4517,6 +4643,11 @@ def _public_notification_config(config: dict[str, Any]) -> dict[str, Any]:
     webhook_url = str(config.get("webhook_url", "")).strip()
     wecom_aibot_id = str(config.get("wecom_aibot_id", "")).strip()
     wecom_aibot_secret = str(config.get("wecom_aibot_secret", "")).strip()
+    wecom_app_corp_id = str(config.get("wecom_app_corp_id", "")).strip()
+    wecom_app_agent_id = str(config.get("wecom_app_agent_id", "")).strip()
+    wecom_app_secret = str(config.get("wecom_app_secret", "")).strip()
+    wecom_app_token = str(config.get("wecom_app_token", "")).strip()
+    wecom_app_encoding_aes_key = str(config.get("wecom_app_encoding_aes_key", "")).strip()
     lightagent_url = str(config.get("lightagent_url", "")).strip()
     lightagent_targets = _normalize_feature_channel_rooms(config.get("lightagent_targets"))
     lightagent_target = str(config.get("lightagent_target", "")).strip()
@@ -4541,6 +4672,17 @@ def _public_notification_config(config: dict[str, Any]) -> dict[str, Any]:
         "wecom_aibot_configured": bool(wecom_aibot_id and wecom_aibot_secret),
         "wecom_aibot_secret": "",
         "wecom_aibot_secret_configured": bool(wecom_aibot_secret),
+        "wecom_app_enabled": bool(config.get("wecom_app_enabled")),
+        "wecom_app_corp_id": wecom_app_corp_id,
+        "wecom_app_agent_id": wecom_app_agent_id,
+        "wecom_app_configured": bool(wecom_app_corp_id and wecom_app_agent_id and wecom_app_secret and wecom_app_token and wecom_app_encoding_aes_key),
+        "wecom_app_secret": "",
+        "wecom_app_secret_configured": bool(wecom_app_secret),
+        "wecom_app_token": "",
+        "wecom_app_token_configured": bool(wecom_app_token),
+        "wecom_app_encoding_aes_key": "",
+        "wecom_app_encoding_aes_key_configured": bool(wecom_app_encoding_aes_key),
+        "wecom_app_callback_url": _public_app_url("/api/wecom-app/callback"),
         "lightagent_url": lightagent_url,
         "lightagent_configured": bool(lightagent_targets and (lightagent_url or wechat_bridge_enabled())),
         "lightagent_active": lightagent_active and bool(lightagent_targets and (lightagent_url or wechat_bridge_enabled())),

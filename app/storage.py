@@ -179,6 +179,12 @@ class DutyRepository:
                     wecom_aibot_enabled INTEGER NOT NULL DEFAULT 0,
                     wecom_aibot_id TEXT NOT NULL DEFAULT '',
                     wecom_aibot_secret TEXT NOT NULL DEFAULT '',
+                    wecom_app_enabled INTEGER NOT NULL DEFAULT 0,
+                    wecom_app_corp_id TEXT NOT NULL DEFAULT '',
+                    wecom_app_agent_id TEXT NOT NULL DEFAULT '',
+                    wecom_app_secret TEXT NOT NULL DEFAULT '',
+                    wecom_app_token TEXT NOT NULL DEFAULT '',
+                    wecom_app_encoding_aes_key TEXT NOT NULL DEFAULT '',
                     lightagent_url TEXT NOT NULL DEFAULT '',
                     lightagent_token TEXT NOT NULL DEFAULT '',
                     lightagent_target TEXT NOT NULL DEFAULT '',
@@ -375,6 +381,18 @@ class DutyRepository:
                 conn.execute("ALTER TABLE notification_config ADD COLUMN wecom_aibot_id TEXT NOT NULL DEFAULT ''")
             if "wecom_aibot_secret" not in config_columns:
                 conn.execute("ALTER TABLE notification_config ADD COLUMN wecom_aibot_secret TEXT NOT NULL DEFAULT ''")
+            if "wecom_app_enabled" not in config_columns:
+                conn.execute("ALTER TABLE notification_config ADD COLUMN wecom_app_enabled INTEGER NOT NULL DEFAULT 0")
+            if "wecom_app_corp_id" not in config_columns:
+                conn.execute("ALTER TABLE notification_config ADD COLUMN wecom_app_corp_id TEXT NOT NULL DEFAULT ''")
+            if "wecom_app_agent_id" not in config_columns:
+                conn.execute("ALTER TABLE notification_config ADD COLUMN wecom_app_agent_id TEXT NOT NULL DEFAULT ''")
+            if "wecom_app_secret" not in config_columns:
+                conn.execute("ALTER TABLE notification_config ADD COLUMN wecom_app_secret TEXT NOT NULL DEFAULT ''")
+            if "wecom_app_token" not in config_columns:
+                conn.execute("ALTER TABLE notification_config ADD COLUMN wecom_app_token TEXT NOT NULL DEFAULT ''")
+            if "wecom_app_encoding_aes_key" not in config_columns:
+                conn.execute("ALTER TABLE notification_config ADD COLUMN wecom_app_encoding_aes_key TEXT NOT NULL DEFAULT ''")
             if "lightagent_url" not in config_columns:
                 conn.execute("ALTER TABLE notification_config ADD COLUMN lightagent_url TEXT NOT NULL DEFAULT ''")
             if "lightagent_token" not in config_columns:
@@ -1146,6 +1164,12 @@ class DutyRepository:
         wecom_aibot_enabled: bool = False,
         wecom_aibot_id: str = "",
         wecom_aibot_secret: str = "",
+        wecom_app_enabled: bool = False,
+        wecom_app_corp_id: str = "",
+        wecom_app_agent_id: str = "",
+        wecom_app_secret: str = "",
+        wecom_app_token: str = "",
+        wecom_app_encoding_aes_key: str = "",
         message_template: str = DEFAULT_MESSAGE_TEMPLATE,
         sender_type: str = "wecom_webhook",
         lightagent_url: str = "",
@@ -1163,14 +1187,20 @@ class DutyRepository:
             conn.execute(
                 """
                 INSERT INTO notification_config
-                    (id, sender_type, webhook_url, wecom_aibot_enabled, wecom_aibot_id, wecom_aibot_secret, lightagent_url, lightagent_token, lightagent_target, lightagent_targets_json, mention_mode, mention_targets, message_template)
-                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, sender_type, webhook_url, wecom_aibot_enabled, wecom_aibot_id, wecom_aibot_secret, wecom_app_enabled, wecom_app_corp_id, wecom_app_agent_id, wecom_app_secret, wecom_app_token, wecom_app_encoding_aes_key, lightagent_url, lightagent_token, lightagent_target, lightagent_targets_json, mention_mode, mention_targets, message_template)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     sender_type = excluded.sender_type,
                     webhook_url = excluded.webhook_url,
                     wecom_aibot_enabled = excluded.wecom_aibot_enabled,
                     wecom_aibot_id = excluded.wecom_aibot_id,
                     wecom_aibot_secret = excluded.wecom_aibot_secret,
+                    wecom_app_enabled = excluded.wecom_app_enabled,
+                    wecom_app_corp_id = excluded.wecom_app_corp_id,
+                    wecom_app_agent_id = excluded.wecom_app_agent_id,
+                    wecom_app_secret = excluded.wecom_app_secret,
+                    wecom_app_token = excluded.wecom_app_token,
+                    wecom_app_encoding_aes_key = excluded.wecom_app_encoding_aes_key,
                     lightagent_url = excluded.lightagent_url,
                     lightagent_token = excluded.lightagent_token,
                     lightagent_target = excluded.lightagent_target,
@@ -1186,6 +1216,12 @@ class DutyRepository:
                     int(bool(wecom_aibot_enabled)),
                     str(wecom_aibot_id or "").strip(),
                     str(wecom_aibot_secret or "").strip(),
+                    int(bool(wecom_app_enabled)),
+                    str(wecom_app_corp_id or "").strip(),
+                    str(wecom_app_agent_id or "").strip(),
+                    str(wecom_app_secret or "").strip(),
+                    str(wecom_app_token or "").strip(),
+                    str(wecom_app_encoding_aes_key or "").strip(),
                     lightagent_url,
                     lightagent_token,
                     primary_target,
@@ -1200,7 +1236,7 @@ class DutyRepository:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT sender_type, webhook_url, wecom_aibot_enabled, wecom_aibot_id, wecom_aibot_secret, lightagent_url, lightagent_token, lightagent_target, lightagent_targets_json, mention_mode, mention_targets, message_template
+                SELECT sender_type, webhook_url, wecom_aibot_enabled, wecom_aibot_id, wecom_aibot_secret, wecom_app_enabled, wecom_app_corp_id, wecom_app_agent_id, wecom_app_secret, wecom_app_token, wecom_app_encoding_aes_key, lightagent_url, lightagent_token, lightagent_target, lightagent_targets_json, mention_mode, mention_targets, message_template
                 FROM notification_config
                 WHERE id = 1
                 """
@@ -1212,6 +1248,12 @@ class DutyRepository:
                 "wecom_aibot_enabled": False,
                 "wecom_aibot_id": "",
                 "wecom_aibot_secret": "",
+                "wecom_app_enabled": False,
+                "wecom_app_corp_id": "",
+                "wecom_app_agent_id": "",
+                "wecom_app_secret": "",
+                "wecom_app_token": "",
+                "wecom_app_encoding_aes_key": "",
                 "lightagent_url": "",
                 "lightagent_token": "",
                 "lightagent_target": "",
@@ -1229,6 +1271,12 @@ class DutyRepository:
             "wecom_aibot_enabled": bool(row["wecom_aibot_enabled"]),
             "wecom_aibot_id": row["wecom_aibot_id"],
             "wecom_aibot_secret": row["wecom_aibot_secret"],
+            "wecom_app_enabled": bool(row["wecom_app_enabled"]),
+            "wecom_app_corp_id": row["wecom_app_corp_id"],
+            "wecom_app_agent_id": row["wecom_app_agent_id"],
+            "wecom_app_secret": row["wecom_app_secret"],
+            "wecom_app_token": row["wecom_app_token"],
+            "wecom_app_encoding_aes_key": row["wecom_app_encoding_aes_key"],
             "lightagent_url": row["lightagent_url"],
             "lightagent_token": row["lightagent_token"],
             "lightagent_target": row["lightagent_target"],
