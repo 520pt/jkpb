@@ -97,6 +97,17 @@ class WeComClient:
         if data.get("errcode") != 0:
             raise WeComError(f"WeCom image send failed: {data.get('errmsg', 'unknown error')}")
 
+    async def create_menu(self, menu: dict[str, object]) -> None:
+        token = await self.get_access_token()
+        response = await self.http_client.post(
+            f"{self.base_url}/menu/create",
+            params={"access_token": token, "agentid": self.agent_id},
+            json=menu,
+        )
+        data = response.json()
+        if data.get("errcode") != 0:
+            raise WeComError(f"WeCom menu create failed: {data.get('errmsg', 'unknown error')}")
+
 
 class WeComAppNotifyClient:
     """Notification adapter backed by a WeCom self-built app.

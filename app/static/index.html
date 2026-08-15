@@ -3237,9 +3237,20 @@
                       <label>回调 Token <input id="wecomAppToken" type="password" autocomplete="new-password" placeholder="接收消息页面的 Token，已配置时可留空" /></label>
                       <label>EncodingAESKey <input id="wecomAppEncodingAesKey" type="password" autocomplete="new-password" placeholder="43 位，已配置时可留空" /></label>
                     </div>
+                    <div class="item">
+                      <strong>自定义菜单</strong>
+                      <small id="wecomAppMenuLimits">一级菜单最多 3 个；每个一级菜单最多 5 个二级菜单；已按分类自动控制数量。</small>
+                      <div id="wecomAppMenuPreview" class="wechat-card-grid"></div>
+                    </div>
+                    <div class="item">
+                      <strong>配置测试</strong>
+                      <small>测试会通过企业微信自建应用发送一条消息。收到后请在自建应用里回复“菜单”，能返回查询菜单就说明回调交互也生效。</small>
+                    </div>
                   </div>
                   <div class="settings-actions notification-card-actions">
                     <button class="primary" id="saveNotificationWecomAppBtn" type="button" data-save-notification>保存自建应用配置</button>
+                    <button id="testWecomAppBtn" type="button">测试自建应用交互</button>
+                    <button id="createWecomAppMenuBtn" type="button">创建/更新自建应用菜单</button>
                   </div>
                 </div>
                 <p id="notificationStatus" class="status"></p>
@@ -6489,6 +6500,73 @@
       target.className = `status ${current === "authenticated" ? "ok" : (current === "error" || current === "unconfigured" ? "error" : "")}`;
     }
 
+    function renderWecomAppMenuPreview(menu) {
+      const target = $("wecomAppMenuPreview");
+      if (!target) return;
+      const limits = menu && menu.limits || {};
+      if ($("wecomAppMenuLimits")) {
+        $("wecomAppMenuLimits").textContent = `一级菜单最多 ${limits.max_top_buttons || 3} 个；每个一级菜单最多 ${limits.max_sub_buttons || 5} 个二级菜单；一级菜单名最多 ${limits.max_top_name_bytes || 16} 字节，二级菜单名最多 ${limits.max_sub_name_bytes || 40} 字节。`;
+      }
+      const groups = menu && menu.groups || [];
+      target.innerHTML = groups.length ? groups.map((group) => `
+        <div class="item">
+          <strong>${escapeHtml(group.name || "")}</strong>
+          <small>${(group.items || []).map((item) => `${escapeHtml(item.name || "")} → ${escapeHtml(item.command || "")}`).join("<br>")}</small>
+        </div>
+      `).join("") : `<div class="item"><small>暂无菜单预览</small></div>`;
+    }
+
+    async function loadWecomAppMenuPreview() {
+      const response = await fetch("/api/wecom-app/menu");
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.detail || "读取自建应用菜单预览失败");
+      renderWecomAppMenuPreview(body);
+      return body;
+    }
+
+    async function createWecomAppMenu() {
+      const button = $("createWecomAppMenuBtn");
+      button.disabled = true;
+      $("notificationStatus").textContent = "正在保存配置并创建自建应用菜单...";
+      $("notificationStatus").className = "status";
+      try {
+        const saved = await saveNotificationConfig(false);
+        if (!saved) throw new Error("通知配置保存失败");
+        const response = await fetch("/api/wecom-app/menu/create", { method: "POST" });
+        const body = await response.json();
+        if (!response.ok || !body.success) throw new Error(body.detail || "创建自建应用菜单失败");
+        renderWecomAppMenuPreview(body.menu);
+        $("notificationStatus").textContent = "自建应用菜单已创建/更新。企业微信客户端可能需要重新进入应用或稍等片刻才显示新菜单。";
+        $("notificationStatus").className = "status ok";
+      } catch (error) {
+        $("notificationStatus").textContent = `创建自建应用菜单失败：${error.message || error}`;
+        $("notificationStatus").className = "status error";
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function testWecomAppInteraction() {
+      const button = $("testWecomAppBtn");
+      button.disabled = true;
+      $("notificationStatus").textContent = "正在保存配置并发送自建应用测试消息...";
+      $("notificationStatus").className = "status";
+      try {
+        const saved = await saveNotificationConfig(false);
+        if (!saved) throw new Error("自建应用配置保存失败");
+        const response = await fetch("/api/wecom-app/test", { method: "POST" });
+        const body = await response.json();
+        if (!response.ok || !body.success) throw new Error(body.detail || "自建应用测试失败");
+        $("notificationStatus").textContent = `${body.message || "测试消息已发送"} 发送目标：${body.target || "企业微信自建应用成员"}`;
+        $("notificationStatus").className = "status ok";
+      } catch (error) {
+        $("notificationStatus").textContent = `自建应用测试失败：${error.message || error}`;
+        $("notificationStatus").className = "status error";
+      } finally {
+        button.disabled = false;
+      }
+    }
+
     async function refreshWecomAiBotStatus() {
       const response = await fetch("/api/wecom-aibot/status");
       const body = await response.json();
@@ -6546,6 +6624,8 @@
         $("wecomAiBotStatus").className = "status error";
       }
     });
+    $("createWecomAppMenuBtn").addEventListener("click", createWecomAppMenu);
+    $("testWecomAppBtn").addEventListener("click", testWecomAppInteraction);
 
     async function syncLightAgentWechatStateForNotification(options = {}) {
       if ($("notificationSenderType").value !== "lightagent") return true;
@@ -6681,6 +6761,7 @@
       refreshWecomAiBotStatus().catch(() => renderWecomAiBotStatus({
         status: $("wecomAiBotEnabled").checked ? "disconnected" : "disabled",
       }));
+      loadWecomAppMenuPreview().catch(() => null);
       renderSettingsOverview();
     }
 
@@ -8168,6 +8249,8 @@
         daily_duty_test_resend: "今日在岗测试补发",
         notification_test: "通知测试",
         notification_test_resend: "通知测试补发",
+        wecom_app_test: "企业微信自建应用测试",
+        wecom_app_test_resend: "企业微信自建应用测试补发",
         monitor_test: "监控班测试",
         monitor_test_resend: "监控班测试补发",
         daily: "每日提醒",

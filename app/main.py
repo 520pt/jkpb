@@ -96,6 +96,26 @@ DEFAULT_WECHAT_INTERACTION_CONFIG = {
     "tunnel_modify_template_triggers": DEFAULT_TUNNEL_MODIFY_TEMPLATE_TRIGGERS,
     "tunnel_modify_template": DEFAULT_TUNNEL_MODIFY_TEMPLATE,
 }
+WECOM_APP_MENU_LIMITS = {
+    "max_top_buttons": 3,
+    "max_sub_buttons": 5,
+    "max_top_name_bytes": 16,
+    "max_sub_name_bytes": 40,
+}
+WECOM_APP_MENU_COMMANDS = {
+    "DR_MY_MONITOR": "查询我的监控",
+    "DR_TODAY_REMINDERS": "查询今日提醒",
+    "DR_TOMORROW_MONITOR": "查询明日监控",
+    "DR_WEEK_MONITOR": "查询本周监控",
+    "DR_NEXT_REMINDER": "查询下次提醒",
+    "DR_TODAY_TUNNEL": "查询今日机电",
+    "DR_TUNNEL_TEMPLATE": "模板",
+    "DR_TUNNEL_MODIFY_TEMPLATE": "修改模板",
+    "DR_ORANGE_PATROL_RECORD": "橙色预警巡查记录查询",
+    "DR_NEXT_7_DAYS": "查询未来7天",
+    "DR_BINDING": "查询我的绑定",
+    "DR_HELP": "菜单",
+}
 
 
 class RosterConfirmRequest(BaseModel):
@@ -1160,6 +1180,63 @@ def create_app(
             raise HTTPException(status_code=502, detail=f"企业微信智能机器人连接失败：{exc}") from exc
         return app.state.wecom_aibot.status_snapshot()
 
+    @app.get("/api/wecom-app/menu")
+    def get_wecom_app_menu_preview():
+        return _public_wecom_app_menu_preview()
+
+    @app.post("/api/wecom-app/menu/create")
+    async def create_wecom_app_menu():
+        config = _notification_config_with_env_defaults(repo.get_notification_config())
+        if not _wecom_app_config_complete(config, require_callback=False):
+            raise HTTPException(status_code=400, detail="请先启用并保存企业微信自建应用 CorpID / AgentId / Secret")
+        payload = _wecom_app_menu_payload()
+        try:
+            client = _wecom_app_client_from_repo(repo)
+            await client.create_menu(payload)
+        except WeComError as exc:
+            raise HTTPException(status_code=502, detail=_sanitize_wechat_ids_for_display(repo, str(exc))) from exc
+        return {"success": True, "menu": _public_wecom_app_menu_preview()}
+
+    @app.post("/api/wecom-app/test")
+    async def test_wecom_app_interaction():
+        config = _notification_config_with_env_defaults(repo.get_notification_config())
+        if not _wecom_app_config_complete(config, require_callback=True):
+            raise HTTPException(status_code=400, detail="请先启用并保存企业微信自建应用 CorpID / AgentId / Secret / Token / EncodingAESKey")
+        # 同时校验 Token / EncodingAESKey 格式，避免只测发送成功但回调配置明显不可用。
+        _wecom_app_crypto_from_repo(repo)
+        targets = _wecom_app_default_tousers(repo)
+        target_text = "|".join(targets)
+        display_target = "已绑定企业微信成员" if targets and targets != ["@all"] else "@all（应用可见范围）"
+        content = (
+            "企业微信自建应用测试消息发送成功。\n"
+            "如果你收到这条消息，说明 CorpID / AgentId / Secret 和应用消息发送已生效。\n"
+            "请在这个自建应用里回复“菜单”，如果能收到查询菜单，说明接收消息 URL / Token / EncodingAESKey 回调交互也已生效。\n"
+            "首次使用姓名相关功能请回复：绑定商邱宏"
+        )
+        try:
+            await _wecom_app_client_from_repo(repo).send_text(target_text, content)
+            repo.save_send_record(
+                kind="wecom_app_test",
+                target=display_target,
+                status="success",
+                content=content,
+            )
+        except WeComError as exc:
+            repo.save_send_record(
+                kind="wecom_app_test",
+                target=display_target,
+                status="failed",
+                content=content,
+                error=str(exc),
+            )
+            raise HTTPException(status_code=502, detail=_sanitize_wechat_ids_for_display(repo, str(exc))) from exc
+        return {
+            "success": True,
+            "target": display_target,
+            "content": content,
+            "message": "测试消息已发送。收到后请在企业微信自建应用里回复“菜单”验证回调交互。",
+        }
+
     @app.get("/api/wecom-app/callback")
     def verify_wecom_app_callback(
         msg_signature: str = "",
@@ -1186,7 +1263,14 @@ def create_app(
         if not crypto.verify_signature(msg_signature, timestamp, nonce, encrypted):
             raise HTTPException(status_code=403, detail="企业微信自建应用消息签名不正确")
         message = parse_wecom_app_message(crypto.decrypt(encrypted))
-        if message.msg_type in {"text", "voice"} and _looks_like_duty_wechat_command(_normalize_wechat_query_text(message.content), repo):
+        command_text = _wecom_app_menu_command(str(message.event_key or message.content or "").strip())
+        if message.msg_type in {"text", "voice"} and _looks_like_duty_wechat_command(_normalize_wechat_query_text(command_text), repo):
+            background_tasks.add_task(_handle_wecom_app_message, repo, uploads, message)
+        elif (
+            message.msg_type == "event"
+            and str(message.event or "").strip().lower() == "click"
+            and _looks_like_duty_wechat_command(_normalize_wechat_query_text(command_text), repo)
+        ):
             background_tasks.add_task(_handle_wecom_app_message, repo, uploads, message)
         return Response("success", media_type="text/plain")
 
@@ -2071,6 +2155,138 @@ def _public_wechat_interaction_config(repo: DutyRepository) -> dict[str, Any]:
     }
 
 
+def _wecom_app_menu_payload() -> dict[str, Any]:
+    menu = {
+        "button": [
+            {
+                "name": "监控提醒",
+                "sub_button": [
+                    _wecom_app_menu_click_button("我的监控", "DR_MY_MONITOR"),
+                    _wecom_app_menu_click_button("今日提醒", "DR_TODAY_REMINDERS"),
+                    _wecom_app_menu_click_button("明日监控", "DR_TOMORROW_MONITOR"),
+                    _wecom_app_menu_click_button("本周监控", "DR_WEEK_MONITOR"),
+                    _wecom_app_menu_click_button("下次提醒", "DR_NEXT_REMINDER"),
+                ],
+            },
+            {
+                "name": "机电预警",
+                "sub_button": [
+                    _wecom_app_menu_click_button("机电模板", "DR_TUNNEL_TEMPLATE"),
+                    _wecom_app_menu_click_button("修改模板", "DR_TUNNEL_MODIFY_TEMPLATE"),
+                    _wecom_app_menu_click_button("橙色预警巡查记录查询", "DR_ORANGE_PATROL_RECORD"),
+                ],
+            },
+            {
+                "name": "绑定帮助",
+                "sub_button": [
+                    _wecom_app_menu_click_button("我的绑定", "DR_BINDING"),
+                    _wecom_app_menu_click_button("查询帮助", "DR_HELP"),
+                ],
+            },
+        ]
+    }
+    _validate_wecom_app_menu_payload(menu)
+    return menu
+
+
+def _wecom_app_menu_click_button(name: str, key: str) -> dict[str, str]:
+    return {"type": "click", "name": name, "key": key}
+
+
+def _wecom_app_menu_command(value: str) -> str:
+    text = str(value or "").strip()
+    return WECOM_APP_MENU_COMMANDS.get(text, text)
+
+
+def _is_wecom_app_query(query: WechatQueryRequest) -> bool:
+    return str(query.channel or "").strip() == "wecom_app"
+
+
+def _wecom_app_bind_required_response(repo: DutyRepository, query: WechatQueryRequest) -> dict[str, Any]:
+    examples = _wechat_query_known_person_names(repo)
+    example = examples[0] if examples else "商邱宏"
+    sender_name = _clean_wechat_member_display_name(
+        str(query.sender_name or ""),
+        str(query.runtime_sender_id or query.sender_id or ""),
+    )
+    suffix = f"\n当前企业微信成员：{sender_name}" if sender_name else ""
+    return {
+        "success": False,
+        "query_type": "unbound",
+        "reply": (
+            "首次使用企业微信自建应用请先绑定姓名，后面才能按你的名字生成监控提醒和机电/预警模板。\n"
+            f"请直接发送：绑定{example}"
+            f"{suffix}"
+        ),
+    }
+
+
+def _wechat_query_bound_person_name(repo: DutyRepository, query: WechatQueryRequest) -> str:
+    person = _person_for_wechat_query(repo, query)
+    return str(person.get("name") or "").strip() if person else ""
+
+
+def _personalize_recorder_field(text: str, person_name: str) -> str:
+    name = str(person_name or "").strip()
+    if not name:
+        return str(text or "")
+    value = str(text or "")
+    updated, count = re.subn(r"(记录人\s*)[^\s，,。；;]+", lambda match: f"{match.group(1)}{name}", value, count=1)
+    return updated if count else value
+
+
+def _personalize_patrol_record_template(text: str, person_name: str) -> str:
+    name = str(person_name or "").strip()
+    if not name:
+        return str(text or "")
+    value = str(text or "")
+    updated, count = re.subn(
+        r"((?:查询|查)?)[^\s，,。；;]+(巡查记录)",
+        lambda match: f"{match.group(1)}{name}{match.group(2)}",
+        value,
+        count=1,
+    )
+    return updated if count else value
+
+
+def _validate_wecom_app_menu_payload(menu: dict[str, Any]) -> None:
+    buttons = menu.get("button") or []
+    limits = WECOM_APP_MENU_LIMITS
+    if len(buttons) > limits["max_top_buttons"]:
+        raise ValueError("企业微信自建应用一级菜单最多只能创建 3 个")
+    for button in buttons:
+        top_name = str(button.get("name") or "")
+        if len(top_name.encode("utf-8")) > limits["max_top_name_bytes"]:
+            raise ValueError(f"企业微信自建应用一级菜单“{top_name}”超过 16 字节")
+        sub_buttons = button.get("sub_button") or []
+        if len(sub_buttons) > limits["max_sub_buttons"]:
+            raise ValueError(f"企业微信自建应用“{top_name}”二级菜单最多只能创建 5 个")
+        for sub_button in sub_buttons:
+            sub_name = str(sub_button.get("name") or "")
+            if len(sub_name.encode("utf-8")) > limits["max_sub_name_bytes"]:
+                raise ValueError(f"企业微信自建应用二级菜单“{sub_name}”超过 40 字节")
+
+
+def _public_wecom_app_menu_preview() -> dict[str, Any]:
+    payload = _wecom_app_menu_payload()
+    groups = []
+    for button in payload["button"]:
+        groups.append(
+            {
+                "name": button["name"],
+                "items": [
+                    {
+                        "name": sub["name"],
+                        "key": sub["key"],
+                        "command": _wecom_app_menu_command(sub["key"]),
+                    }
+                    for sub in button.get("sub_button", [])
+                ],
+            }
+        )
+    return {"limits": copy.deepcopy(WECOM_APP_MENU_LIMITS), "groups": groups, "payload": payload}
+
+
 def _public_wechat_interaction_logs(repo: DutyRepository, logs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     del repo
     items: list[dict[str, Any]] = []
@@ -2946,7 +3162,7 @@ def _wecom_app_notify_client_from_config(config: dict[str, Any], repo: DutyRepos
 
 
 async def _handle_wecom_app_message(repo: DutyRepository, uploads: Path, message) -> None:
-    text = str(message.content or "").strip()
+    text = _wecom_app_menu_command(str(getattr(message, "event_key", "") or getattr(message, "content", "") or "").strip())
     userid = str(message.from_user or "").strip()
     if not text or not userid:
         return
@@ -3074,10 +3290,17 @@ async def _build_wechat_patrol_record_response(
     *,
     uploads: Path | None = None,
 ) -> dict[str, Any] | None:
-    if not _is_wechat_patrol_record_command(text) and not _is_wechat_patrol_record_template_trigger(repo, text):
+    if (
+        not _is_wechat_patrol_record_command(text)
+        and not _is_wechat_patrol_record_template_trigger(repo, text)
+        and not _is_orange_warning_patrol_record_template_shortcut(text)
+    ):
         return None
-    if _is_wechat_patrol_record_template_trigger(repo, text):
-        template = _wechat_patrol_record_template(repo)
+    if _is_wechat_patrol_record_template_trigger(repo, text) or _is_orange_warning_patrol_record_template_shortcut(text):
+        person_name = _wechat_query_bound_person_name(repo, query)
+        if _is_wecom_app_query(query) and not person_name:
+            return _wecom_app_bind_required_response(repo, query)
+        template = _wechat_patrol_record_template(repo, person_name=person_name)
         return {
             "success": True,
             "query_type": "patrol_record_template",
@@ -3166,6 +3389,10 @@ def _is_wechat_patrol_record_template_trigger(repo: DutyRepository, text: str) -
     return value in _wechat_interaction_config(repo)["patrol_record_triggers"]
 
 
+def _is_orange_warning_patrol_record_template_shortcut(text: str) -> bool:
+    return str(text or "").strip() in {"橙色预警巡查记录查询", "橙色预警巡查查询", "橙色巡查记录查询"}
+
+
 def _is_wechat_interaction_trigger(repo: DutyRepository, text: str) -> bool:
     value = str(text or "").strip()
     config = _wechat_interaction_config(repo)
@@ -3176,10 +3403,12 @@ def _is_wechat_interaction_trigger(repo: DutyRepository, text: str) -> bool:
     }
 
 
-def _wechat_patrol_record_template(repo: DutyRepository | None = None) -> str:
+def _wechat_patrol_record_template(repo: DutyRepository | None = None, *, person_name: str = "") -> str:
     if repo is None:
-        return DEFAULT_PATROL_RECORD_TEMPLATE
-    return _wechat_interaction_config(repo)["patrol_record_template"]
+        template = DEFAULT_PATROL_RECORD_TEMPLATE
+    else:
+        template = _wechat_interaction_config(repo)["patrol_record_template"]
+    return _personalize_patrol_record_template(template, person_name)
 
 
 def _wechat_patrol_record_name(repo: DutyRepository, text: str) -> str:
@@ -3282,8 +3511,11 @@ async def _build_tunnel_mechanical_wechat_response(
     ):
         return None
     template = _public_tunnel_mechanical_template(repo.get_tunnel_mechanical_template())
+    bound_person_name = _wechat_query_bound_person_name(repo, query)
     if _is_tunnel_mechanical_wechat_modify_template_shortcut(text, repo):
-        template_line = _tunnel_mechanical_wechat_modify_template_line(template, query.target_date, repo=repo)
+        if _is_wecom_app_query(query) and not bound_person_name:
+            return _wecom_app_bind_required_response(repo, query)
+        template_line = _tunnel_mechanical_wechat_modify_template_line(template, query.target_date, repo=repo, person_name=bound_person_name)
         return {
             "success": True,
             "query_type": "tunnel_mechanical_modify_template",
@@ -3292,7 +3524,9 @@ async def _build_tunnel_mechanical_wechat_response(
             "template": template_line,
         }
     if _is_tunnel_mechanical_wechat_template_shortcut(text, repo):
-        template_line = _tunnel_mechanical_wechat_template_line(template, query.target_date, repo=repo)
+        if _is_wecom_app_query(query) and not bound_person_name:
+            return _wecom_app_bind_required_response(repo, query)
+        template_line = _tunnel_mechanical_wechat_template_line(template, query.target_date, repo=repo, person_name=bound_person_name)
         return {
             "success": True,
             "query_type": "tunnel_mechanical_template",
@@ -3303,11 +3537,13 @@ async def _build_tunnel_mechanical_wechat_response(
     if _is_tunnel_mechanical_wechat_modify_command(text):
         return await _build_tunnel_mechanical_wechat_modify_response(repo, query, text, template, uploads=uploads)
     if _is_tunnel_mechanical_wechat_template_command(text, repo):
-        return _tunnel_mechanical_wechat_template_response(template, query.target_date, repo=repo)
+        if _is_wecom_app_query(query) and not bound_person_name:
+            return _wecom_app_bind_required_response(repo, query)
+        return _tunnel_mechanical_wechat_template_response(template, query.target_date, repo=repo, person_name=bound_person_name)
     if _is_tunnel_mechanical_wechat_result_query_command(text):
         return await _build_tunnel_mechanical_wechat_result_query_response(repo, query, text, template, uploads=uploads)
     if not _is_tunnel_mechanical_wechat_submit_command(text):
-        return _tunnel_mechanical_wechat_template_response(template, query.target_date, repo=repo)
+        return _tunnel_mechanical_wechat_template_response(template, query.target_date, repo=repo, person_name=bound_person_name)
     if not template["assets"] or not template["people"]:
         return {
             "success": False,
@@ -3321,7 +3557,7 @@ async def _build_tunnel_mechanical_wechat_response(
     if not params.get("recorder"):
         missing.append("记录人")
     if missing:
-        example = _tunnel_mechanical_wechat_template_line(template, params["checkTime"], repo=repo)
+        example = _tunnel_mechanical_wechat_template_line(template, params["checkTime"], repo=repo, person_name=bound_person_name)
         return {
             "success": False,
             "query_type": "tunnel_mechanical",
@@ -3648,9 +3884,10 @@ def _tunnel_mechanical_wechat_template_response(
     target_date: date | None = None,
     *,
     repo: DutyRepository | None = None,
+    person_name: str = "",
 ) -> dict[str, Any]:
-    intro = _tunnel_mechanical_wechat_template_reply(template, target_date, repo=repo)
-    template_line = _tunnel_mechanical_wechat_template_line(template, target_date, repo=repo)
+    intro = _tunnel_mechanical_wechat_template_reply(template, target_date, repo=repo, person_name=person_name)
+    template_line = _tunnel_mechanical_wechat_template_line(template, target_date, repo=repo, person_name=person_name)
     return {
         "success": True,
         "query_type": "tunnel_mechanical_template",
@@ -3673,10 +3910,12 @@ def _tunnel_mechanical_wechat_template_line(
     target_date: date | None = None,
     *,
     repo: DutyRepository | None = None,
+    person_name: str = "",
 ) -> str:
     del template
     pattern = _wechat_interaction_config(repo)["tunnel_template"] if repo is not None else DEFAULT_TUNNEL_TEMPLATE
-    return _render_wechat_template_text(pattern, target_date) or _render_wechat_template_text(DEFAULT_TUNNEL_TEMPLATE, target_date)
+    rendered = _render_wechat_template_text(pattern, target_date) or _render_wechat_template_text(DEFAULT_TUNNEL_TEMPLATE, target_date)
+    return _personalize_recorder_field(rendered, person_name)
 
 
 def _tunnel_mechanical_wechat_modify_template_line(
@@ -3684,10 +3923,12 @@ def _tunnel_mechanical_wechat_modify_template_line(
     target_date: date | None = None,
     *,
     repo: DutyRepository | None = None,
+    person_name: str = "",
 ) -> str:
     del template
     pattern = _wechat_interaction_config(repo)["tunnel_modify_template"] if repo is not None else DEFAULT_TUNNEL_MODIFY_TEMPLATE
-    return _render_wechat_template_text(pattern, target_date) or _render_wechat_template_text(DEFAULT_TUNNEL_MODIFY_TEMPLATE, target_date)
+    rendered = _render_wechat_template_text(pattern, target_date) or _render_wechat_template_text(DEFAULT_TUNNEL_MODIFY_TEMPLATE, target_date)
+    return _personalize_recorder_field(rendered, person_name)
 
 
 def _tunnel_mechanical_wechat_template_reply(
@@ -3695,6 +3936,7 @@ def _tunnel_mechanical_wechat_template_reply(
     target_date: date | None = None,
     *,
     repo: DutyRepository | None = None,
+    person_name: str = "",
 ) -> str:
     check_time = (target_date or _today_in_tz()).isoformat()
     asset_count = len(template.get("assets") or [])
@@ -3712,8 +3954,8 @@ def _tunnel_mechanical_wechat_template_reply(
         "- 只想预览请求，把“录入”改成“预览”\n\n"
         "修改记录：\n"
         "- 发送“修改模板”获取可复制修改模板\n"
-        f"- {_tunnel_mechanical_wechat_modify_template_line(template, target_date, repo=repo)}\n"
-        "- 也可以修改天气、负责人、记录人，例如：修改天气为多云、负责人改为罗富耀、记录人改为商邱宏\n"
+        f"- {_tunnel_mechanical_wechat_modify_template_line(template, target_date, repo=repo, person_name=person_name)}\n"
+        f"- 也可以修改天气、负责人、记录人，例如：修改天气为多云、负责人改为罗富耀、记录人改为{person_name or '商邱宏'}\n"
         f"登录失效时会自动重新登录；验证码识别失败会自动重试。"
         f"{asset_line}"
         f"{people_line}"
@@ -4208,7 +4450,7 @@ def _wechat_query_unbound_response(query: WechatQueryRequest) -> dict[str, Any]:
     return {
         "success": False,
         "query_type": "unbound",
-        "reply": "还没有识别到“我”对应的人员。可以直接回复“绑定姓名”，例如：绑定张三；也可以改发“查询张三监控”按姓名查询。" + suffix,
+        "reply": "还没有识别到“我”对应的人员。可以直接回复“绑定姓名”，例如：绑定商邱宏；也可以改发“查询商邱宏监控”按姓名查询。" + suffix,
     }
 
 
