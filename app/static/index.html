@@ -3221,7 +3221,7 @@
                       <label class="checkbox-label"><span>启用</span><input id="wecomAppEnabled" type="checkbox" /></label>
                     </div>
                     <p class="settings-panel-note">
-                      用于企业微信里直接给自建应用发送“菜单、查询今日提醒、查询我的监控”等命令；项目收到回调后主动回复文字和图片。
+                      启用后，通知发送和命令交互都只走企业微信自建应用；企业微信群机器人、个人微信群和智能机器人不会同时发送/回复。
                     </p>
                     <div class="settings-panel-note">
                       <strong>配置步骤：</strong><br />
@@ -4093,6 +4093,9 @@
     function overviewNotificationText() {
       const config = state.notificationConfig || {};
       if (!config.notification_configured) return "通知通道未配置";
+      if (config.effective_sender_type === "wecom_app" || config.wecom_app_enabled) {
+        return config.wecom_app_configured ? "企业微信自建应用" : "企业微信自建应用（未配置完整）";
+      }
       if (config.sender_type === "lightagent") {
         const count = normalizeFeatureChannelRooms(config.lightagent_targets || []).length;
         return count ? `个人微信群（${count} 个群）` : "个人微信群";
@@ -6636,7 +6639,7 @@
       state.notificationConfig = body.config || {};
       state.wechatBridgeEnabled = Boolean(body.config && body.config.wechat_bridge_enabled);
       $("notificationSenderType").value = body.config && body.config.sender_type ? body.config.sender_type : "wecom_webhook";
-      state.notificationActivePanel = $("notificationSenderType").value || "wecom_webhook";
+      state.notificationActivePanel = body.config && body.config.wecom_app_enabled ? "wecom_app" : ($("notificationSenderType").value || "wecom_webhook");
       $("webhookUrl").value = "";
       $("webhookUrl").placeholder = body.config && body.config.webhook_configured ? "已配置，如需修改请输入新地址" : "未配置，保存时请输入机器人地址";
       $("wecomAiBotEnabled").checked = Boolean(body.config && body.config.wecom_aibot_enabled);
@@ -8460,7 +8463,7 @@
         const patrolScheduleText = patrol.backoff_until
           ? `退避到 ${formatIsoMinute(patrol.backoff_until)}`
           : (patrol.next_check_at ? `下次检查 ${formatIsoMinute(patrol.next_check_at)}` : "尚未安排检查");
-        const notificationLabel = body.notification_sender_type === "lightagent" ? wechatGatewayLabel() : "企业微信群机器人";
+        const notificationLabel = body.notification_sender_type === "wecom_app" ? "企业微信自建应用" : (body.notification_sender_type === "lightagent" ? wechatGatewayLabel() : "企业微信群机器人");
         const cards = [
           ["北京时间", formatIsoMinute(body.now_beijing), body.timezone || ""],
           ["后台调度", yesNo(body.scheduler_enabled), body.scheduler_enabled ? "已启动，提醒是否发送看各项启用开关" : "仅测试模式关闭"],

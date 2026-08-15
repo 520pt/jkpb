@@ -125,3 +125,78 @@ def test_wecom_app_message_binding_uses_enterprise_userid(tmp_path: Path, monkey
 
     assert repo.list_personnel()[0]["wecom_userid"] == "luofuyao"
     assert any("绑定成功：罗富耀" in content for _, content in fake.texts)
+
+
+
+def test_wecom_app_enabled_overrides_other_notification_channels(tmp_path: Path, monkeypatch):
+    class FailingWebhookClient:
+        def __init__(self, *args, **kwargs) -> None:
+            raise AssertionError("webhook should not be used when wecom app is enabled")
+
+    class FakeRawWeComClient:
+        def __init__(self, *args, **kwargs) -> None:
+            self.texts: list[tuple[str, str]] = []
+            raw_clients.append(self)
+
+        async def send_text(self, touser: str, content: str) -> None:
+            self.texts.append((touser, content))
+
+        async def send_image(self, touser: str, image_bytes: bytes) -> None:
+            raise AssertionError("image not expected")
+
+    raw_clients: list[FakeRawWeComClient] = []
+    monkeypatch.setattr(main_module, "WeComWebhookClient", FailingWebhookClient)
+    monkeypatch.setattr(main_module, "WeComClient", FakeRawWeComClient)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    repo = app.state.repo
+    repo.upsert_personnel_names(["罗富耀"])
+    repo.upsert_personnel_contacts([{"name": "罗富耀", "wecom_userid": "luofuyao"}])
+    repo.save_notification_config(
+        sender_type="wecom_webhook",
+        webhook_url="https://example.test/cgi-bin/webhook/send?key=stale-webhook",
+        wecom_app_enabled=True,
+        wecom_app_corp_id=CORP_ID,
+        wecom_app_agent_id="1000002",
+        wecom_app_secret="app-secret",
+        wecom_app_token=TOKEN,
+        wecom_app_encoding_aes_key=AES_KEY,
+    )
+    client = TestClient(app)
+
+    public = client.get("/api/notification-config").json()["config"]
+    response = client.post("/api/notification-config/test", json={"person_name": "罗富耀"})
+
+    assert public["effective_sender_type"] == "wecom_app"
+    assert public["notification_configured"] is True
+    assert response.status_code == 200
+    assert raw_clients[-1].texts
+    assert raw_clients[-1].texts[0][0] == "luofuyao"
+
+
+def test_wecom_app_enabled_disables_aibot_manager():
+    class FakeManager:
+        def __init__(self) -> None:
+            self.enabled = None
+
+        def configure(self, **kwargs) -> None:
+            self.enabled = kwargs["enabled"]
+
+    manager = FakeManager()
+
+    main_module._configure_wecom_aibot_manager(
+        manager,
+        {
+            "wecom_aibot_enabled": True,
+            "wecom_aibot_id": "bot-id",
+            "wecom_aibot_secret": "bot-secret",
+            "wecom_app_enabled": True,
+            "wecom_app_corp_id": CORP_ID,
+            "wecom_app_agent_id": "1000002",
+            "wecom_app_secret": "app-secret",
+            "wecom_app_token": TOKEN,
+            "wecom_app_encoding_aes_key": AES_KEY,
+        },
+        restart=False,
+    )
+
+    assert manager.enabled is False

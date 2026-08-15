@@ -6,7 +6,7 @@ import json
 import httpx
 import pytest
 
-from app.wecom import LightAgentNotifyClient, WeComClient, WeComError, WeComWebhookClient
+from app.wecom import LightAgentNotifyClient, WeComAppNotifyClient, WeComClient, WeComError, WeComWebhookClient
 
 
 def test_send_text_requests_token_and_posts_message_payload():
@@ -331,3 +331,30 @@ def test_lightagent_notify_client_can_send_to_selected_target_only():
     asyncio.run(client.send_image(b"png", target_ids=["room-2"]))
 
     assert targets == ["room-2", "room-2"]
+
+
+
+def test_wecom_app_notify_client_sends_to_selected_userids():
+    asyncio.run(_wecom_app_notify_client_sends_to_selected_userids())
+
+
+async def _wecom_app_notify_client_sends_to_selected_userids():
+    class FakeAppClient:
+        def __init__(self) -> None:
+            self.texts: list[tuple[str, str]] = []
+            self.images: list[tuple[str, bytes]] = []
+
+        async def send_text(self, touser: str, content: str) -> None:
+            self.texts.append((touser, content))
+
+        async def send_image(self, touser: str, image_bytes: bytes) -> None:
+            self.images.append((touser, image_bytes))
+
+    raw = FakeAppClient()
+    client = WeComAppNotifyClient(raw, default_tousers=["user-a", "user-b"])
+
+    await client.send_text("提醒", target_ids=["user-c"])
+    await client.send_image(b"png", target_ids=None)
+
+    assert raw.texts == [("user-c", "提醒")]
+    assert raw.images == [("user-a|user-b", b"png")]

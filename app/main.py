@@ -57,7 +57,7 @@ from app.storage import (
     DutyRepository,
 )
 from app.tunnel_mechanical_image import render_tunnel_mechanical_result_image
-from app.wecom import LightAgentNotifyClient, WeComClient, WeComError, WeComWebhookClient
+from app.wecom import LightAgentNotifyClient, WeComAppNotifyClient, WeComClient, WeComError, WeComWebhookClient
 from app.wecom_app import WeComAppCrypto, WeComAppCryptoError, encrypted_text_from_xml, parse_wecom_app_message
 from app.wecom_aibot import WeComAiBotManager
 from app.wechat_query_image import render_wechat_query_image
@@ -782,7 +782,16 @@ def create_app(
         target = request.target_date or _today_in_tz()
         preview = _build_daily_duty_preview(repo, target)
         try:
-            await _notify_send_image(notification_client, render_daily_duty_image(preview), _daily_duty_target_room_ids(repo))
+            event = ReminderEvent(
+                kind="daily_duty_test",
+                person_name="今日在岗人员",
+                send_at=datetime.fromisoformat(preview["send_at"]),
+                content=preview["content"],
+            )
+            target_ids = _notification_target_ids_for_event(repo, notification_client, event)
+            if not _is_wecom_app_notify_client(notification_client):
+                target_ids = _daily_duty_target_room_ids(repo)
+            await _notify_send_image(notification_client, render_daily_duty_image(preview), target_ids)
             repo.save_send_record(
                 kind="daily_duty_test",
                 target="今日在岗人员",
@@ -1200,9 +1209,10 @@ def create_app(
         event = ReminderEvent(kind="notification_test", person_name=person_name, send_at=datetime.now(TZ), content=content)
         mentions = _notification_true_mentions_for_event(repo, notification_client, event)
         content = _notification_content_for_event(repo, notification_client, event)
+        target_ids = _notification_target_ids_for_event(repo, notification_client, event)
         record_target = person_name or "测试消息"
         try:
-            await notification_client.send_text(content, mentions)
+            await _notify_send_text(notification_client, content, mentions, target_ids)
             repo.save_send_record(
                 kind="notification_test",
                 target=record_target,
@@ -2785,6 +2795,8 @@ async def _build_wechat_query_response(
 
 
 def _handle_wechat_bridge_message(repo: DutyRepository, uploads: Path, message: dict[str, Any]) -> None:
+    if bool(_notification_config_with_env_defaults(repo.get_notification_config()).get("wecom_app_enabled")):
+        return
     if message.get("my_msg"):
         return
     if not bool(message.get("is_at")):
@@ -2843,9 +2855,11 @@ def _configure_wecom_aibot_manager(
     restart: bool = True,
 ) -> None:
     merged = _notification_config_with_env_defaults(config)
+    # 企业微信自建应用是独立且更稳定的交互入口；启用后不要再同时启动智能机器人长连接。
+    enabled = bool(merged.get("wecom_aibot_enabled")) and not bool(merged.get("wecom_app_enabled"))
     try:
         manager.configure(
-            enabled=bool(merged.get("wecom_aibot_enabled")),
+            enabled=enabled,
             bot_id=str(merged.get("wecom_aibot_id") or ""),
             secret=str(merged.get("wecom_aibot_secret") or ""),
             restart=restart,
@@ -2876,6 +2890,59 @@ def _wecom_app_client_from_repo(repo: DutyRepository) -> WeComClient:
     if not bool(config.get("wecom_app_enabled")) or not corp_id or not secret or not agent_id:
         raise WeComError("企业微信自建应用 CorpID / AgentId / Secret 未配置")
     return WeComClient(corp_id=corp_id, corp_secret=secret, agent_id=int(agent_id))
+
+
+def _wecom_app_config_complete(config: dict[str, Any], *, require_callback: bool = True) -> bool:
+    required = [
+        "wecom_app_corp_id",
+        "wecom_app_agent_id",
+        "wecom_app_secret",
+    ]
+    if require_callback:
+        required.extend(["wecom_app_token", "wecom_app_encoding_aes_key"])
+    if not bool(config.get("wecom_app_enabled")) or not all(str(config.get(key) or "").strip() for key in required):
+        return False
+    try:
+        int(str(config.get("wecom_app_agent_id") or "").strip())
+    except ValueError:
+        return False
+    return True
+
+
+def _wecom_app_userid_lookup(repo: DutyRepository) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+    for source in (repo.list_personnel(), repo.list_monitored_people()):
+        for person in source:
+            name = str(person.get("name") or "").strip()
+            userid = str(person.get("wecom_userid") or "").strip()
+            if name and userid and name not in lookup:
+                lookup[name] = userid
+    return lookup
+
+
+def _wecom_app_default_tousers(repo: DutyRepository) -> list[str]:
+    userids = list(dict.fromkeys(_wecom_app_userid_lookup(repo).values()))
+    return userids or ["@all"]
+
+
+def _wecom_app_notify_client_from_config(config: dict[str, Any], repo: DutyRepository | None = None) -> WeComAppNotifyClient | None:
+    config = _notification_config_with_env_defaults(config)
+    if not bool(config.get("wecom_app_enabled")):
+        return None
+    if not _wecom_app_config_complete(config, require_callback=True):
+        return None
+    try:
+        agent_id = int(str(config.get("wecom_app_agent_id") or "0").strip())
+    except ValueError:
+        return None
+    return WeComAppNotifyClient(
+        WeComClient(
+            corp_id=str(config.get("wecom_app_corp_id") or "").strip(),
+            corp_secret=str(config.get("wecom_app_secret") or "").strip(),
+            agent_id=agent_id,
+        ),
+        default_tousers=_wecom_app_default_tousers(repo) if repo is not None else ["@all"],
+    )
 
 
 async def _handle_wecom_app_message(repo: DutyRepository, uploads: Path, message) -> None:
@@ -2922,6 +2989,8 @@ def _handle_wecom_aibot_message(
     manager: WeComAiBotManager,
     message: dict[str, Any],
 ) -> None:
+    if bool(_notification_config_with_env_defaults(repo.get_notification_config()).get("wecom_app_enabled")):
+        return
     text = str(message.get("text") or "").strip()
     normalized = _normalize_wechat_query_text(text)
     if not text or not _looks_like_duty_wechat_command(normalized, repo):
@@ -4657,11 +4726,19 @@ def _public_notification_config(config: dict[str, Any]) -> dict[str, Any]:
     lightagent_token = str(config.get("lightagent_token", "")).strip()
     sender_type = _normalize_notification_sender_type(str(config.get("sender_type") or "wecom_webhook"))
     mention_mode = _normalize_notification_mention_mode(str(config.get("mention_mode") or "person"))
-    webhook_active = sender_type == "wecom_webhook"
-    lightagent_active = sender_type == "lightagent"
-    active_configured = bool(webhook_url) if webhook_active else bool(lightagent_targets and (lightagent_url or wechat_bridge_enabled()))
+    wecom_app_configured = _wecom_app_config_complete(config, require_callback=True)
+    wecom_app_active = bool(config.get("wecom_app_enabled"))
+    effective_sender_type = "wecom_app" if wecom_app_active else sender_type
+    webhook_active = not wecom_app_active and sender_type == "wecom_webhook"
+    lightagent_active = not wecom_app_active and sender_type == "lightagent"
+    active_configured = (
+        wecom_app_configured
+        if wecom_app_active
+        else (bool(webhook_url) if webhook_active else bool(lightagent_targets and (lightagent_url or wechat_bridge_enabled())))
+    )
     return {
         "sender_type": sender_type,
+        "effective_sender_type": effective_sender_type,
         "wechat_bridge_enabled": wechat_bridge_enabled(),
         "webhook_url": "",
         "webhook_configured": bool(webhook_url),
@@ -4672,10 +4749,10 @@ def _public_notification_config(config: dict[str, Any]) -> dict[str, Any]:
         "wecom_aibot_configured": bool(wecom_aibot_id and wecom_aibot_secret),
         "wecom_aibot_secret": "",
         "wecom_aibot_secret_configured": bool(wecom_aibot_secret),
-        "wecom_app_enabled": bool(config.get("wecom_app_enabled")),
+        "wecom_app_enabled": wecom_app_active,
         "wecom_app_corp_id": wecom_app_corp_id,
         "wecom_app_agent_id": wecom_app_agent_id,
-        "wecom_app_configured": bool(wecom_app_corp_id and wecom_app_agent_id and wecom_app_secret and wecom_app_token and wecom_app_encoding_aes_key),
+        "wecom_app_configured": wecom_app_configured,
         "wecom_app_secret": "",
         "wecom_app_secret_configured": bool(wecom_app_secret),
         "wecom_app_token": "",
@@ -6793,7 +6870,7 @@ def _build_system_status(repo: DutyRepository, scheduler_enabled: bool, cjk_font
         "scheduler_enabled": scheduler_enabled,
         "webhook_configured": bool(notification_config.get("webhook_configured")),
         "notification_configured": bool(notification_config.get("notification_configured")),
-        "notification_sender_type": str(notification_config.get("sender_type") or "wecom_webhook"),
+        "notification_sender_type": str(notification_config.get("effective_sender_type") or notification_config.get("sender_type") or "wecom_webhook"),
         "wechat_bridge_enabled": wechat_bridge_enabled(),
         "cjk_font_ready": cjk_font_ready,
         "roster_month_count": repo.count_roster_months(),
@@ -6991,7 +7068,7 @@ async def _check_patrol_warning_monitor(repo: DutyRepository) -> None:
 
 async def _send_patrol_warning_message(
     repo: DutyRepository,
-    webhook_client: WeComWebhookClient,
+    webhook_client: Any,
     *,
     kind: str,
     target: str,
@@ -7005,9 +7082,9 @@ async def _send_patrol_warning_message(
     try:
         patrol_config = repo.get_patrol_warning_config()
         send_content_mode = _normalize_patrol_send_content_mode(str(patrol_config.get("send_content_mode") or "both"))
-        target_ids = _patrol_warning_target_room_ids(repo)
+        event = ReminderEvent(kind=kind, person_name="", send_at=now or datetime.now(TZ), content=content)
+        target_ids = _notification_target_ids_for_event(repo, webhook_client, event) if _is_wecom_app_notify_client(webhook_client) else _patrol_warning_target_room_ids(repo)
         if send_content_mode in {"both", "text"}:
-            event = ReminderEvent(kind=kind, person_name="", send_at=now or datetime.now(TZ), content=content)
             content = _notification_content_for_event(repo, webhook_client, event)
             await _notify_send_text(webhook_client, content, _notification_true_mentions_for_event(repo, webhook_client, event), target_ids)
         if send_content_mode in {"both", "image"} and warning is not None:
@@ -7120,7 +7197,7 @@ def _notification_target_names(repo: DutyRepository, event: ReminderEvent | str 
 
 
 def _notification_true_mentions_for_event(repo: DutyRepository, client: Any, event: ReminderEvent) -> list[str]:
-    if _is_personal_wechat_notify_client(client):
+    if _is_personal_wechat_notify_client(client) or _is_wecom_app_notify_client(client):
         return []
     mention = _notification_mention_config(repo)
     mode = mention["mode"]
@@ -7224,7 +7301,7 @@ async def _send_test_reminder_event(
     mentions = _notification_true_mentions_for_event(repo, notification_client, event)
     content = _notification_content_for_event(repo, notification_client, event)
     target = event.person_name or "测试消息"
-    target_ids = _notification_target_room_ids_for_event(event)
+    target_ids = _notification_target_ids_for_event(repo, notification_client, event)
     sent_content = content
     try:
         if _should_send_shift_reminder_image(event) and hasattr(notification_client, "send_image"):
@@ -7493,6 +7570,18 @@ def _notification_target_room_ids_for_event(event: ReminderEvent) -> list[str] |
     return [room_id] if room_id else None
 
 
+def _notification_target_ids_for_event(repo: DutyRepository, client: Any, event: ReminderEvent) -> list[str] | None:
+    if _is_wecom_app_notify_client(client):
+        person_target = _person_target_for_event(event)
+        if not person_target and event.kind == "notification_test":
+            person_target = str(event.person_name or "").strip()
+        if person_target:
+            userid = _wecom_app_userid_lookup(repo).get(person_target, "")
+            return [userid] if userid else []
+        return None
+    return _notification_target_room_ids_for_event(event)
+
+
 def _daily_duty_target_room_ids(repo: DutyRepository) -> list[str] | None:
     room_id = str(repo.get_daily_duty_config().get("notification_room_id") or "").strip()
     return [room_id] if room_id else None
@@ -7518,14 +7607,14 @@ def _record_target_room_ids(record: dict[str, Any]) -> list[str] | None:
 
 
 async def _notify_send_text(client: Any, content: str, mentions: list[str] | None = None, target_ids: list[str] | None = None) -> None:
-    if target_ids and _is_personal_wechat_notify_client(client):
+    if target_ids is not None and (_is_personal_wechat_notify_client(client) or _is_wecom_app_notify_client(client)):
         await client.send_text(content, mentions, target_ids=target_ids)
         return
     await client.send_text(content, mentions)
 
 
 async def _notify_send_image(client: Any, image_bytes: bytes, target_ids: list[str] | None = None) -> None:
-    if target_ids and _is_personal_wechat_notify_client(client):
+    if target_ids is not None and (_is_personal_wechat_notify_client(client) or _is_wecom_app_notify_client(client)):
         await client.send_image(image_bytes, target_ids=target_ids)
         return
     await client.send_image(image_bytes)
@@ -7534,6 +7623,10 @@ def _is_personal_wechat_notify_client(client: Any) -> bool:
     return isinstance(client, (LightAgentNotifyClient, WechatBridgeNotifyClient)) or bool(
         getattr(client, "is_wechat_bridge", False)
     )
+
+
+def _is_wecom_app_notify_client(client: Any) -> bool:
+    return isinstance(client, WeComAppNotifyClient) or bool(getattr(client, "is_wecom_app_notify", False))
 
 
 async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> dict[str, Any]:
@@ -7550,11 +7643,14 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
     try:
         if kind in {"daily_duty", "daily_duty_test", "daily_duty_resend"}:
             preview_date = _date_from_record(record) or _today_in_tz()
-            await _notify_send_image(client, render_daily_duty_image(_build_daily_duty_preview(repo, preview_date)), record_target_ids or _daily_duty_target_room_ids(repo))
+            fake_event = ReminderEvent(kind=kind, person_name="今日在岗人员", send_at=datetime.now(TZ), content=content)
+            target_ids = _notification_target_ids_for_event(repo, client, fake_event) if _is_wecom_app_notify_client(client) else (record_target_ids or _daily_duty_target_room_ids(repo))
+            await _notify_send_image(client, render_daily_duty_image(_build_daily_duty_preview(repo, preview_date)), target_ids)
         elif kind.startswith("patrol_warning_"):
             fake_event = ReminderEvent(kind=kind, person_name="", send_at=datetime.now(TZ), content=content)
             content = _notification_content_for_event(repo, client, fake_event)
-            await _notify_send_text(client, content, _notification_true_mentions_for_event(repo, client, fake_event), record_target_ids or _patrol_warning_target_room_ids(repo))
+            target_ids = _notification_target_ids_for_event(repo, client, fake_event) if _is_wecom_app_notify_client(client) else (record_target_ids or _patrol_warning_target_room_ids(repo))
+            await _notify_send_text(client, content, _notification_true_mentions_for_event(repo, client, fake_event), target_ids)
         elif _is_shift_reminder_kind(kind) and hasattr(client, "send_image"):
             fake_event = ReminderEvent(
                 kind=kind,
@@ -7563,7 +7659,7 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
                 content=content,
             )
             mentions = _notification_true_mentions_for_event(repo, client, fake_event)
-            resend_target_ids = record_target_ids or _configured_person_target_room_ids(repo, target)
+            resend_target_ids = _notification_target_ids_for_event(repo, client, fake_event) if _is_wecom_app_notify_client(client) else (record_target_ids or _configured_person_target_room_ids(repo, target))
             intro_event = ReminderEvent(
                 kind=kind,
                 person_name=target,
@@ -7573,7 +7669,6 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
             await _notify_send_text(client, _notification_content_for_event(repo, client, intro_event), mentions, resend_target_ids)
             await _notify_send_image(client, render_shift_reminder_image(fake_event), resend_target_ids)
         else:
-            mobile_lookup = _person_mobile_lookup(repo)
             fake_event = ReminderEvent(
                 kind=kind,
                 person_name=target,
@@ -7581,7 +7676,8 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
                 content=content,
             )
             content = _notification_content_for_event(repo, client, fake_event)
-            await _notify_send_text(client, content, _notification_true_mentions_for_event(repo, client, fake_event), record_target_ids or _configured_person_target_room_ids(repo, target))
+            target_ids = _notification_target_ids_for_event(repo, client, fake_event) if _is_wecom_app_notify_client(client) else (record_target_ids or _configured_person_target_room_ids(repo, target))
+            await _notify_send_text(client, content, _notification_true_mentions_for_event(repo, client, fake_event), target_ids)
         repo.save_send_record(
             kind=resend_kind,
             target=target,
@@ -7632,53 +7728,39 @@ def _date_from_record(record: dict[str, Any]) -> date | None:
 async def _send_due_reminders(repo: DutyRepository) -> None:
     now = datetime.now(TZ)
     events = _plan_all_events(repo, now.date())
-    webhook_client = _wecom_webhook_client_from_repo(repo)
-    app_client = None if webhook_client else _wecom_client_from_env()
-    if webhook_client is None and app_client is None:
+    notification_client = _wecom_webhook_client_from_repo(repo)
+    if notification_client is None:
         return
 
-    people = {person["name"]: person for person in repo.list_monitored_people(enabled_only=True)}
     for event in events:
         if not (now - REMINDER_SEND_GRACE <= event.send_at <= now):
-            continue
-        person = people.get(event.person_name)
-        can_send = event.kind == "daily_duty" and webhook_client
-        can_send = bool(can_send or webhook_client or (person and app_client))
-        if not can_send:
             continue
         content_hash = hashlib.sha256(event.content.encode("utf-8")).hexdigest()[:12]
         reminder_key = f"{event.person_name}:{event.kind}:{event.send_at.isoformat()}:{event.key_suffix}:{event.target_room_id}:{content_hash}"
         if not repo.mark_sent_once(reminder_key):
             continue
         try:
-            target_ids = _notification_target_room_ids_for_event(event)
-            if event.kind == "daily_duty" and webhook_client:
-                await _notify_send_image(webhook_client, render_daily_duty_image(_build_daily_duty_preview(repo, now.date())), target_ids)
-            elif webhook_client and _should_send_shift_reminder_image(event) and hasattr(webhook_client, "send_image"):
-                mentions = _notification_true_mentions_for_event(repo, webhook_client, event)
+            target_ids = _notification_target_ids_for_event(repo, notification_client, event)
+            if event.kind == "daily_duty":
+                await _notify_send_image(notification_client, render_daily_duty_image(_build_daily_duty_preview(repo, now.date())), target_ids)
+            elif _should_send_shift_reminder_image(event) and hasattr(notification_client, "send_image"):
+                mentions = _notification_true_mentions_for_event(repo, notification_client, event)
+                intro_event = ReminderEvent(
+                    kind=event.kind,
+                    person_name=event.person_name,
+                    send_at=event.send_at,
+                    content=_shift_reminder_intro_content(event, personal_wechat=_is_personal_wechat_notify_client(notification_client)),
+                )
                 await _notify_send_text(
-                    webhook_client,
-                    _notification_content_for_event(
-                        repo,
-                        webhook_client,
-                        ReminderEvent(
-                            kind=event.kind,
-                            person_name=event.person_name,
-                            send_at=event.send_at,
-                            content=_shift_reminder_intro_content(event, personal_wechat=_is_personal_wechat_notify_client(webhook_client)),
-                        ),
-                    ),
+                    notification_client,
+                    _notification_content_for_event(repo, notification_client, intro_event),
                     mentions,
                     target_ids,
                 )
-                await _notify_send_image(webhook_client, render_shift_reminder_image(event), target_ids)
-            elif webhook_client:
-                mentions = _notification_true_mentions_for_event(repo, webhook_client, event)
-                await _notify_send_text(webhook_client, _notification_content_for_event(repo, webhook_client, event), mentions, target_ids)
-            elif person and app_client:
-                await app_client.send_text(person["wecom_userid"], event.content)
+                await _notify_send_image(notification_client, render_shift_reminder_image(event), target_ids)
             else:
-                continue
+                mentions = _notification_true_mentions_for_event(repo, notification_client, event)
+                await _notify_send_text(notification_client, _notification_content_for_event(repo, notification_client, event), mentions, target_ids)
             repo.save_send_record(
                 kind=event.kind,
                 target=event.person_name,
@@ -7704,11 +7786,17 @@ async def _send_due_reminders(repo: DutyRepository) -> None:
 
 
 def _notification_client_from_repo(repo: DutyRepository):
-    return _notification_client_from_config(repo.get_notification_config())
+    config = repo.get_notification_config()
+    merged = _notification_config_with_env_defaults(config)
+    if bool(merged.get("wecom_app_enabled")):
+        return _wecom_app_notify_client_from_config(merged, repo)
+    return _notification_client_from_config(config)
 
 
-def _notification_client_from_config(config: dict[str, Any]):
+def _notification_client_from_config(config: dict[str, Any], repo: DutyRepository | None = None):
     config = _notification_config_with_env_defaults(config)
+    if bool(config.get("wecom_app_enabled")):
+        return _wecom_app_notify_client_from_config(config, repo)
     sender_type = _normalize_notification_sender_type(str(config.get("sender_type") or "wecom_webhook"))
     if sender_type == "lightagent":
         targets = _normalize_feature_channel_rooms(config.get("lightagent_targets"))

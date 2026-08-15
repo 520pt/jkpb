@@ -98,6 +98,48 @@ class WeComClient:
             raise WeComError(f"WeCom image send failed: {data.get('errmsg', 'unknown error')}")
 
 
+class WeComAppNotifyClient:
+    """Notification adapter backed by a WeCom self-built app.
+
+    Unlike a group webhook, app messages are sent to enterprise userids.  When
+    the app channel is active this adapter is the single notification sender;
+    callers may pass target_ids as userids, otherwise default_tousers are used.
+    """
+
+    is_wecom_app_notify = True
+
+    def __init__(self, client: WeComClient, *, default_tousers: list[str] | None = None) -> None:
+        self.client = client
+        self.default_tousers = _normalize_wecom_tousers(default_tousers or [])
+
+    async def send_text(
+        self,
+        content: str,
+        mentioned_mobile_list: list[str] | None = None,
+        *,
+        target_ids: list[str] | None = None,
+    ) -> None:
+        await self.client.send_text(self._touser(target_ids), content)
+
+    async def send_image(self, image_bytes: bytes, *, target_ids: list[str] | None = None) -> None:
+        await self.client.send_image(self._touser(target_ids), image_bytes)
+
+    def _touser(self, target_ids: list[str] | None = None) -> str:
+        targets = self.default_tousers if target_ids is None else _normalize_wecom_tousers(target_ids)
+        if not targets:
+            raise WeComError("企业微信自建应用没有可发送的成员，请先让成员发送“绑定姓名”或配置应用可见范围")
+        return "|".join(targets)
+
+
+def _normalize_wecom_tousers(values: list[str]) -> list[str]:
+    targets: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in targets:
+            targets.append(text)
+    return targets
+
+
 class WeComWebhookClient:
     def __init__(
         self,
