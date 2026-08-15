@@ -3130,16 +3130,23 @@
                   <label>群机器人地址 <input id="webhookUrl" placeholder="未配置，保存时请输入机器人地址" /></label>
                   <div class="lightagent-notify-card stack">
                     <div class="notification-title-row">
-                      <h3>企业微信智能机器人交互</h3>
-                      <label class="inline-check"><input id="wecomAiBotEnabled" type="checkbox" /> 启用群内命令交互</label>
+                      <h3>企业微信智能机器人交互（群内查询命令）</h3>
+                      <label class="inline-check"><input id="wecomAiBotEnabled" type="checkbox" /> 启用企业微信群内命令交互</label>
                     </div>
-                    <p class="settings-panel-note">用于在企业微信群或单聊中发送“查询今日提醒、查询本周监控、模板”等命令并自动回复，不使用个人微信登录。</p>
+                    <p class="settings-panel-note">
+                      用于在企业微信群或单聊中直接发送文字命令，例如“菜单、查询今日提醒、查询本周监控、模板”，不需要 artifacts 或 JSON，也不使用个人微信登录。
+                    </p>
+                    <div class="settings-panel-note">
+                      <strong>Bot ID / Secret 获取方式：</strong>
+                      企业微信管理后台 → 智能机器人 → 创建机器人 → 选择“API 模式” → 创建后复制 Bot ID 和 Secret，并把该智能机器人添加到需要交互的企业微信群。
+                      这里不能填写普通“群机器人 Webhook”的地址或 key；Webhook 只负责系统主动发通知，不能接收群内命令。
+                    </div>
                     <div id="wecomAiBotFields" class="field-grid">
-                      <label>智能机器人 Bot ID
-                        <input id="wecomAiBotId" autocomplete="off" placeholder="在企业微信智能机器人 API 模式中获取" />
+                      <label>智能机器人 Bot ID（API 模式）
+                        <input id="wecomAiBotId" autocomplete="off" placeholder="创建 API 模式智能机器人后复制 Bot ID" />
                       </label>
-                      <label>智能机器人 Secret
-                        <input id="wecomAiBotSecret" type="password" autocomplete="new-password" placeholder="已配置时可留空" />
+                      <label>智能机器人 Secret（API 模式）
+                        <input id="wecomAiBotSecret" type="password" autocomplete="new-password" placeholder="创建 API 模式智能机器人后复制 Secret；已配置时可留空" />
                       </label>
                     </div>
                     <div class="settings-actions">
