@@ -2587,7 +2587,7 @@
       }
       .notification-channel-switch {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
       }
       .notification-channel-switch button {
         min-width: 0;
@@ -3107,25 +3107,28 @@
                 <div class="notification-channel-switch" role="group" aria-label="发送通道">
                   <button type="button" data-notification-sender="wecom_webhook">企业微信群机器人</button>
                   <button type="button" data-notification-sender="lightagent">个人微信群</button>
+                  <button type="button" data-notification-sender="wecom_app">企业微信自建应用</button>
                 </div>
                 <input id="notificationSenderType" type="hidden" value="wecom_webhook" />
               </div>
               <div class="stack">
-                <div class="field-grid">
-                  <label>通知 @ 方式
-                    <select id="notificationMentionMode">
-                      <option value="person">按提醒对象自动 @</option>
-                      <option value="all">@所有人</option>
-                      <option value="custom">指定对象</option>
-                      <option value="none">不 @</option>
-                    </select>
+                <div id="notificationCommonFields" class="stack">
+                  <div class="field-grid">
+                    <label>通知 @ 方式
+                      <select id="notificationMentionMode">
+                        <option value="person">按提醒对象自动 @</option>
+                        <option value="all">@所有人</option>
+                        <option value="custom">指定对象</option>
+                        <option value="none">不 @</option>
+                      </select>
+                    </label>
+                    <label>发送测试对象 <input id="notificationTestPersonName" list="personnelNameOptions" placeholder="示例甲" /></label>
+                  </div>
+                  <label id="notificationMentionTargetsField">通知 @ 对象
+                    <textarea id="notificationMentionTargets" rows="2" placeholder="指定对象时填写：姓名、手机号、@所有人，一行一个或逗号分隔"></textarea>
                   </label>
-                  <label>发送测试对象 <input id="notificationTestPersonName" list="personnelNameOptions" placeholder="示例甲" /></label>
+                  <p class="settings-panel-note">@ 对象统一在这里配置：企业微信群机器人支持手机号 / @所有人触发系统级 @；个人微信群只保证消息文字里可见 @姓名，不再发送不稳定的成员 ID @。</p>
                 </div>
-                <label id="notificationMentionTargetsField">通知 @ 对象
-                  <textarea id="notificationMentionTargets" rows="2" placeholder="指定对象时填写：姓名、手机号、@所有人，一行一个或逗号分隔"></textarea>
-                </label>
-                <p class="settings-panel-note">@ 对象统一在这里配置：企业微信群机器人支持手机号 / @所有人触发系统级 @；个人微信群只保证消息文字里可见 @姓名，不再发送不稳定的成员 ID @。</p>
                 <div id="wecomNotificationFields" class="stack">
                   <label>群机器人地址 <input id="webhookUrl" placeholder="未配置，保存时请输入机器人地址" /></label>
                   <div class="lightagent-notify-card stack">
@@ -3157,29 +3160,6 @@
                       <button id="reconnectWecomAiBotBtn" type="button">重新连接</button>
                     </div>
                     <p id="wecomAiBotStatus" class="status"></p>
-                  </div>
-                  <div class="lightagent-notify-card stack">
-                    <div class="notification-title-row">
-                      <h3>企业微信自建应用交互（稳定查询入口）</h3>
-                      <label class="checkbox-label"><span>启用</span><input id="wecomAppEnabled" type="checkbox" /></label>
-                    </div>
-                    <p class="settings-panel-note">
-                      用于企业微信里直接给自建应用发送“菜单、查询今日提醒、查询我的监控”等命令；项目收到回调后主动回复文字和图片。
-                    </p>
-                    <div class="settings-panel-note">
-                      <strong>配置步骤：</strong><br />
-                      1）企业微信管理后台 → 应用管理 → 自建 → 创建应用，复制企业 ID、AgentId、Secret。<br />
-                      2）在应用“接收消息”里设置 URL：<span id="wecomAppCallbackUrlText">/api/wecom-app/callback</span>。<br />
-                      3）Token 和 EncodingAESKey 可以在企业微信页面随机生成，再填到这里保存。<br />
-                      4）保存本页面配置后，再到企业微信页面点“保存/验证 URL”。群内机器人异常时，优先使用这个自建应用私聊查询。
-                    </div>
-                    <div class="field-grid">
-                      <label>企业 ID CorpID <input id="wecomAppCorpId" autocomplete="off" placeholder="例如 wwxxxxxxxxxxxxxx" /></label>
-                      <label>应用 AgentId <input id="wecomAppAgentId" autocomplete="off" placeholder="自建应用详情里的 AgentId" /></label>
-                      <label>应用 Secret <input id="wecomAppSecret" type="password" autocomplete="new-password" placeholder="已配置时可留空" /></label>
-                      <label>回调 Token <input id="wecomAppToken" type="password" autocomplete="new-password" placeholder="接收消息页面的 Token，已配置时可留空" /></label>
-                      <label>EncodingAESKey <input id="wecomAppEncodingAesKey" type="password" autocomplete="new-password" placeholder="43 位，已配置时可留空" /></label>
-                    </div>
                   </div>
                   <div class="settings-actions notification-card-actions">
                     <button class="primary" id="saveNotificationWecomBtn" type="button" data-save-notification>保存通知配置</button>
@@ -3232,6 +3212,34 @@
                         </div>
                       </div>
                     </div>
+                  </div>
+                </div>
+                <div id="wecomAppNotificationFields" class="stack hidden">
+                  <div class="lightagent-notify-card stack">
+                    <div class="notification-title-row">
+                      <h3>企业微信自建应用交互（稳定查询入口）</h3>
+                      <label class="checkbox-label"><span>启用</span><input id="wecomAppEnabled" type="checkbox" /></label>
+                    </div>
+                    <p class="settings-panel-note">
+                      用于企业微信里直接给自建应用发送“菜单、查询今日提醒、查询我的监控”等命令；项目收到回调后主动回复文字和图片。
+                    </p>
+                    <div class="settings-panel-note">
+                      <strong>配置步骤：</strong><br />
+                      1）企业微信管理后台 → 应用管理 → 自建 → 创建应用，复制企业 ID、AgentId、Secret。<br />
+                      2）在应用“接收消息”里设置 URL：<span id="wecomAppCallbackUrlText">/api/wecom-app/callback</span>。<br />
+                      3）Token 和 EncodingAESKey 可以在企业微信页面随机生成，再填到这里保存。<br />
+                      4）保存本页面配置后，再到企业微信页面点“保存/验证 URL”。群内机器人异常时，优先使用这个自建应用私聊查询。
+                    </div>
+                    <div class="field-grid">
+                      <label>企业 ID CorpID <input id="wecomAppCorpId" autocomplete="off" placeholder="例如 wwxxxxxxxxxxxxxx" /></label>
+                      <label>应用 AgentId <input id="wecomAppAgentId" autocomplete="off" placeholder="自建应用详情里的 AgentId" /></label>
+                      <label>应用 Secret <input id="wecomAppSecret" type="password" autocomplete="new-password" placeholder="已配置时可留空" /></label>
+                      <label>回调 Token <input id="wecomAppToken" type="password" autocomplete="new-password" placeholder="接收消息页面的 Token，已配置时可留空" /></label>
+                      <label>EncodingAESKey <input id="wecomAppEncodingAesKey" type="password" autocomplete="new-password" placeholder="43 位，已配置时可留空" /></label>
+                    </div>
+                  </div>
+                  <div class="settings-actions notification-card-actions">
+                    <button class="primary" id="saveNotificationWecomAppBtn" type="button" data-save-notification>保存自建应用配置</button>
                   </div>
                 </div>
                 <p id="notificationStatus" class="status"></p>
@@ -3662,6 +3670,7 @@
       lightAgentWechatStatusTimer: null,
       lightAgentWechatConnected: false,
       wechatBridgeEnabled: false,
+      notificationActivePanel: "wecom_webhook",
       featureChannelConfig: null,
       featureChannelDefaults: null,
       featureChannelRooms: [],
@@ -6438,14 +6447,18 @@
     }
 
     function updateNotificationBackendFields() {
-      const isLightAgent = $("notificationSenderType").value === "lightagent";
+      const activePanel = state.notificationActivePanel || $("notificationSenderType").value || "wecom_webhook";
+      const isLightAgent = activePanel === "lightagent";
+      const isWecomApp = activePanel === "wecom_app";
       document.querySelectorAll("[data-notification-sender]").forEach((button) => {
-        const active = button.dataset.notificationSender === $("notificationSenderType").value;
+        const active = button.dataset.notificationSender === activePanel;
         button.classList.toggle("active", active);
         button.setAttribute("aria-pressed", active ? "true" : "false");
       });
-      $("wecomNotificationFields").classList.toggle("hidden", isLightAgent);
+      $("notificationCommonFields").classList.toggle("hidden", isWecomApp);
+      $("wecomNotificationFields").classList.toggle("hidden", activePanel !== "wecom_webhook");
       $("lightAgentNotificationFields").classList.toggle("hidden", !isLightAgent);
+      $("wecomAppNotificationFields").classList.toggle("hidden", !isWecomApp);
       $("lightAgentUrlField").classList.toggle("hidden", !isLightAgent || state.wechatBridgeEnabled);
       $("lightAgentTokenField").classList.toggle("hidden", !isLightAgent || state.wechatBridgeEnabled);
       updateNotificationMentionFields();
@@ -6498,7 +6511,13 @@
     }
 
     function setNotificationSenderType(value) {
-      $("notificationSenderType").value = value === "lightagent" ? "lightagent" : "wecom_webhook";
+      if (value === "wecom_app") {
+        state.notificationActivePanel = "wecom_app";
+      } else {
+        const senderType = value === "lightagent" ? "lightagent" : "wecom_webhook";
+        $("notificationSenderType").value = senderType;
+        state.notificationActivePanel = senderType;
+      }
       updateNotificationBackendFields();
     }
 
@@ -6617,6 +6636,7 @@
       state.notificationConfig = body.config || {};
       state.wechatBridgeEnabled = Boolean(body.config && body.config.wechat_bridge_enabled);
       $("notificationSenderType").value = body.config && body.config.sender_type ? body.config.sender_type : "wecom_webhook";
+      state.notificationActivePanel = $("notificationSenderType").value || "wecom_webhook";
       $("webhookUrl").value = "";
       $("webhookUrl").placeholder = body.config && body.config.webhook_configured ? "已配置，如需修改请输入新地址" : "未配置，保存时请输入机器人地址";
       $("wecomAiBotEnabled").checked = Boolean(body.config && body.config.wecom_aibot_enabled);
