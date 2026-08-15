@@ -54,6 +54,8 @@ def render_wechat_query_image(result: dict[str, Any]) -> bytes | None:
         return _render_table(title, query_type, ["日期", "星期", "提醒"], _parse_all_reminder_range(reply), [180, 95, 605], content_cols={2}, nowrap_cols={0}, min_h=620)
     if query_type in {"next_reminder", "next_reminder_all"}:
         return _render_table(title, query_type, ["日期", "人员", "内容"], _parse_next_reminder(reply), [180, 145, 565], content_cols={2}, nowrap_cols={0}, min_h=520)
+    if query_type == "rest_query":
+        return _render_message_card(title, query_type, reply)
     if query_type == "help":
         return _render_help_image()
     return _render_message_card(title, query_type, reply)
@@ -150,8 +152,8 @@ def _render_message_card(title: str, query_type: str, reply: str) -> bytes:
 
 def _render_help_image() -> bytes:
     commands = [
-        "查询我的监控", "查询今日提醒", "查询明日监控", "查询本周监控", "查询未来7天",
-        "查询下次提醒", "查询我的绑定", "查询今日机电", "查询2026-08-09机电", "隧道机电",
+        "查询我的监控", "查询今日在岗", "查询今日监控", "查询明日监控", "查询本周监控",
+        "查询未来7天", "查询我的绑定", "查询休息", "查询今日机电", "查询2026-08-09机电", "隧道机电",
     ]
     rows = [[str(index + 1), command] for index, command in enumerate(commands)]
     return _render_table("监控查询菜单", "help", ["序号", "功能"], rows, [110, 660], min_h=620)
@@ -280,6 +282,7 @@ def _title_for_result(result: dict[str, Any]) -> str:
         "unbound": "未绑定",
         "binding": "我的绑定",
         "reminder_all": "查询今日提醒",
+        "daily_duty_query": "查询今日在岗",
         "reminder": "查询个人提醒",
         "monitor_all": "查询监控",
         "monitor": "查询个人监控",
@@ -289,6 +292,7 @@ def _title_for_result(result: dict[str, Any]) -> str:
         "reminder_all_range": "查询提醒汇总",
         "next_reminder_all": "查询下次提醒",
         "next_reminder": "查询下次提醒",
+        "rest_query": "查询休息",
     }
     return mapping.get(query_type, "查询结果")
 

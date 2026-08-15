@@ -4839,6 +4839,84 @@ def test_wechat_query_template_remains_text_only(tmp_path, monkeypatch):
     assert "image_url" not in body
 
 
+def test_wechat_query_today_duty_returns_daily_duty_image(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2025, 9, 16))
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "查询今日在岗"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["query_type"] == "daily_duty_query"
+    assert body["target_date"] == "2025-09-16"
+    assert body["image_url"].startswith("/api/uploads/daily-duty-query-")
+    image_response = client.get(body["image_url"])
+    assert image_response.status_code == 200
+    assert image_response.content.startswith(b"\x89PNG")
+
+
+def test_wechat_query_rest_uses_bound_person_and_summarizes_ranges(tmp_path, monkeypatch):
+    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2026, 8, 16))
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    repo: DutyRepository = app.state.repo
+    repo.save_roster_month(
+        2026,
+        8,
+        [
+            {"name": "商邱宏", "days": {"11": "休", "12": "休", "13": "休", "25": "休", "26": "休"}},
+            {"name": "罗富耀", "days": {"17": "休"}},
+        ],
+        "",
+    )
+    repo.upsert_personnel_contacts([{"name": "商邱宏", "wecom_userid": "u-shang"}])
+
+    response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={
+            "text": "查询休息",
+            "channel": "wecom_app",
+            "sender_id": "wecom_user:u-shang",
+            "runtime_sender_id": "wecom_user:u-shang",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["query_type"] == "rest_query"
+    assert "商邱宏 本月休息共5天，分2次休息" in body["reply"]
+    assert "已经休息3天，本月休息还剩2天" in body["reply"]
+    assert "距离第二次休息还剩9天" in body["reply"]
+    assert body["image_url"].startswith("/api/uploads/wechat-query-")
+
+
+def test_vacation_reminder_plans_start_and_end_events(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    repo: DutyRepository = app.state.repo
+    repo.save_roster_month(
+        2026,
+        8,
+        [{"name": "罗富耀", "days": {"16": "", "17": "休", "18": "休"}}],
+        "",
+    )
+    repo.save_vacation_reminder_config(enabled=True, start_reminder_time="07:50", end_reminder_time="07:55")
+
+    start_events = main_module._plan_all_events(repo, date(2026, 8, 16))
+    end_events = main_module._plan_all_events(repo, date(2026, 8, 18))
+
+    assert any(event.kind == "vacation_start" and event.person_name == "罗富耀" and event.send_at.strftime("%H:%M") == "07:50" for event in start_events)
+    assert any(event.kind == "vacation_end" and event.person_name == "罗富耀" and event.send_at.strftime("%H:%M") == "07:55" for event in end_events)
+
+
 def test_monitored_person_can_be_updated_and_deleted(tmp_path):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)

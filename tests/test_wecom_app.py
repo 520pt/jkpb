@@ -108,6 +108,8 @@ def test_wecom_app_callback_replies_text_and_image(tmp_path: Path, monkeypatch):
 
 def test_wecom_app_menu_click_event_runs_mapped_command(tmp_path: Path, monkeypatch):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    app.state.repo.upsert_personnel_names(["商邱宏"])
+    app.state.repo.upsert_personnel_contacts([{"name": "商邱宏", "wecom_userid": "shangqiuhong"}])
     app.state.repo.save_notification_config(
         webhook_url="",
         wecom_app_enabled=True,
@@ -139,6 +141,68 @@ def test_wecom_app_menu_click_event_runs_mapped_command(tmp_path: Path, monkeypa
     assert response.status_code == 200
     assert fake.texts[0] == ("luofuyao", "正在查询，请稍候…")
     assert any("监控查询菜单" in content for _, content in fake.texts)
+
+
+def test_wecom_app_today_duty_menu_click_sends_daily_duty_image(tmp_path: Path, monkeypatch):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    app.state.repo.upsert_personnel_names(["商邱宏"])
+    app.state.repo.upsert_personnel_contacts([{"name": "商邱宏", "wecom_userid": "shangqiuhong"}])
+    app.state.repo.save_notification_config(
+        webhook_url="",
+        wecom_app_enabled=True,
+        wecom_app_corp_id=CORP_ID,
+        wecom_app_agent_id="1000002",
+        wecom_app_secret="app-secret",
+        wecom_app_token=TOKEN,
+        wecom_app_encoding_aes_key=AES_KEY,
+    )
+    fake = FakeWeComAppClient()
+    monkeypatch.setattr(main_module, "_wecom_app_client_from_repo", lambda repo: fake)
+    client = TestClient(app)
+    plain = (
+        "<xml><ToUserName><![CDATA[ww-test-corp]]></ToUserName>"
+        "<FromUserName><![CDATA[shangqiuhong]]></FromUserName>"
+        "<CreateTime>123</CreateTime><MsgType><![CDATA[event]]></MsgType>"
+        "<Event><![CDATA[click]]></Event><EventKey><![CDATA[DR_MENU_0_0]]></EventKey>"
+        "<AgentID>1000002</AgentID></xml>"
+    )
+    encrypted = _encrypt(plain)
+    body = f"<xml><ToUserName><![CDATA[{CORP_ID}]]></ToUserName><Encrypt><![CDATA[{encrypted}]]></Encrypt><AgentID>1000002</AgentID></xml>"
+
+    response = client.post(
+        "/api/wecom-app/callback",
+        params={"msg_signature": _signature(encrypted), "timestamp": "123", "nonce": "nonce"},
+        content=body,
+    )
+
+    assert response.status_code == 200
+    assert any("今日在岗信息图片" in content for _, content in fake.texts)
+    assert fake.images and fake.images[0][1].startswith(b"\x89PNG")
+
+
+def test_wecom_app_unbound_command_requires_binding(tmp_path: Path, monkeypatch):
+    repo = main_module.DutyRepository(tmp_path / "duty.db")
+    repo.upsert_personnel_names(["商邱宏"])
+    repo.save_notification_config(
+        webhook_url="",
+        wecom_app_enabled=True,
+        wecom_app_corp_id=CORP_ID,
+        wecom_app_agent_id="1000002",
+        wecom_app_secret="app-secret",
+        wecom_app_token=TOKEN,
+        wecom_app_encoding_aes_key=AES_KEY,
+    )
+    fake = FakeWeComAppClient()
+    monkeypatch.setattr(main_module, "_wecom_app_client_from_repo", lambda repo: fake)
+
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "查询今日监控",
+        "from_user": "unbound-user",
+        "msg_type": "text",
+    })()))
+
+    assert any("首次使用企业微信自建应用请先绑定姓名" in content for _, content in fake.texts)
+    assert any("绑定商邱宏" in content for _, content in fake.texts)
 
 
 def test_wecom_app_menu_templates_require_binding_then_use_bound_name(tmp_path: Path, monkeypatch):
@@ -221,14 +285,67 @@ def test_create_wecom_app_menu_endpoint_uses_limited_grouped_menu(tmp_path: Path
     buttons = fake.menus[0]["button"]
     assert len(buttons) <= preview["limits"]["max_top_buttons"] == 3
     assert all(len(button.get("sub_button", [])) <= preview["limits"]["max_sub_buttons"] for button in buttons)
-    assert buttons[0]["name"] == "监控提醒"
-    assert buttons[0]["sub_button"][0]["key"] == "DR_MY_MONITOR"
+    assert buttons[0]["name"] == "监控在岗"
+    assert [item["key"] for item in buttons[0]["sub_button"]] == [
+        "DR_MENU_0_0",
+        "DR_MENU_0_1",
+        "DR_MENU_0_2",
+        "DR_MENU_0_3",
+        "DR_MENU_0_4",
+    ]
     assert buttons[1]["name"] == "机电预警"
     assert [item["key"] for item in buttons[1]["sub_button"]] == [
-        "DR_TUNNEL_TEMPLATE",
-        "DR_TUNNEL_MODIFY_TEMPLATE",
-        "DR_ORANGE_PATROL_RECORD",
+        "DR_MENU_1_0",
+        "DR_MENU_1_1",
+        "DR_MENU_1_2",
     ]
+
+
+def test_wecom_app_menu_can_be_saved_and_dynamic_key_maps_to_command(tmp_path: Path, monkeypatch):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    app.state.repo.upsert_personnel_names(["商邱宏"])
+    app.state.repo.upsert_personnel_contacts([{"name": "商邱宏", "wecom_userid": "shangqiuhong"}])
+    app.state.repo.save_notification_config(
+        webhook_url="",
+        wecom_app_enabled=True,
+        wecom_app_corp_id=CORP_ID,
+        wecom_app_agent_id="1000002",
+        wecom_app_secret="app-secret",
+        wecom_app_token=TOKEN,
+        wecom_app_encoding_aes_key=AES_KEY,
+    )
+    fake = FakeWeComAppClient()
+    monkeypatch.setattr(main_module, "_wecom_app_client_from_repo", lambda repo: fake)
+    client = TestClient(app)
+
+    save_response = client.post(
+        "/api/wecom-app/menu",
+        json={"groups": [{"name": "常用", "items": [{"name": "今日在岗", "command": "查询今日在岗"}]}]},
+    )
+    create_response = client.post("/api/wecom-app/menu/create")
+
+    assert save_response.status_code == 200
+    assert create_response.status_code == 200
+    assert fake.menus[-1]["button"][0]["name"] == "常用"
+    assert fake.menus[-1]["button"][0]["sub_button"][0]["key"] == "DR_MENU_0_0"
+
+    plain = (
+        "<xml><ToUserName><![CDATA[ww-test-corp]]></ToUserName>"
+        "<FromUserName><![CDATA[shangqiuhong]]></FromUserName>"
+        "<CreateTime>123</CreateTime><MsgType><![CDATA[event]]></MsgType>"
+        "<Event><![CDATA[click]]></Event><EventKey><![CDATA[DR_MENU_0_0]]></EventKey>"
+        "<AgentID>1000002</AgentID></xml>"
+    )
+    encrypted = _encrypt(plain)
+    body = f"<xml><ToUserName><![CDATA[{CORP_ID}]]></ToUserName><Encrypt><![CDATA[{encrypted}]]></Encrypt><AgentID>1000002</AgentID></xml>"
+    callback_response = client.post(
+        "/api/wecom-app/callback",
+        params={"msg_signature": _signature(encrypted), "timestamp": "123", "nonce": "nonce"},
+        content=body,
+    )
+
+    assert callback_response.status_code == 200
+    assert fake.images and fake.images[-1][1].startswith(b"\x89PNG")
 
 
 def test_wecom_app_test_endpoint_sends_interaction_check_message(tmp_path: Path, monkeypatch):

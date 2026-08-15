@@ -28,6 +28,7 @@ class ReminderEvent:
     key_suffix: str = ""
     target_room_id: str = ""
     target_room_name: str = ""
+    send_content_mode: str = ""
 
 
 def _parse_hhmm(value: str) -> time:
@@ -92,6 +93,7 @@ def _dedupe_reminder_events(events: list[ReminderEvent]) -> list[ReminderEvent]:
                 key_suffix=first.key_suffix,
                 target_room_id=first.target_room_id,
                 target_room_name=first.target_room_name,
+                send_content_mode=first.send_content_mode,
             )
         )
     return sorted(

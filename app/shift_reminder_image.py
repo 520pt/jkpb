@@ -115,7 +115,7 @@ def _render_generic_shift_image(event: ReminderEvent) -> bytes:
     image = Image.new("RGB", (WIDTH, height), BG)
     draw = ImageDraw.Draw(image)
     _rounded(draw, (CARD_MARGIN, 24, WIDTH - CARD_MARGIN, height - 24), 30, "#ffffff", "#cbd5e1", 2)
-    _draw_header(draw, (48, 48, 852, 138), "#2563eb", "7:50 每日提醒")
+    _draw_header(draw, (48, 48, 852, 138), "#2563eb", _header_subtitle(event), _header_title(event))
     y = _draw_person_only_row(draw, INNER_LEFT, 166, INNER_RIGHT, event.person_name)
     box = (INNER_LEFT, y + 8, INNER_RIGHT, height - 52)
     _rounded(draw, box, 20, "#f8fafc", LINE, 1)
@@ -124,9 +124,26 @@ def _render_generic_shift_image(event: ReminderEvent) -> bytes:
     return _png_bytes(image)
 
 
-def _draw_header(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], main: str, subtitle: str) -> None:
+def _header_title(event: ReminderEvent) -> str:
+    kind = str(event.kind or "")
+    if kind.startswith("custom"):
+        return "自定义提醒"
+    if kind.startswith("vacation"):
+        return "假期余额提醒"
+    if kind.startswith("rest"):
+        return "休息提醒"
+    return "监控班提醒"
+
+
+def _header_subtitle(event: ReminderEvent) -> str:
+    try:
+        return f"{event.send_at:%H:%M} 提醒"
+    except Exception:
+        return "提醒"
+
+
+def _draw_header(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], main: str, subtitle: str, title: str = "监控班提醒") -> None:
     _rounded(draw, box, 22, main)
-    title = "监控班提醒"
     title_font = _font(34)
     sub_font = _font(20)
     title_h = _text_size(draw, title, title_font)[1]

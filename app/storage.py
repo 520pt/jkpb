@@ -26,6 +26,44 @@ DEFAULT_DAILY_DUTY_TEMPLATE = (
 LEGACY_REST_MESSAGE_TEMPLATE = "{name} {date} 今天休息"
 LEGACY_TOMORROW_REST_MESSAGE_TEMPLATE = "{name} {date} 明天休息"
 DEFAULT_REST_MESSAGE_TEMPLATE = "{name} {rest_status}"
+DEFAULT_VACATION_START_TEMPLATE = "恭喜你今天下午可以开始休息了，加油一天要苦80块的男人，"
+DEFAULT_VACATION_END_TEMPLATE = "假期余额不足，今天下午就该返回站点了，加油天选打工人。"
+DEFAULT_VACATION_START_TEMPLATES = [
+    DEFAULT_VACATION_START_TEMPLATE,
+    "恭喜你，牛马暂时获得喘气权，今天再熬一下。",
+    "系统提示：你的休息即将到账，今天请活着下班。",
+    "今日 KPI：坚持到下午，然后原地复活。",
+    "正式确诊为即将休息的牛马，今天再苦最后一天。",
+    "恭喜你，打工暂停键即将生效，请完成今日最后挣扎。",
+    "休息申请已被命运批准，今天下午开始短暂做人。",
+    "今天再搬最后一天砖，明天开始当废物。",
+    "你的假期正在派送中，预计今天下午签收。",
+    "再撑一天，灵魂就可以从工位回来了。",
+    "温馨提醒：今天活着下班，就是本周最大胜利。",
+    "牛马能量即将耗尽，系统已安排休息充电。",
+    "今天下午开始休息，恭喜你暂时退出人间疾苦。",
+    "坚持住，今天下班后你就不是牛马，是自由的牛马。",
+    "今日任务：少说话，多忍耐，下午开始休息。",
+    "恭喜你，马上可以从“虽然没挣钱，起码累着了”切换成“虽然没上班，起码躺着了”。",
+]
+DEFAULT_VACATION_END_TEMPLATES = [
+    DEFAULT_VACATION_END_TEMPLATE,
+    "假期余额不足，牛马身份即将自动恢复。",
+    "系统提示：休息体验卡今日到期，请准备返岗。",
+    "你的自由试用期即将结束，明天继续搬砖。",
+    "正式确诊为假期余额不足患者，请及时返回站点。",
+    "休息模式即将关闭，牛马模式正在重启。",
+    "今天是假期最后一天，请珍惜还能躺平的每一分钟。",
+    "假期即将清零，明天继续为了生活低头。",
+    "温馨提醒：快乐供给不足，请准备恢复上班。",
+    "你的灵魂刚回家，身体又要返岗了。",
+    "假期余额告急，打工人的钢铁意志即将上线。",
+    "今日下午返回站点，继续做一个稳定发疯的成年人。",
+    "休息结束不是结束，是下一轮想休息的开始。",
+    "恭喜你完成短暂回血，明天继续掉血。",
+    "自由倒计时结束，请收拾心情继续当选手。",
+    "假期余额不足，别难过，至少你曾经短暂地不是牛马。",
+]
 DEFAULT_PATROL_WARNING_START_TEMPLATE = (
     "{mention_prefix}请注意监测到 {app_name} 发布 {warning_level_label}\n"
     "路线：{route_text}\n"
@@ -59,9 +97,11 @@ CONFIG_EXPORT_TABLES = [
     "notification_config",
     "feature_channel_config",
     "wechat_interaction_config",
+    "wecom_app_menu_config",
     "personnel_names",
     "custom_reminders",
     "daily_duty_config",
+    "vacation_reminder_config",
     "patrol_warning_config",
     "tunnel_mechanical_config",
     "tunnel_mechanical_template",
@@ -81,6 +121,21 @@ def _normalize_notification_mention_mode(value: str) -> str:
 def _normalize_patrol_send_content_mode(value: str) -> str:
     normalized = str(value or "both").strip().lower()
     return normalized if normalized in {"both", "text", "image"} else "both"
+
+
+def _normalize_send_content_mode(value: str, default: str = "both") -> str:
+    normalized = str(value or default).strip().lower()
+    return normalized if normalized in {"both", "text", "image"} else default
+
+
+def _normalize_template_list(values: Any, fallback: list[str]) -> list[str]:
+    items = values if isinstance(values, list) else []
+    normalized: list[str] = []
+    for value in items:
+        text = str(value or "").strip()
+        if text and text not in normalized:
+            normalized.append(text)
+    return normalized or list(fallback)
 
 
 def _normalize_patrol_end_template(value: str) -> str:
@@ -169,6 +224,7 @@ class DutyRepository:
                     rest_message_template TEXT NOT NULL DEFAULT '',
                     notification_room_id TEXT NOT NULL DEFAULT '',
                     notification_room_name TEXT NOT NULL DEFAULT '',
+                    send_content_mode TEXT NOT NULL DEFAULT 'both',
                     enabled INTEGER NOT NULL DEFAULT 1
                 );
 
@@ -220,6 +276,12 @@ class DutyRepository:
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
+                CREATE TABLE IF NOT EXISTS wecom_app_menu_config (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    menu_json TEXT NOT NULL DEFAULT '[]',
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
                 CREATE TABLE IF NOT EXISTS wechat_interaction_logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     room_id TEXT NOT NULL DEFAULT '',
@@ -255,6 +317,7 @@ class DutyRepository:
                     message TEXT NOT NULL,
                     notification_room_id TEXT NOT NULL DEFAULT '',
                     notification_room_name TEXT NOT NULL DEFAULT '',
+                    send_content_mode TEXT NOT NULL DEFAULT 'text',
                     enabled INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -269,6 +332,20 @@ class DutyRepository:
                     message_template TEXT NOT NULL DEFAULT '',
                     notification_room_id TEXT NOT NULL DEFAULT '',
                     notification_room_name TEXT NOT NULL DEFAULT '',
+                    send_content_mode TEXT NOT NULL DEFAULT 'image',
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS vacation_reminder_config (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    start_reminder_time TEXT NOT NULL DEFAULT '07:50',
+                    end_reminder_time TEXT NOT NULL DEFAULT '07:50',
+                    start_message_template TEXT NOT NULL DEFAULT '',
+                    end_message_template TEXT NOT NULL DEFAULT '',
+                    start_message_templates_json TEXT NOT NULL DEFAULT '[]',
+                    end_message_templates_json TEXT NOT NULL DEFAULT '[]',
+                    send_content_mode TEXT NOT NULL DEFAULT 'text',
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -370,6 +447,8 @@ class DutyRepository:
                 conn.execute("ALTER TABLE monitored_people ADD COLUMN notification_room_id TEXT NOT NULL DEFAULT ''")
             if "notification_room_name" not in columns:
                 conn.execute("ALTER TABLE monitored_people ADD COLUMN notification_room_name TEXT NOT NULL DEFAULT ''")
+            if "send_content_mode" not in columns:
+                conn.execute("ALTER TABLE monitored_people ADD COLUMN send_content_mode TEXT NOT NULL DEFAULT 'both'")
             config_columns = {row["name"] for row in conn.execute("PRAGMA table_info(notification_config)").fetchall()}
             if "sender_type" not in config_columns:
                 conn.execute("ALTER TABLE notification_config ADD COLUMN sender_type TEXT NOT NULL DEFAULT 'wecom_webhook'")
@@ -440,11 +519,20 @@ class DutyRepository:
                 conn.execute("ALTER TABLE custom_reminders ADD COLUMN notification_room_id TEXT NOT NULL DEFAULT ''")
             if "notification_room_name" not in custom_columns:
                 conn.execute("ALTER TABLE custom_reminders ADD COLUMN notification_room_name TEXT NOT NULL DEFAULT ''")
+            if "send_content_mode" not in custom_columns:
+                conn.execute("ALTER TABLE custom_reminders ADD COLUMN send_content_mode TEXT NOT NULL DEFAULT 'text'")
             daily_columns = {row["name"] for row in conn.execute("PRAGMA table_info(daily_duty_config)").fetchall()}
             if "notification_room_id" not in daily_columns:
                 conn.execute("ALTER TABLE daily_duty_config ADD COLUMN notification_room_id TEXT NOT NULL DEFAULT ''")
             if "notification_room_name" not in daily_columns:
                 conn.execute("ALTER TABLE daily_duty_config ADD COLUMN notification_room_name TEXT NOT NULL DEFAULT ''")
+            if "send_content_mode" not in daily_columns:
+                conn.execute("ALTER TABLE daily_duty_config ADD COLUMN send_content_mode TEXT NOT NULL DEFAULT 'image'")
+            vacation_columns = {row["name"] for row in conn.execute("PRAGMA table_info(vacation_reminder_config)").fetchall()}
+            if "start_message_templates_json" not in vacation_columns:
+                conn.execute("ALTER TABLE vacation_reminder_config ADD COLUMN start_message_templates_json TEXT NOT NULL DEFAULT '[]'")
+            if "end_message_templates_json" not in vacation_columns:
+                conn.execute("ALTER TABLE vacation_reminder_config ADD COLUMN end_message_templates_json TEXT NOT NULL DEFAULT '[]'")
             patrol_state_columns = {row["name"] for row in conn.execute("PRAGMA table_info(patrol_warning_state)").fetchall()}
             if "token" not in patrol_state_columns:
                 conn.execute("ALTER TABLE patrol_warning_state ADD COLUMN token TEXT NOT NULL DEFAULT ''")
@@ -922,6 +1010,7 @@ class DutyRepository:
         rest_message_template: str = DEFAULT_REST_MESSAGE_TEMPLATE,
         notification_room_id: str = "",
         notification_room_name: str = "",
+        send_content_mode: str = "both",
         enabled: bool = True,
     ) -> None:
         clean_name = name.strip()
@@ -933,9 +1022,9 @@ class DutyRepository:
                     (
                         name, wecom_userid, mention_text, mention_mobile, daily_time, before_shift_minutes,
                         rest_reminder_enabled, rest_reminder_time, rest_message_template,
-                        notification_room_id, notification_room_name, enabled
+                        notification_room_id, notification_room_name, send_content_mode, enabled
                     )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(name) DO UPDATE SET
                     wecom_userid = excluded.wecom_userid,
                     mention_text = excluded.mention_text,
@@ -947,6 +1036,7 @@ class DutyRepository:
                     rest_message_template = excluded.rest_message_template,
                     notification_room_id = excluded.notification_room_id,
                     notification_room_name = excluded.notification_room_name,
+                    send_content_mode = excluded.send_content_mode,
                     enabled = excluded.enabled
                 """,
                 (
@@ -961,6 +1051,7 @@ class DutyRepository:
                     _normalize_rest_message_template(rest_message_template),
                     str(notification_room_id or "").strip(),
                     str(notification_room_name or "").strip(),
+                    _normalize_send_content_mode(send_content_mode, "both"),
                     int(enabled),
                 ),
             )
@@ -1019,6 +1110,7 @@ class DutyRepository:
                 "rest_message_template": _normalize_rest_message_template(row["rest_message_template"]),
                 "notification_room_id": row["notification_room_id"],
                 "notification_room_name": row["notification_room_name"],
+                "send_content_mode": _normalize_send_content_mode(row["send_content_mode"], "both"),
                 "enabled": bool(row["enabled"]),
             }
             wechat_fields = {
@@ -1048,6 +1140,7 @@ class DutyRepository:
         wechat_group_member_name: str = "",
         notification_room_id: str = "",
         notification_room_name: str = "",
+        send_content_mode: str = "text",
         enabled: bool = True,
         id: int | None = None,
     ) -> int:
@@ -1065,11 +1158,12 @@ class DutyRepository:
                         message = ?,
                         notification_room_id = ?,
                         notification_room_name = ?,
+                        send_content_mode = ?,
                         enabled = ?,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                     """,
-                    (clean_name, clean_mobile, shift_code, reminder_time, message, str(notification_room_id or "").strip(), str(notification_room_name or "").strip(), int(enabled), int(id)),
+                    (clean_name, clean_mobile, shift_code, reminder_time, message, str(notification_room_id or "").strip(), str(notification_room_name or "").strip(), _normalize_send_content_mode(send_content_mode, "text"), int(enabled), int(id)),
                 )
                 if cursor.rowcount > 0:
                     reminder_id = int(id)
@@ -1077,20 +1171,20 @@ class DutyRepository:
                     cursor = conn.execute(
                         """
                         INSERT INTO custom_reminders
-                            (name, mention_mobile, shift_code, reminder_time, message, notification_room_id, notification_room_name, enabled)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            (name, mention_mobile, shift_code, reminder_time, message, notification_room_id, notification_room_name, send_content_mode, enabled)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                        (clean_name, clean_mobile, shift_code, reminder_time, message, str(notification_room_id or "").strip(), str(notification_room_name or "").strip(), int(enabled)),
+                        (clean_name, clean_mobile, shift_code, reminder_time, message, str(notification_room_id or "").strip(), str(notification_room_name or "").strip(), _normalize_send_content_mode(send_content_mode, "text"), int(enabled)),
                     )
                     reminder_id = int(cursor.lastrowid)
             else:
                 cursor = conn.execute(
                     """
                     INSERT INTO custom_reminders
-                        (name, mention_mobile, shift_code, reminder_time, message, notification_room_id, notification_room_name, enabled)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        (name, mention_mobile, shift_code, reminder_time, message, notification_room_id, notification_room_name, send_content_mode, enabled)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (clean_name, clean_mobile, shift_code, reminder_time, message, str(notification_room_id or "").strip(), str(notification_room_name or "").strip(), int(enabled)),
+                    (clean_name, clean_mobile, shift_code, reminder_time, message, str(notification_room_id or "").strip(), str(notification_room_name or "").strip(), _normalize_send_content_mode(send_content_mode, "text"), int(enabled)),
                 )
                 reminder_id = int(cursor.lastrowid)
         self.upsert_personnel_contacts(
@@ -1141,6 +1235,7 @@ class DutyRepository:
                 "message": row["message"],
                 "notification_room_id": row["notification_room_id"],
                 "notification_room_name": row["notification_room_name"],
+                "send_content_mode": _normalize_send_content_mode(row["send_content_mode"], "text"),
                 "enabled": bool(row["enabled"]),
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
@@ -1454,6 +1549,33 @@ class DutyRepository:
             "tunnel_modify_template": row["tunnel_modify_template"] or "",
         }
 
+    def save_wecom_app_menu_config(self, menu: list[dict[str, Any]]) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO wecom_app_menu_config (id, menu_json)
+                VALUES (1, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    menu_json = excluded.menu_json,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (json.dumps(menu, ensure_ascii=False),),
+            )
+
+    def get_wecom_app_menu_config(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT menu_json
+                FROM wecom_app_menu_config
+                WHERE id = 1
+                """
+            ).fetchone()
+        if row is None:
+            return []
+        menu = _loads_json(row["menu_json"], [])
+        return menu if isinstance(menu, list) else []
+
     def save_wechat_interaction_log(
         self,
         *,
@@ -1528,13 +1650,14 @@ class DutyRepository:
         message_template: str = DEFAULT_DAILY_DUTY_TEMPLATE,
         notification_room_id: str = "",
         notification_room_name: str = "",
+        send_content_mode: str = "image",
     ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO daily_duty_config
-                    (id, enabled, reminder_time, big_driver_names_json, small_driver_names_json, message_template, notification_room_id, notification_room_name)
-                VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+                    (id, enabled, reminder_time, big_driver_names_json, small_driver_names_json, message_template, notification_room_id, notification_room_name, send_content_mode)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     enabled = excluded.enabled,
                     reminder_time = excluded.reminder_time,
@@ -1543,6 +1666,7 @@ class DutyRepository:
                     message_template = excluded.message_template,
                     notification_room_id = excluded.notification_room_id,
                     notification_room_name = excluded.notification_room_name,
+                    send_content_mode = excluded.send_content_mode,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -1553,6 +1677,7 @@ class DutyRepository:
                     _normalize_daily_duty_template(message_template),
                     str(notification_room_id or "").strip(),
                     str(notification_room_name or "").strip(),
+                    _normalize_send_content_mode(send_content_mode, "image"),
                 ),
             )
 
@@ -1568,6 +1693,7 @@ class DutyRepository:
                 "message_template": DEFAULT_DAILY_DUTY_TEMPLATE,
                 "notification_room_id": "",
                 "notification_room_name": "",
+                "send_content_mode": "image",
             }
         return {
             "enabled": bool(row["enabled"]),
@@ -1577,6 +1703,93 @@ class DutyRepository:
             "message_template": _normalize_daily_duty_template(row["message_template"]),
             "notification_room_id": row["notification_room_id"],
             "notification_room_name": row["notification_room_name"],
+            "send_content_mode": _normalize_send_content_mode(row["send_content_mode"], "image"),
+        }
+
+    def save_vacation_reminder_config(
+        self,
+        *,
+        enabled: bool = True,
+        start_reminder_time: str = "07:50",
+        end_reminder_time: str = "07:50",
+        start_message_template: str = DEFAULT_VACATION_START_TEMPLATE,
+        end_message_template: str = DEFAULT_VACATION_END_TEMPLATE,
+        start_message_templates: list[str] | None = None,
+        end_message_templates: list[str] | None = None,
+        send_content_mode: str = "text",
+    ) -> None:
+        start_templates = _normalize_template_list(
+            start_message_templates,
+            [str(start_message_template or "").strip() or DEFAULT_VACATION_START_TEMPLATE],
+        )
+        end_templates = _normalize_template_list(
+            end_message_templates,
+            [str(end_message_template or "").strip() or DEFAULT_VACATION_END_TEMPLATE],
+        )
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO vacation_reminder_config
+                    (id, enabled, start_reminder_time, end_reminder_time, start_message_template, end_message_template, start_message_templates_json, end_message_templates_json, send_content_mode)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    enabled = excluded.enabled,
+                    start_reminder_time = excluded.start_reminder_time,
+                    end_reminder_time = excluded.end_reminder_time,
+                    start_message_template = excluded.start_message_template,
+                    end_message_template = excluded.end_message_template,
+                    start_message_templates_json = excluded.start_message_templates_json,
+                    end_message_templates_json = excluded.end_message_templates_json,
+                    send_content_mode = excluded.send_content_mode,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    int(enabled),
+                    start_reminder_time or "07:50",
+                    end_reminder_time or "07:50",
+                    start_templates[0],
+                    end_templates[0],
+                    json.dumps(start_templates, ensure_ascii=False),
+                    json.dumps(end_templates, ensure_ascii=False),
+                    _normalize_send_content_mode(send_content_mode, "text"),
+                ),
+            )
+
+    def get_vacation_reminder_config(self) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM vacation_reminder_config WHERE id = 1").fetchone()
+        if row is None:
+            return {
+                "enabled": True,
+                "start_reminder_time": "07:50",
+                "end_reminder_time": "07:50",
+                "start_message_template": DEFAULT_VACATION_START_TEMPLATE,
+                "end_message_template": DEFAULT_VACATION_END_TEMPLATE,
+                "start_message_templates": list(DEFAULT_VACATION_START_TEMPLATES),
+                "end_message_templates": list(DEFAULT_VACATION_END_TEMPLATES),
+                "send_content_mode": "text",
+            }
+        start_templates = _normalize_template_list(
+            _loads_json(row["start_message_templates_json"], []),
+            DEFAULT_VACATION_START_TEMPLATES
+            if not str(row["start_message_template"] or "").strip() or row["start_message_template"] == DEFAULT_VACATION_START_TEMPLATE
+            else [row["start_message_template"]],
+        )
+        end_templates = _normalize_template_list(
+            _loads_json(row["end_message_templates_json"], []),
+            DEFAULT_VACATION_END_TEMPLATES
+            if not str(row["end_message_template"] or "").strip() or row["end_message_template"] == DEFAULT_VACATION_END_TEMPLATE
+            else [row["end_message_template"]],
+        )
+        return {
+            "enabled": bool(row["enabled"]),
+            "start_reminder_time": row["start_reminder_time"],
+            "end_reminder_time": row["end_reminder_time"],
+            "start_message_template": start_templates[0],
+            "end_message_template": end_templates[0],
+            "start_message_templates": start_templates,
+            "end_message_templates": end_templates,
+            "send_content_mode": _normalize_send_content_mode(row["send_content_mode"], "text"),
         }
 
     def save_patrol_warning_config(

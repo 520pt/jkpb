@@ -54,6 +54,10 @@ from app.storage import (
     DEFAULT_PATROL_WARNING_END_TEMPLATE,
     DEFAULT_PATROL_WARNING_START_TEMPLATE,
     DEFAULT_REST_MESSAGE_TEMPLATE,
+    DEFAULT_VACATION_END_TEMPLATE,
+    DEFAULT_VACATION_END_TEMPLATES,
+    DEFAULT_VACATION_START_TEMPLATE,
+    DEFAULT_VACATION_START_TEMPLATES,
     DutyRepository,
 )
 from app.tunnel_mechanical_image import render_tunnel_mechanical_result_image
@@ -103,12 +107,12 @@ WECOM_APP_MENU_LIMITS = {
     "max_sub_name_bytes": 40,
 }
 WECOM_APP_MENU_COMMANDS = {
+    # Backward-compatible keys created by older versions.
+    "DR_TODAY_DUTY": "查询今日在岗",
+    "DR_TODAY_MONITOR": "查询今日监控",
     "DR_MY_MONITOR": "查询我的监控",
-    "DR_TODAY_REMINDERS": "查询今日提醒",
     "DR_TOMORROW_MONITOR": "查询明日监控",
     "DR_WEEK_MONITOR": "查询本周监控",
-    "DR_NEXT_REMINDER": "查询下次提醒",
-    "DR_TODAY_TUNNEL": "查询今日机电",
     "DR_TUNNEL_TEMPLATE": "模板",
     "DR_TUNNEL_MODIFY_TEMPLATE": "修改模板",
     "DR_ORANGE_PATROL_RECORD": "橙色预警巡查记录查询",
@@ -116,6 +120,35 @@ WECOM_APP_MENU_COMMANDS = {
     "DR_BINDING": "查询我的绑定",
     "DR_HELP": "菜单",
 }
+DEFAULT_WECOM_APP_MENU_GROUPS = [
+    {
+        "name": "监控在岗",
+        "items": [
+            {"name": "今日在岗", "command": "查询今日在岗"},
+            {"name": "今日监控", "command": "查询今日监控"},
+            {"name": "明日监控", "command": "查询明日监控"},
+            {"name": "本周监控", "command": "查询本周监控"},
+            {"name": "我的监控", "command": "查询我的监控"},
+        ],
+    },
+    {
+        "name": "机电预警",
+        "items": [
+            {"name": "机电模板", "command": "模板"},
+            {"name": "修改模板", "command": "修改模板"},
+            {"name": "橙色预警巡查记录查询", "command": "橙色预警巡查记录查询"},
+        ],
+    },
+    {
+        "name": "更多查询",
+        "items": [
+            {"name": "今日机电", "command": "查询今日机电"},
+            {"name": "未来7天", "command": "查询未来7天"},
+            {"name": "查询休息", "command": "查询休息"},
+            {"name": "我的绑定", "command": "查询我的绑定"},
+        ],
+    },
+]
 
 
 class RosterConfirmRequest(BaseModel):
@@ -152,6 +185,7 @@ class MonitoredPersonRequest(BaseModel):
     rest_reminder_time: str = "08:30"
     rest_message_template: str = DEFAULT_REST_MESSAGE_TEMPLATE
     enabled: bool = True
+    send_content_mode: str = "both"
 
     @field_validator("daily_time", "rest_reminder_time")
     @classmethod
@@ -235,6 +269,20 @@ class WechatInteractionTestRequest(BaseModel):
     target_date: date | None = None
 
 
+class WeComAppMenuItemRequest(BaseModel):
+    name: str = ""
+    command: str = ""
+
+
+class WeComAppMenuGroupRequest(BaseModel):
+    name: str = ""
+    items: list[WeComAppMenuItemRequest] = Field(default_factory=list)
+
+
+class WeComAppMenuConfigRequest(BaseModel):
+    groups: list[WeComAppMenuGroupRequest] = Field(default_factory=list)
+
+
 class PreviewRequest(BaseModel):
     target_date: date | None = None
 
@@ -270,6 +318,7 @@ class CustomReminderRequest(BaseModel):
     reminder_time: str
     message: str
     enabled: bool = True
+    send_content_mode: str = "text"
 
     @field_validator("name", "message")
     @classmethod
@@ -312,10 +361,27 @@ class DailyDutyConfigRequest(BaseModel):
     message_template: str = DEFAULT_DAILY_DUTY_TEMPLATE
     notification_room_id: str = ""
     notification_room_name: str = ""
+    send_content_mode: str = "image"
 
     @field_validator("reminder_time")
     @classmethod
     def validate_reminder_time(cls, value: str) -> str:
+        return _validate_hhmm(value)
+
+
+class VacationReminderConfigRequest(BaseModel):
+    enabled: bool = True
+    start_reminder_time: str = "07:50"
+    end_reminder_time: str = "07:50"
+    start_message_template: str = DEFAULT_VACATION_START_TEMPLATE
+    end_message_template: str = DEFAULT_VACATION_END_TEMPLATE
+    start_message_templates: list[str] = Field(default_factory=lambda: list(DEFAULT_VACATION_START_TEMPLATES))
+    end_message_templates: list[str] = Field(default_factory=lambda: list(DEFAULT_VACATION_END_TEMPLATES))
+    send_content_mode: str = "text"
+
+    @field_validator("start_reminder_time", "end_reminder_time")
+    @classmethod
+    def validate_time(cls, value: str) -> str:
         return _validate_hhmm(value)
 
 
@@ -784,6 +850,42 @@ def create_app(
         repo.save_daily_duty_config(**request.model_dump())
         return {"success": True, "config": repo.get_daily_duty_config()}
 
+    @app.get("/api/vacation-reminder-config")
+    def get_vacation_reminder_config():
+        return {"config": repo.get_vacation_reminder_config()}
+
+    @app.post("/api/vacation-reminder-config")
+    def save_vacation_reminder_config(request: VacationReminderConfigRequest):
+        repo.save_vacation_reminder_config(**request.model_dump())
+        return {"success": True, "config": repo.get_vacation_reminder_config()}
+
+    @app.post("/api/vacation-reminder-config/test")
+    async def test_vacation_reminder_config(request: VacationReminderConfigRequest):
+        repo.save_vacation_reminder_config(**request.model_dump())
+        notification_client = _notification_client_from_repo(repo)
+        if notification_client is None:
+            raise HTTPException(status_code=400, detail="请先配置通知发送通道")
+        bound_names = list(_wecom_app_userid_lookup(repo).keys()) if _is_wecom_app_notify_client(notification_client) else []
+        person_name = next((name for name in bound_names if str(name or "").strip()), "")
+        if not person_name:
+            person_name = next((name for name in repo.list_personnel_names() if str(name or "").strip()), "测试人员")
+        event = ReminderEvent(
+            kind="vacation_start",
+            person_name=person_name,
+            send_at=datetime.now(TZ),
+            content=_render_simple_template(
+                _choose_template(request.start_message_templates, request.start_message_template or DEFAULT_VACATION_START_TEMPLATE),
+                {
+                    "name": person_name,
+                    "date": _today_in_tz().isoformat(),
+                    "rest_start_date": _today_in_tz().isoformat(),
+                    "rest_end_date": _today_in_tz().isoformat(),
+                },
+            ),
+            send_content_mode=request.send_content_mode,
+        )
+        return await _send_test_reminder_event(repo, notification_client, event, "vacation_test")
+
     @app.post("/api/daily-duty-preview")
     def preview_daily_duty(request: PreviewRequest):
         target = request.target_date or _today_in_tz()
@@ -807,11 +909,17 @@ def create_app(
                 person_name="今日在岗人员",
                 send_at=datetime.fromisoformat(preview["send_at"]),
                 content=preview["content"],
+                send_content_mode=str(preview.get("send_content_mode") or "image"),
             )
             target_ids = _notification_target_ids_for_event(repo, notification_client, event)
             if not _is_wecom_app_notify_client(notification_client):
                 target_ids = _daily_duty_target_room_ids(repo)
-            await _notify_send_image(notification_client, render_daily_duty_image(preview), target_ids)
+            mode = _event_send_content_mode(event, "image")
+            mentions = _notification_true_mentions_for_event(repo, notification_client, event)
+            if mode in {"both", "text"}:
+                await _notify_send_text(notification_client, _notification_content_for_event(repo, notification_client, event), mentions, target_ids)
+            if mode in {"both", "image"}:
+                await _notify_send_image(notification_client, render_daily_duty_image(preview), target_ids)
             repo.save_send_record(
                 kind="daily_duty_test",
                 target="今日在岗人员",
@@ -1182,20 +1290,29 @@ def create_app(
 
     @app.get("/api/wecom-app/menu")
     def get_wecom_app_menu_preview():
-        return _public_wecom_app_menu_preview()
+        return _public_wecom_app_menu_preview(repo)
+
+    @app.post("/api/wecom-app/menu")
+    def save_wecom_app_menu_config(request: WeComAppMenuConfigRequest):
+        groups = _normalize_wecom_app_menu_groups(
+            [group.model_dump() for group in request.groups],
+            allow_empty=False,
+        )
+        repo.save_wecom_app_menu_config(groups)
+        return {"success": True, "menu": _public_wecom_app_menu_preview(repo)}
 
     @app.post("/api/wecom-app/menu/create")
     async def create_wecom_app_menu():
         config = _notification_config_with_env_defaults(repo.get_notification_config())
         if not _wecom_app_config_complete(config, require_callback=False):
             raise HTTPException(status_code=400, detail="请先启用并保存企业微信自建应用 CorpID / AgentId / Secret")
-        payload = _wecom_app_menu_payload()
+        payload = _wecom_app_menu_payload(repo)
         try:
             client = _wecom_app_client_from_repo(repo)
             await client.create_menu(payload)
         except WeComError as exc:
             raise HTTPException(status_code=502, detail=_sanitize_wechat_ids_for_display(repo, str(exc))) from exc
-        return {"success": True, "menu": _public_wecom_app_menu_preview()}
+        return {"success": True, "menu": _public_wecom_app_menu_preview(repo)}
 
     @app.post("/api/wecom-app/test")
     async def test_wecom_app_interaction():
@@ -1263,7 +1380,7 @@ def create_app(
         if not crypto.verify_signature(msg_signature, timestamp, nonce, encrypted):
             raise HTTPException(status_code=403, detail="企业微信自建应用消息签名不正确")
         message = parse_wecom_app_message(crypto.decrypt(encrypted))
-        command_text = _wecom_app_menu_command(str(message.event_key or message.content or "").strip())
+        command_text = _wecom_app_menu_command(str(message.event_key or message.content or "").strip(), repo)
         if message.msg_type in {"text", "voice"} and _looks_like_duty_wechat_command(_normalize_wechat_query_text(command_text), repo):
             background_tasks.add_task(_handle_wecom_app_message, repo, uploads, message)
         elif (
@@ -2155,36 +2272,16 @@ def _public_wechat_interaction_config(repo: DutyRepository) -> dict[str, Any]:
     }
 
 
-def _wecom_app_menu_payload() -> dict[str, Any]:
-    menu = {
-        "button": [
-            {
-                "name": "监控提醒",
-                "sub_button": [
-                    _wecom_app_menu_click_button("我的监控", "DR_MY_MONITOR"),
-                    _wecom_app_menu_click_button("今日提醒", "DR_TODAY_REMINDERS"),
-                    _wecom_app_menu_click_button("明日监控", "DR_TOMORROW_MONITOR"),
-                    _wecom_app_menu_click_button("本周监控", "DR_WEEK_MONITOR"),
-                    _wecom_app_menu_click_button("下次提醒", "DR_NEXT_REMINDER"),
-                ],
-            },
-            {
-                "name": "机电预警",
-                "sub_button": [
-                    _wecom_app_menu_click_button("机电模板", "DR_TUNNEL_TEMPLATE"),
-                    _wecom_app_menu_click_button("修改模板", "DR_TUNNEL_MODIFY_TEMPLATE"),
-                    _wecom_app_menu_click_button("橙色预警巡查记录查询", "DR_ORANGE_PATROL_RECORD"),
-                ],
-            },
-            {
-                "name": "绑定帮助",
-                "sub_button": [
-                    _wecom_app_menu_click_button("我的绑定", "DR_BINDING"),
-                    _wecom_app_menu_click_button("查询帮助", "DR_HELP"),
-                ],
-            },
-        ]
-    }
+def _wecom_app_menu_payload(repo: DutyRepository | None = None) -> dict[str, Any]:
+    groups = _wecom_app_menu_groups(repo)
+    menu = {"button": []}
+    for group_index, group in enumerate(groups):
+        button = {"name": group["name"], "sub_button": []}
+        for item_index, item in enumerate(group["items"]):
+            button["sub_button"].append(
+                _wecom_app_menu_click_button(item["name"], _wecom_app_menu_key(group_index, item_index))
+            )
+        menu["button"].append(button)
     _validate_wecom_app_menu_payload(menu)
     return menu
 
@@ -2193,9 +2290,64 @@ def _wecom_app_menu_click_button(name: str, key: str) -> dict[str, str]:
     return {"type": "click", "name": name, "key": key}
 
 
-def _wecom_app_menu_command(value: str) -> str:
+def _wecom_app_menu_key(group_index: int, item_index: int) -> str:
+    return f"DR_MENU_{group_index}_{item_index}"
+
+
+def _wecom_app_menu_command(value: str, repo: DutyRepository | None = None) -> str:
     text = str(value or "").strip()
-    return WECOM_APP_MENU_COMMANDS.get(text, text)
+    if text in WECOM_APP_MENU_COMMANDS:
+        return WECOM_APP_MENU_COMMANDS[text]
+    match = re.fullmatch(r"DR_MENU_(\d+)_(\d+)", text)
+    if match and repo is not None:
+        groups = _wecom_app_menu_groups(repo)
+        group_index = int(match.group(1))
+        item_index = int(match.group(2))
+        if 0 <= group_index < len(groups):
+            items = groups[group_index]["items"]
+            if 0 <= item_index < len(items):
+                return str(items[item_index].get("command") or "").strip()
+    return text
+
+
+def _wecom_app_menu_groups(repo: DutyRepository | None = None) -> list[dict[str, Any]]:
+    raw = repo.get_wecom_app_menu_config() if repo is not None else []
+    return _normalize_wecom_app_menu_groups(raw or DEFAULT_WECOM_APP_MENU_GROUPS, allow_empty=False)
+
+
+def _normalize_wecom_app_menu_groups(groups: Any, *, allow_empty: bool) -> list[dict[str, Any]]:
+    if not isinstance(groups, list):
+        raise HTTPException(status_code=400, detail="自建应用菜单格式不正确")
+    normalized: list[dict[str, Any]] = []
+    for raw_group in groups:
+        if not isinstance(raw_group, dict):
+            continue
+        group_name = str(raw_group.get("name") or "").strip()
+        raw_items = raw_group.get("items") or []
+        if not group_name and not raw_items:
+            continue
+        if not group_name:
+            raise HTTPException(status_code=400, detail="一级菜单名称不能为空")
+        items: list[dict[str, str]] = []
+        if not isinstance(raw_items, list):
+            raise HTTPException(status_code=400, detail=f"一级菜单“{group_name}”的二级菜单格式不正确")
+        for raw_item in raw_items:
+            if not isinstance(raw_item, dict):
+                continue
+            item_name = str(raw_item.get("name") or "").strip()
+            command = str(raw_item.get("command") or "").strip()
+            if not item_name and not command:
+                continue
+            if not item_name or not command:
+                raise HTTPException(status_code=400, detail=f"一级菜单“{group_name}”下的二级菜单名称和命令都不能为空")
+            items.append({"name": item_name, "command": command})
+        if not items:
+            raise HTTPException(status_code=400, detail=f"一级菜单“{group_name}”至少需要 1 个二级菜单")
+        normalized.append({"name": group_name, "items": items})
+    if not normalized and not allow_empty:
+        normalized = copy.deepcopy(DEFAULT_WECOM_APP_MENU_GROUPS)
+    _validate_wecom_app_menu_groups(normalized)
+    return normalized
 
 
 def _is_wecom_app_query(query: WechatQueryRequest) -> bool:
@@ -2267,24 +2419,50 @@ def _validate_wecom_app_menu_payload(menu: dict[str, Any]) -> None:
                 raise ValueError(f"企业微信自建应用二级菜单“{sub_name}”超过 40 字节")
 
 
-def _public_wecom_app_menu_preview() -> dict[str, Any]:
-    payload = _wecom_app_menu_payload()
-    groups = []
-    for button in payload["button"]:
-        groups.append(
+def _validate_wecom_app_menu_groups(groups: list[dict[str, Any]]) -> None:
+    limits = WECOM_APP_MENU_LIMITS
+    if len(groups) > limits["max_top_buttons"]:
+        raise HTTPException(status_code=400, detail="企业微信自建应用一级菜单最多只能创建 3 个")
+    for group in groups:
+        group_name = str(group.get("name") or "")
+        if len(group_name.encode("utf-8")) > limits["max_top_name_bytes"]:
+            raise HTTPException(status_code=400, detail=f"企业微信自建应用一级菜单“{group_name}”超过 16 字节")
+        items = group.get("items") or []
+        if len(items) > limits["max_sub_buttons"]:
+            raise HTTPException(status_code=400, detail=f"企业微信自建应用“{group_name}”二级菜单最多只能创建 5 个")
+        for item in items:
+            item_name = str(item.get("name") or "")
+            command = str(item.get("command") or "")
+            if len(item_name.encode("utf-8")) > limits["max_sub_name_bytes"]:
+                raise HTTPException(status_code=400, detail=f"企业微信自建应用二级菜单“{item_name}”超过 40 字节")
+            if len(command.encode("utf-8")) > 128:
+                raise HTTPException(status_code=400, detail=f"企业微信自建应用二级菜单“{item_name}”命令超过 128 字节")
+
+
+def _public_wecom_app_menu_preview(repo: DutyRepository | None = None) -> dict[str, Any]:
+    groups = _wecom_app_menu_groups(repo)
+    payload = _wecom_app_menu_payload(repo)
+    public_groups = []
+    for group_index, group in enumerate(groups):
+        public_groups.append(
             {
-                "name": button["name"],
+                "name": group["name"],
                 "items": [
                     {
-                        "name": sub["name"],
-                        "key": sub["key"],
-                        "command": _wecom_app_menu_command(sub["key"]),
+                        "name": item["name"],
+                        "key": _wecom_app_menu_key(group_index, item_index),
+                        "command": item["command"],
                     }
-                    for sub in button.get("sub_button", [])
+                    for item_index, item in enumerate(group.get("items", []))
                 ],
             }
         )
-    return {"limits": copy.deepcopy(WECOM_APP_MENU_LIMITS), "groups": groups, "payload": payload}
+    return {
+        "limits": copy.deepcopy(WECOM_APP_MENU_LIMITS),
+        "defaults": copy.deepcopy(DEFAULT_WECOM_APP_MENU_GROUPS),
+        "groups": public_groups,
+        "payload": payload,
+    }
 
 
 def _public_wechat_interaction_logs(repo: DutyRepository, logs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2378,6 +2556,7 @@ def _wechat_query_image_reply_title(result: dict[str, Any]) -> str:
         "help": "帮助菜单",
         "unbound": "查询",
         "binding": "绑定查询",
+        "daily_duty_query": "今日在岗查询",
         "monitor": "监控查询",
         "monitor_all": "监控查询",
         "monitor_all_range": "监控查询",
@@ -2386,6 +2565,7 @@ def _wechat_query_image_reply_title(result: dict[str, Any]) -> str:
         "reminder_all_range": "提醒查询",
         "next_reminder": "下次提醒查询",
         "next_reminder_all": "下次提醒查询",
+        "rest_query": "休息查询",
     }.get(query_type, "查询")
 
 
@@ -2942,6 +3122,13 @@ async def _build_wechat_query_response(
 ) -> dict[str, Any]:
     text = _wechat_query_menu_selection_command(_normalize_wechat_query_text(query.text))
     if (
+        _is_wecom_app_query(query)
+        and not _is_wechat_self_bind_command(text)
+        and not _is_wechat_query_help(text)
+        and not _wechat_query_bound_person_name(repo, query)
+    ):
+        return _wecom_app_bind_required_response(repo, query)
+    if (
         _is_tunnel_mechanical_wechat_request(text)
         or _is_tunnel_mechanical_wechat_template_shortcut(text, repo)
         or _is_tunnel_mechanical_wechat_modify_template_shortcut(text, repo)
@@ -2955,6 +3142,10 @@ async def _build_wechat_query_response(
     patrol_record_response = await _build_wechat_patrol_record_response(repo, query, text, uploads=uploads)
     if patrol_record_response is not None:
         return patrol_record_response
+    if _is_wechat_daily_duty_query(text):
+        return _build_wechat_daily_duty_query_response(repo, query, uploads=uploads)
+    if _is_wechat_rest_query(text):
+        return _build_wechat_rest_query_response(repo, query, text)
     if _is_wechat_query_help(text):
         return _wechat_query_help_response()
     person = _person_for_wechat_query(repo, query)
@@ -3162,7 +3353,7 @@ def _wecom_app_notify_client_from_config(config: dict[str, Any], repo: DutyRepos
 
 
 async def _handle_wecom_app_message(repo: DutyRepository, uploads: Path, message) -> None:
-    text = _wecom_app_menu_command(str(getattr(message, "event_key", "") or getattr(message, "content", "") or "").strip())
+    text = _wecom_app_menu_command(str(getattr(message, "event_key", "") or getattr(message, "content", "") or "").strip(), repo)
     userid = str(message.from_user or "").strip()
     if not text or not userid:
         return
@@ -3267,6 +3458,8 @@ def _looks_like_duty_wechat_command(text: str, repo: DutyRepository | None = Non
             _is_wechat_query_help,
             _is_wechat_self_bind_command,
             _is_wechat_binding_query,
+            _is_wechat_daily_duty_query,
+            _is_wechat_rest_query,
             _is_wechat_next_reminder_query,
             _is_wechat_monitor_query,
         )
@@ -4209,15 +4402,16 @@ def _wechat_query_menu_selection_command(text: str) -> str:
     today = _today_in_tz().isoformat()
     return {
         "1": "查询我的监控",
-        "2": "查询今日提醒",
-        "3": "查询明日监控",
-        "4": "查询本周监控",
-        "5": "查询未来7天",
-        "6": "查询下次提醒",
+        "2": "查询今日在岗",
+        "3": "查询今日监控",
+        "4": "查询明日监控",
+        "5": "查询本周监控",
+        "6": "查询未来7天",
         "7": "查询我的绑定",
         "8": "查询今日机电",
         "9": f"查询{today}机电",
         "10": "隧道机电",
+        "11": "查询休息",
     }.get(text, text)
 
 
@@ -4232,6 +4426,27 @@ def _is_wechat_self_bind_command(text: str) -> bool:
 
 def _is_wechat_next_reminder_query(text: str) -> bool:
     return text in {"查询下次提醒", "下次提醒", "我的下次提醒", "最近提醒", "下一次提醒", "我下次什么时候提醒"}
+
+
+def _is_wechat_daily_duty_query(text: str) -> bool:
+    value = str(text or "").strip()
+    return value in {
+        "查询今日在岗",
+        "今日在岗",
+        "查询今天在岗",
+        "今天在岗",
+        "查询在岗",
+        "在岗查询",
+        "今日值守",
+        "查询今日值守",
+    }
+
+
+def _is_wechat_rest_query(text: str) -> bool:
+    value = str(text or "").strip()
+    if value in {"查询休息", "休息查询", "我的休息", "查询我的休息", "我什么时候休息", "本月休息"}:
+        return True
+    return bool(re.match(r"^(查询|查).{1,12}休息$", value))
 
 
 def _is_wechat_self_scoped_query(text: str) -> bool:
@@ -4264,6 +4479,10 @@ def _is_wechat_monitor_query(text: str) -> bool:
         "我的监控",
         "查询我的排班",
         "我的排班",
+        "查询今日监控",
+        "今日监控",
+        "查询今天监控",
+        "今天监控",
         "查询今日提醒",
         "今日提醒",
         "查询今天提醒",
@@ -4315,6 +4534,8 @@ def _is_wechat_monitor_query(text: str) -> bool:
         for keyword in (
             "我的监控",
             "我的排班",
+            "今日监控",
+            "今天监控",
             "今日提醒",
             "今天提醒",
             "明日监控",
@@ -4424,15 +4645,16 @@ def _wechat_query_help_text() -> str:
     return (
         "监控查询菜单：\n"
         "1. 查询我的监控\n"
-        "2. 查询今日提醒\n"
-        "3. 查询明日监控\n"
-        "4. 查询本周监控\n"
-        "5. 查询未来7天\n"
-        "6. 查询下次提醒\n"
+        "2. 查询今日在岗\n"
+        "3. 查询今日监控\n"
+        "4. 查询明日监控\n"
+        "5. 查询本周监控\n"
+        "6. 查询未来7天\n"
         "7. 查询我的绑定\n"
         "8. 查询今日机电\n"
         f"9. 查询{today}机电\n"
         "10. 查看隧道机电录入格式\n"
+        "11. 查询休息\n"
         "直接回复序号即可执行。\n"
         "发送“巡查记录”可获取巡查记录查询模板。\n"
         f"示例：{DEFAULT_PATROL_RECORD_TEMPLATE}\n"
@@ -4584,6 +4806,128 @@ def _wechat_query_requested_person_name(repo: DutyRepository, text: str) -> str:
         if name in value:
             return name
     return ""
+
+
+def _build_wechat_daily_duty_query_response(
+    repo: DutyRepository,
+    query: WechatQueryRequest,
+    *,
+    uploads: Path | None = None,
+) -> dict[str, Any]:
+    target = query.target_date or _today_in_tz()
+    preview = _build_daily_duty_preview(repo, target)
+    image_url = ""
+    if uploads is not None:
+        uploads.mkdir(parents=True, exist_ok=True)
+        filename = f"daily-duty-query-{uuid.uuid4().hex}.png"
+        (uploads / filename).write_bytes(render_daily_duty_image(preview))
+        image_url = f"/api/uploads/{filename}"
+    reply = f"已生成 {target.isoformat()} 今日在岗信息图片，正在发送。"
+    result = {
+        "success": True,
+        "query_type": "daily_duty_query",
+        "target_date": target.isoformat(),
+        "reply": reply,
+        "replies": [reply],
+        "content": preview.get("content") or "",
+        "details": preview.get("details") or {},
+    }
+    if image_url:
+        result["image_url"] = image_url
+        result["image_full_url"] = _public_app_url(image_url)
+    return result
+
+
+def _build_wechat_rest_query_response(repo: DutyRepository, query: WechatQueryRequest, text: str) -> dict[str, Any]:
+    target = query.target_date or _today_in_tz()
+    requested_person = _wechat_query_requested_person_name(repo, text)
+    bound = _person_for_wechat_query(repo, query)
+    person_name = requested_person or (str(bound["name"]) if bound else "")
+    if not person_name:
+        return _wechat_query_unbound_response(query)
+    summary = _monthly_rest_summary(repo, person_name, target)
+    return {
+        "success": True,
+        "query_type": "rest_query",
+        "person_name": person_name,
+        "target_date": target.isoformat(),
+        "reply": summary["reply"],
+        "details": summary,
+    }
+
+
+def _monthly_rest_summary(repo: DutyRepository, person_name: str, target: date) -> dict[str, Any]:
+    roster = repo.get_roster_month(target.year, target.month)
+    if not roster:
+        reply = f"{person_name} {target.year}年{target.month}月没有导入排班，无法查询休息。"
+        return {"reply": reply, "total_days": 0, "ranges": []}
+    row = next((item for item in roster.get("grid", []) if str(item.get("name") or "").strip() == person_name), None)
+    if not row:
+        reply = f"{person_name} {target.year}年{target.month}月排班表里没有找到这个人。"
+        return {"reply": reply, "total_days": 0, "ranges": []}
+    rest_days: list[date] = []
+    for day_text, code in dict(row.get("days") or {}).items():
+        if not _is_rest_code(str(code or "")):
+            continue
+        try:
+            rest_days.append(date(target.year, target.month, int(day_text)))
+        except ValueError:
+            continue
+    rest_days = sorted(set(rest_days))
+    ranges = _date_ranges_from_days(rest_days)
+    total = len(rest_days)
+    rested = len([day for day in rest_days if day < target])
+    if _is_rest_code(_roster_code_for_person(repo, person_name, target)):
+        rested = len([day for day in rest_days if day <= target])
+    remaining = max(0, total - rested)
+    if not rest_days:
+        reply = f"{person_name} {target.year}年{target.month}月没有休息排班。"
+        return {"reply": reply, "total_days": 0, "rested_days": 0, "remaining_days": 0, "ranges": []}
+    prefix = f"{person_name} 本月休息共{total}天，分{len(ranges)}次休息"
+    if rested > 0:
+        prefix += f"，已经休息{rested}天，本月休息还剩{remaining}天"
+    pieces = [prefix]
+    for index, (start, end) in enumerate(ranges, start=1):
+        label = _ordinal_zh(index)
+        range_text = f"从{_month_day_week_label(start)}到{_month_day_week_label(end)}"
+        if target < start:
+            days_left = (start - target).days
+            pieces.append(f"距离第{label}次休息还剩{days_left}天，{range_text}")
+        elif start <= target <= end:
+            left = (end - target).days + 1
+            pieces.append(f"正在第{label}次休息，假期余额{left}天，{range_text}")
+        else:
+            pieces.append(f"第{label}次休息已结束，{range_text}")
+    return {
+        "reply": "，".join(pieces),
+        "total_days": total,
+        "rested_days": rested,
+        "remaining_days": remaining,
+        "ranges": [{"start": start.isoformat(), "end": end.isoformat(), "days": (end - start).days + 1} for start, end in ranges],
+    }
+
+
+def _date_ranges_from_days(days: list[date]) -> list[tuple[date, date]]:
+    if not days:
+        return []
+    ranges: list[tuple[date, date]] = []
+    start = prev = days[0]
+    for day in days[1:]:
+        if day == prev + timedelta(days=1):
+            prev = day
+            continue
+        ranges.append((start, prev))
+        start = prev = day
+    ranges.append((start, prev))
+    return ranges
+
+
+def _month_day_week_label(day: date) -> str:
+    return f"{day.month}月{day.day}日（星期{'一二三四五六日'[day.weekday()]}）"
+
+
+def _ordinal_zh(index: int) -> str:
+    return {1: "一", 2: "二", 3: "三", 4: "四", 5: "五"}.get(index, str(index))
 
 
 def _build_person_monitor_query_response(repo: DutyRepository, person_name: str, target: date) -> dict[str, Any]:
@@ -4905,6 +5249,8 @@ def _wechat_query_event_label(kind: str) -> str:
         "before_shift": "班前提醒",
         "rest": "休息提醒",
         "custom": "自定义提醒",
+        "vacation_start": "假期开始提醒",
+        "vacation_end": "假期余额提醒",
     }.get(kind, kind)
 
 
@@ -6601,10 +6947,12 @@ def _reminder_events_response(repo: DutyRepository, target: date, *, now: dateti
 
 def _today_reminder_event_media(repo: DutyRepository, event: ReminderEvent, target: date) -> dict[str, str]:
     if event.kind == "daily_duty":
-        return {
-            "image_url": f"/api/daily-duty-image?target_date={target.isoformat()}",
-            "image_alt": "今日在岗提醒图片",
-        }
+        if _event_send_content_mode(event, "image") in {"both", "image"}:
+            return {
+                "image_url": f"/api/daily-duty-image?target_date={target.isoformat()}",
+                "image_alt": "今日在岗提醒图片",
+            }
+        return {}
     if event.kind in {"patrol_warning_start", "patrol_warning_end"}:
         send_content_mode = _patrol_send_content_mode(repo.get_patrol_warning_config())
         if send_content_mode in {"both", "image"}:
@@ -6740,6 +7088,12 @@ def _today_reminder_group_statuses(repo: DutyRepository, target: date, events: l
         statuses.append({"key": "custom", "message": "未配置自定义提醒"})
     elif "custom" not in event_kinds:
         statuses.append({"key": "custom", "message": "今日没有匹配到自定义提醒"})
+
+    vacation_config = repo.get_vacation_reminder_config()
+    if not vacation_config.get("enabled"):
+        statuses.append({"key": "vacation", "message": "假期余额提醒未启用"})
+    elif not (event_kinds & {"vacation_start", "vacation_end"}):
+        statuses.append({"key": "vacation", "message": "今日没有假期余额提醒"})
 
     return statuses
 
@@ -6883,6 +7237,13 @@ def _rest_end_date(repo: DutyRepository, person_name: str, start: date) -> date:
     return current
 
 
+def _rest_start_date(repo: DutyRepository, person_name: str, end: date) -> date:
+    current = end
+    while _is_rest_code(_roster_code_for_person(repo, person_name, current - timedelta(days=1))):
+        current -= timedelta(days=1)
+    return current
+
+
 def _build_daily_duty_preview(repo: DutyRepository, target: date) -> dict[str, Any]:
     config = repo.get_daily_duty_config()
     rows = _roster_rows_for_date(repo, target)
@@ -6944,6 +7305,7 @@ def _build_daily_duty_preview(repo: DutyRepository, target: date) -> dict[str, A
         "details": values,
         "notification_room_id": str(config.get("notification_room_id") or ""),
         "notification_room_name": str(config.get("notification_room_name") or ""),
+        "send_content_mode": _normalize_send_content_mode(str(config.get("send_content_mode") or "image"), "image"),
     }
 
 
@@ -7037,9 +7399,68 @@ def _plan_custom_reminder_events(repo: DutyRepository, assignments: list[ShiftAs
                     key_suffix=str(reminder.get("id") or ""),
                     target_room_id=str(reminder.get("notification_room_id") or "").strip(),
                     target_room_name=str(reminder.get("notification_room_name") or "").strip(),
+                    send_content_mode=_normalize_send_content_mode(str(reminder.get("send_content_mode") or "text"), "text"),
                 )
             )
     return events
+
+
+def _plan_vacation_reminder_events(repo: DutyRepository, target: date) -> list[ReminderEvent]:
+    config = repo.get_vacation_reminder_config()
+    if not bool(config.get("enabled")):
+        return []
+    names = _wechat_query_all_person_names_for_date(repo, target)
+    if bool(_notification_config_with_env_defaults(repo.get_notification_config()).get("wecom_app_enabled")):
+        bound_lookup = _wecom_app_userid_lookup(repo)
+        names = [name for name in names if bound_lookup.get(name)]
+    tomorrow = target + timedelta(days=1)
+    events: list[ReminderEvent] = []
+    mode = _normalize_send_content_mode(str(config.get("send_content_mode") or "text"), "text")
+    for name in names:
+        today_rest = _is_rest_code(_roster_code_for_person(repo, name, target))
+        tomorrow_rest = _is_rest_code(_roster_code_for_person(repo, name, tomorrow))
+        if not today_rest and tomorrow_rest:
+            rest_end = _rest_end_date(repo, name, tomorrow)
+            values = {
+                "name": name,
+                "date": target.isoformat(),
+                "rest_start_date": tomorrow.isoformat(),
+                "rest_end_date": rest_end.isoformat(),
+            }
+            events.append(
+                ReminderEvent(
+                    kind="vacation_start",
+                    person_name=name,
+                    send_at=datetime.combine(target, _parse_hhmm(_coerce_hhmm(str(config.get("start_reminder_time") or ""), "07:50")), tzinfo=TZ),
+                    content=_render_simple_template(_choose_template(config.get("start_message_templates"), str(config.get("start_message_template") or DEFAULT_VACATION_START_TEMPLATE)), values),
+                    send_content_mode=mode,
+                )
+            )
+        if today_rest and not tomorrow_rest:
+            rest_start = _rest_start_date(repo, name, target)
+            values = {
+                "name": name,
+                "date": target.isoformat(),
+                "rest_start_date": rest_start.isoformat(),
+                "rest_end_date": target.isoformat(),
+            }
+            events.append(
+                ReminderEvent(
+                    kind="vacation_end",
+                    person_name=name,
+                    send_at=datetime.combine(target, _parse_hhmm(_coerce_hhmm(str(config.get("end_reminder_time") or ""), "07:50")), tzinfo=TZ),
+                    content=_render_simple_template(_choose_template(config.get("end_message_templates"), str(config.get("end_message_template") or DEFAULT_VACATION_END_TEMPLATE)), values),
+                    send_content_mode=mode,
+                )
+            )
+    return events
+
+
+def _choose_template(values: Any, fallback: str) -> str:
+    choices = [str(value or "").strip() for value in (values if isinstance(values, list) else []) if str(value or "").strip()]
+    if not choices:
+        return str(fallback or "").strip()
+    return secrets.choice(choices)
 
 
 def _plan_all_events(repo: DutyRepository, target: date):
@@ -7064,7 +7485,8 @@ def _plan_all_events(repo: DutyRepository, target: date):
         )
         room_id = str(person.get("notification_room_id") or "").strip()
         room_name = str(person.get("notification_room_name") or "").strip()
-        events.extend(replace(event, target_room_id=room_id, target_room_name=room_name) for event in person_events)
+        mode = _normalize_send_content_mode(str(person.get("send_content_mode") or "both"), "both")
+        events.extend(replace(event, target_room_id=room_id, target_room_name=room_name, send_content_mode=mode) for event in person_events)
         if person.get("rest_reminder_enabled"):
             rest_status = _rest_status_for_date(repo, person["name"], target)
             if rest_status:
@@ -7080,6 +7502,7 @@ def _plan_all_events(repo: DutyRepository, target: date):
                         content=content,
                         target_room_id=str(person.get("notification_room_id") or "").strip(),
                         target_room_name=str(person.get("notification_room_name") or "").strip(),
+                        send_content_mode=mode,
                     )
                 )
     daily_duty = _build_daily_duty_preview(repo, target)
@@ -7092,9 +7515,11 @@ def _plan_all_events(repo: DutyRepository, target: date):
                 content=daily_duty["content"],
                 target_room_id=str(daily_duty.get("notification_room_id") or "").strip(),
                 target_room_name=str(daily_duty.get("notification_room_name") or "").strip(),
+                send_content_mode=_normalize_send_content_mode(str(daily_duty.get("send_content_mode") or "image"), "image"),
             )
         )
     events.extend(_plan_custom_reminder_events(repo, assignments, target))
+    events.extend(_plan_vacation_reminder_events(repo, target))
     return sorted(events, key=lambda event: event.send_at)
 
 
@@ -7384,6 +7809,11 @@ def _normalize_patrol_send_content_mode(value: str) -> str:
     return normalized if normalized in {"both", "text", "image"} else "both"
 
 
+def _normalize_send_content_mode(value: str, default: str = "both") -> str:
+    normalized = str(value or default).strip().lower()
+    return normalized if normalized in {"both", "text", "image"} else default
+
+
 def _patrol_send_content_mode(config: dict[str, Any]) -> str:
     return _normalize_patrol_send_content_mode(str(config.get("send_content_mode") or "both"))
 
@@ -7406,7 +7836,7 @@ def _split_mention_targets(value: Any) -> list[str]:
 
 
 def _person_target_for_event(event: ReminderEvent) -> str:
-    if event.kind in {"daily", "before_shift", "rest", "custom", "monitor_test", "custom_test"}:
+    if event.kind in {"daily", "before_shift", "rest", "custom", "monitor_test", "custom_test", "vacation_start", "vacation_end", "vacation_test"}:
         name = str(event.person_name or "").strip()
         return name if name and name != "测试消息" else ""
     return ""
@@ -7482,6 +7912,23 @@ def _should_send_shift_reminder_image(event: ReminderEvent) -> bool:
     return _is_shift_reminder_kind(event.kind)
 
 
+def _event_send_content_mode(event: ReminderEvent, default: str = "both") -> str:
+    return _normalize_send_content_mode(str(getattr(event, "send_content_mode", "") or ""), default)
+
+
+def _event_can_send_image(event: ReminderEvent) -> bool:
+    return _is_shift_reminder_kind(event.kind) or event.kind in {
+        "daily_duty",
+        "daily_duty_test",
+        "vacation_start",
+        "vacation_end",
+        "vacation_test",
+        "custom",
+        "custom_test",
+        "rest",
+    }
+
+
 def _shift_reminder_intro_content(event: ReminderEvent, *, personal_wechat: bool = False) -> str:
     lines: list[str] = []
     for raw_line in str(event.content or "").splitlines():
@@ -7546,7 +7993,13 @@ async def _send_test_reminder_event(
     target_ids = _notification_target_ids_for_event(repo, notification_client, event)
     sent_content = content
     try:
-        if _should_send_shift_reminder_image(event) and hasattr(notification_client, "send_image"):
+        mode = _event_send_content_mode(event, "both" if _is_shift_reminder_kind(event.kind) else "text")
+        if event.kind == "daily_duty_test" and hasattr(notification_client, "send_image"):
+            if mode in {"both", "text"}:
+                await _notify_send_text(notification_client, content, mentions, target_ids)
+            if mode in {"both", "image"}:
+                await _notify_send_image(notification_client, render_daily_duty_image(_build_daily_duty_preview(repo, event.send_at.date())), target_ids)
+        elif _event_can_send_image(event) and mode in {"both", "image"} and hasattr(notification_client, "send_image"):
             intro_event = ReminderEvent(
                 kind=event.kind,
                 person_name=event.person_name,
@@ -7554,7 +8007,8 @@ async def _send_test_reminder_event(
                 content=_shift_reminder_intro_content(event, personal_wechat=_is_personal_wechat_notify_client(notification_client)),
             )
             sent_content = _notification_content_for_event(repo, notification_client, intro_event)
-            await _notify_send_text(notification_client, sent_content, mentions, target_ids)
+            if mode == "both":
+                await _notify_send_text(notification_client, sent_content, mentions, target_ids)
             await _notify_send_image(notification_client, render_shift_reminder_image(event), target_ids)
         else:
             await _notify_send_text(notification_client, content, mentions, target_ids)
@@ -7887,13 +8341,17 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
             preview_date = _date_from_record(record) or _today_in_tz()
             fake_event = ReminderEvent(kind=kind, person_name="今日在岗人员", send_at=datetime.now(TZ), content=content)
             target_ids = _notification_target_ids_for_event(repo, client, fake_event) if _is_wecom_app_notify_client(client) else (record_target_ids or _daily_duty_target_room_ids(repo))
-            await _notify_send_image(client, render_daily_duty_image(_build_daily_duty_preview(repo, preview_date)), target_ids)
+            mode = _normalize_send_content_mode(str(repo.get_daily_duty_config().get("send_content_mode") or "image"), "image")
+            if mode in {"both", "text"}:
+                await _notify_send_text(client, content, _notification_true_mentions_for_event(repo, client, fake_event), target_ids)
+            if mode in {"both", "image"}:
+                await _notify_send_image(client, render_daily_duty_image(_build_daily_duty_preview(repo, preview_date)), target_ids)
         elif kind.startswith("patrol_warning_"):
             fake_event = ReminderEvent(kind=kind, person_name="", send_at=datetime.now(TZ), content=content)
             content = _notification_content_for_event(repo, client, fake_event)
             target_ids = _notification_target_ids_for_event(repo, client, fake_event) if _is_wecom_app_notify_client(client) else (record_target_ids or _patrol_warning_target_room_ids(repo))
             await _notify_send_text(client, content, _notification_true_mentions_for_event(repo, client, fake_event), target_ids)
-        elif _is_shift_reminder_kind(kind) and hasattr(client, "send_image"):
+        elif (_is_shift_reminder_kind(kind) or kind.startswith(("custom", "vacation", "rest"))) and hasattr(client, "send_image"):
             fake_event = ReminderEvent(
                 kind=kind,
                 person_name=target,
@@ -7902,14 +8360,19 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
             )
             mentions = _notification_true_mentions_for_event(repo, client, fake_event)
             resend_target_ids = _notification_target_ids_for_event(repo, client, fake_event) if _is_wecom_app_notify_client(client) else (record_target_ids or _configured_person_target_room_ids(repo, target))
+            mode = "both" if _is_shift_reminder_kind(kind) else "text"
+            if kind.startswith("vacation"):
+                mode = _normalize_send_content_mode(str(repo.get_vacation_reminder_config().get("send_content_mode") or "text"), "text")
             intro_event = ReminderEvent(
                 kind=kind,
                 person_name=target,
                 send_at=datetime.now(TZ),
                 content=_shift_reminder_intro_content(fake_event, personal_wechat=_is_personal_wechat_notify_client(client)),
             )
-            await _notify_send_text(client, _notification_content_for_event(repo, client, intro_event), mentions, resend_target_ids)
-            await _notify_send_image(client, render_shift_reminder_image(fake_event), resend_target_ids)
+            if mode in {"both", "text"}:
+                await _notify_send_text(client, _notification_content_for_event(repo, client, intro_event), mentions, resend_target_ids)
+            if mode in {"both", "image"}:
+                await _notify_send_image(client, render_shift_reminder_image(fake_event), resend_target_ids)
         else:
             fake_event = ReminderEvent(
                 kind=kind,
@@ -7983,9 +8446,14 @@ async def _send_due_reminders(repo: DutyRepository) -> None:
             continue
         try:
             target_ids = _notification_target_ids_for_event(repo, notification_client, event)
+            mode = _event_send_content_mode(event, "image" if event.kind == "daily_duty" else ("both" if _is_shift_reminder_kind(event.kind) else "text"))
             if event.kind == "daily_duty":
-                await _notify_send_image(notification_client, render_daily_duty_image(_build_daily_duty_preview(repo, now.date())), target_ids)
-            elif _should_send_shift_reminder_image(event) and hasattr(notification_client, "send_image"):
+                if mode in {"both", "text"}:
+                    mentions = _notification_true_mentions_for_event(repo, notification_client, event)
+                    await _notify_send_text(notification_client, _notification_content_for_event(repo, notification_client, event), mentions, target_ids)
+                if mode in {"both", "image"}:
+                    await _notify_send_image(notification_client, render_daily_duty_image(_build_daily_duty_preview(repo, now.date())), target_ids)
+            elif _event_can_send_image(event) and mode in {"both", "image"} and hasattr(notification_client, "send_image"):
                 mentions = _notification_true_mentions_for_event(repo, notification_client, event)
                 intro_event = ReminderEvent(
                     kind=event.kind,
@@ -7993,12 +8461,13 @@ async def _send_due_reminders(repo: DutyRepository) -> None:
                     send_at=event.send_at,
                     content=_shift_reminder_intro_content(event, personal_wechat=_is_personal_wechat_notify_client(notification_client)),
                 )
-                await _notify_send_text(
-                    notification_client,
-                    _notification_content_for_event(repo, notification_client, intro_event),
-                    mentions,
-                    target_ids,
-                )
+                if mode == "both":
+                    await _notify_send_text(
+                        notification_client,
+                        _notification_content_for_event(repo, notification_client, intro_event),
+                        mentions,
+                        target_ids,
+                    )
                 await _notify_send_image(notification_client, render_shift_reminder_image(event), target_ids)
             else:
                 mentions = _notification_true_mentions_for_event(repo, notification_client, event)

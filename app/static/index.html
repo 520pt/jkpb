@@ -3078,6 +3078,7 @@
           <button data-settings-target="patrolWarningSettings">公路巡查预警</button>
           <button data-settings-target="monitorSettings">监控班提醒</button>
           <button data-settings-target="customReminderSettings">自定义提醒</button>
+          <button data-settings-target="vacationReminderSettings">假期余额提醒</button>
           <button data-settings-target="previewSettings">提醒预览</button>
           <div class="settings-nav-group">人员配置</div>
           <button data-settings-target="personnelSettings">人员与驾驶员</button>
@@ -3137,7 +3138,7 @@
                       <label class="checkbox-label"><span>启用</span><input id="wecomAiBotEnabled" type="checkbox" /></label>
                     </div>
                     <p class="settings-panel-note">
-                      用于在企业微信群或单聊中直接发送文字命令，例如“菜单、查询今日提醒、查询本周监控、模板”，不需要 artifacts 或 JSON，也不使用个人微信登录。
+                      用于在企业微信群或单聊中直接发送文字命令，例如“菜单、查询今日在岗、查询今日监控、模板”，不需要 artifacts 或 JSON，也不使用个人微信登录。
                     </p>
                     <div class="settings-panel-note">
                       <strong>Bot ID / Secret 获取方式：</strong><br />
@@ -3239,8 +3240,13 @@
                     </div>
                     <div class="item">
                       <strong>自定义菜单</strong>
-                      <small id="wecomAppMenuLimits">一级菜单最多 3 个；每个一级菜单最多 5 个二级菜单；已按分类自动控制数量。</small>
+                      <small id="wecomAppMenuLimits">一级菜单最多 3 个；每个一级菜单最多 5 个二级菜单。二级菜单命令就是点击后自动发送的文字，例如：查询今日在岗。</small>
                       <div id="wecomAppMenuPreview" class="wechat-card-grid"></div>
+                      <div class="settings-actions">
+                        <button id="addWecomAppMenuGroupBtn" type="button">添加一级菜单</button>
+                        <button id="restoreWecomAppMenuBtn" type="button">恢复默认菜单</button>
+                        <button id="saveWecomAppMenuBtn" type="button">保存菜单配置</button>
+                      </div>
                     </div>
                     <div class="item">
                       <strong>配置测试</strong>
@@ -3394,6 +3400,13 @@
                 <div class="field-grid">
                   <label>每日提醒时间 <input id="dailyTime" type="time" value="07:50" /></label>
                   <label>班次提前提醒分钟 <input id="beforeMinutes" type="number" min="0" max="1440" value="10" /></label>
+                  <label>发送方式
+                    <select id="monitorSendContentMode">
+                      <option value="both">图文（文字+图片）</option>
+                      <option value="image">仅图片</option>
+                      <option value="text">仅文字</option>
+                    </select>
+                  </label>
                 </div>
                 <label>监控排班提醒文案 <textarea id="messageTemplate" placeholder="{name} {date}（{time_range})是你的{shift_label}"></textarea></label>
                 <div class="field-grid">
@@ -3452,7 +3465,7 @@
                   <div class="patrol-delivery-row">
                     <label>发送内容
                       <select id="patrolSendContentMode">
-                        <option value="both">文字+图片</option>
+                        <option value="both">图文（文字+图片）</option>
                         <option value="text">仅文字</option>
                         <option value="image">仅图片</option>
                       </select>
@@ -3510,6 +3523,13 @@
                     </select>
                   </label>
                   <label>提醒时间 <input id="customReminderTime" type="time" value="21:00" /></label>
+                  <label>发送方式
+                    <select id="customReminderSendContentMode">
+                      <option value="text">仅文字</option>
+                      <option value="both">图文（文字+图片）</option>
+                      <option value="image">仅图片</option>
+                    </select>
+                  </label>
                 </div>
                 <label>提醒文案 <textarea id="customReminderMessage" placeholder="需要关闭隧道灯"></textarea></label>
                 <label class="checkbox-label"><span>启用这条提醒</span><input id="customReminderEnabled" type="checkbox" checked /></label>
@@ -3524,6 +3544,39 @@
             <div class="side-block reminder-list-panel">
               <h3>已配置自定义提醒</h3>
               <div id="customReminderList" class="people-list reminder-card-list"></div>
+            </div>
+          </section>
+
+          <section class="settings-panel single" id="vacationReminderSettings">
+            <div class="side-block wide">
+              <h3>假期余额提醒</h3>
+              <p class="settings-panel-note">按排班表里的“休/休息”自动判断：休息开始前一天提醒一次，休息最后一天提醒一次。个人默认发给对应企业微信绑定成员；个人微信群会在文字里 @ 对应姓名。</p>
+              <div class="stack">
+                <div class="field-grid">
+                  <label class="checkbox-label"><span>启用假期余额提醒</span><input id="vacationReminderEnabled" type="checkbox" checked /></label>
+                  <label>开始前提醒时间 <input id="vacationStartTime" type="time" value="07:50" /></label>
+                  <label>最后一天提醒时间 <input id="vacationEndTime" type="time" value="07:50" /></label>
+                  <label>发送方式
+                    <select id="vacationSendContentMode">
+                      <option value="text">仅文字</option>
+                      <option value="both">图文（文字+图片）</option>
+                      <option value="image">仅图片</option>
+                    </select>
+                  </label>
+                </div>
+                <label>开始休息提醒文案库（每行一条，发送时随机选择）
+                  <textarea id="vacationStartTemplate" rows="8" placeholder="恭喜你今天下午可以开始休息了，加油一天要苦80块的男人，"></textarea>
+                </label>
+                <label>假期余额不足提醒文案库（每行一条，发送时随机选择）
+                  <textarea id="vacationEndTemplate" rows="8" placeholder="假期余额不足，今天下午就该返回站点了，加油天选打工人。"></textarea>
+                </label>
+                <p class="settings-panel-note">可用变量：{name}、{date}、{rest_start_date}、{rest_end_date}。</p>
+                <div class="settings-actions">
+                  <button class="primary" id="saveVacationReminderBtn" type="button">保存假期提醒配置</button>
+                  <button id="testVacationReminderBtn" type="button">测试发送假期提醒</button>
+                </div>
+                <p id="vacationReminderStatus" class="status"></p>
+              </div>
             </div>
           </section>
 
@@ -3583,6 +3636,13 @@
                   <div class="field-grid">
                     <label class="checkbox-label"><span>启用今日在岗提醒</span><input id="dailyDutyEnabled" type="checkbox" checked /></label>
                     <label>提醒时间 <input id="dailyDutyTime" type="time" value="07:50" /></label>
+                    <label>发送方式
+                      <select id="dailyDutySendContentMode">
+                        <option value="image">仅图片</option>
+                        <option value="both">图文（文字+图片）</option>
+                        <option value="text">仅文字</option>
+                      </select>
+                    </label>
                     <label>发送到微信群 <select id="dailyDutyNotificationRoom"></select></label>
                   </div>
                   <label>今日在岗提醒文案 <textarea id="dailyDutyTemplate" class="daily-duty-template-input" placeholder="今日在岗人员&#10;监控班：今日早班：{early}，明日早班：{tomorrow_early}，中班：{middle}，晚班：{night}&#10;驾驶员：大车：{big_drivers} 小车：{small_drivers}&#10;备勤人员：{standby}&#10;今日下午休息：{afternoon_rest}&#10;正在休息：{resting}&#10;今日下午到岗：{afternoon_return}"></textarea></label>
@@ -3674,6 +3734,7 @@
       customReminders: [],
       editingCustomReminderId: null,
       dailyDutyConfig: null,
+      vacationReminderConfig: null,
       notificationConfig: null,
       notificationTargetRooms: [],
       lightAgentRooms: [],
@@ -3682,6 +3743,9 @@
       lightAgentWechatConnected: false,
       wechatBridgeEnabled: false,
       notificationActivePanel: "wecom_webhook",
+      wecomAppMenuGroups: [],
+      wecomAppMenuDefaults: [],
+      wecomAppMenuLimits: {},
       featureChannelConfig: null,
       featureChannelDefaults: null,
       featureChannelRooms: [],
@@ -4120,6 +4184,12 @@
       return "warning";
     }
 
+    function contentModeLabel(mode) {
+      if (mode === "image") return "仅图片";
+      if (mode === "text") return "仅文字";
+      return "图文";
+    }
+
     function renderOverviewCard(card) {
       const toggleAction = card.actions.find((action) => action.toggle);
       const normalActions = card.actions.filter((action) => !action.toggle);
@@ -4162,6 +4232,8 @@
       const restEnabled = enabledMonitored.filter((person) => person.rest_reminder_enabled).length;
       const custom = state.customReminders || [];
       const enabledCustom = custom.filter((reminder) => reminder.enabled !== false);
+      const vacation = state.vacationReminderConfig || {};
+      const vacationLoaded = Boolean(state.vacationReminderConfig);
       const patrol = state.patrolWarningConfig || {};
       const patrolConfigured = Boolean(patrol.login_url || patrol.warning_url || patrol.username || patrol.project_id || patrol.route_code);
       const feature = state.featureChannelConfig || {};
@@ -4218,6 +4290,21 @@
           ],
         },
         {
+          title: "假期余额提醒",
+          status: vacationLoaded ? (vacation.enabled !== false ? "已启用" : "未启用") : "读取中",
+          description: "休息开始前一天和休息最后一天自动提醒。",
+          meta: [
+            `开始前：${vacation.start_reminder_time || "07:50"}`,
+            `最后一天：${vacation.end_reminder_time || "07:50"}`,
+            `发送模式：${contentModeLabel(vacation.send_content_mode || "text")}`,
+            `通知通道：${notificationText}`,
+          ],
+          actions: [
+            { label: "去配置", target: "vacationReminderSettings", primary: true },
+            { label: vacation.enabled !== false ? "关闭提醒" : "启用提醒", toggle: "vacation", current: vacation.enabled !== false, enabled: vacation.enabled === false, disabled: !vacationLoaded },
+          ],
+        },
+        {
           title: "公路巡查预警",
           status: patrol.enabled ? "已启用" : (patrolConfigured ? "未启用" : "未配置"),
           description: "轮询预警平台并发送巡查预警通知。",
@@ -4225,7 +4312,7 @@
             `路线：${patrol.route_code || "未填写"}`,
             `轮询：${patrol.poll_interval_minutes || 10} 分钟`,
             `结束后提醒：${patrol.end_reminder_enabled === false ? "未启用" : `${patrol.end_reminder_interval_hours || 6} 小时`}`,
-            `发送模式：${patrol.send_content_mode === "image" ? "仅图片" : (patrol.send_content_mode === "text" ? "仅文字" : "文字和图片")}`,
+            `发送模式：${patrol.send_content_mode === "image" ? "仅图片" : (patrol.send_content_mode === "text" ? "仅文字" : "图文")}`,
           ],
           actions: [
             { label: "去配置", target: "patrolWarningSettings", primary: true },
@@ -4280,6 +4367,7 @@
         rest_reminder_enabled: Boolean(person.rest_reminder_enabled),
         rest_reminder_time: person.rest_reminder_time || "08:30",
         rest_message_template: person.rest_message_template || "{name} {rest_status}",
+        send_content_mode: person.send_content_mode || "both",
         enabled,
       };
     }
@@ -4292,6 +4380,7 @@
         shift_code: reminder.shift_code || "early",
         reminder_time: reminder.reminder_time || "21:00",
         message: reminder.message || "",
+        send_content_mode: reminder.send_content_mode || "text",
         enabled,
       };
     }
@@ -4305,6 +4394,9 @@
         } else if (kind === "patrol") {
           $("patrolWarningEnabled").checked = enabled;
           await savePatrolWarningConfig(false);
+        } else if (kind === "vacation") {
+          $("vacationReminderEnabled").checked = enabled;
+          await saveVacationReminderConfig(false);
         } else if (kind === "monitor") {
           const people = state.monitoredPeople || [];
           for (const person of people) {
@@ -4881,17 +4973,30 @@
     }
 
     function isLightAgentNotificationSelected() {
-      return $("notificationSenderType") && $("notificationSenderType").value === "lightagent";
+      const config = state.notificationConfig || {};
+      return $("notificationSenderType") && $("notificationSenderType").value === "lightagent" && !config.wecom_app_enabled && config.effective_sender_type !== "wecom_app";
+    }
+
+    function updateBusinessNotificationRoomFieldVisibility() {
+      const show = isLightAgentNotificationSelected();
+      ["monitorNotificationRoom", "customReminderNotificationRoom", "dailyDutyNotificationRoom", "patrolNotificationRoom"].forEach((id) => {
+        const select = $(id);
+        if (!select) return;
+        const label = select.closest("label");
+        if (label) label.classList.toggle("hidden", !show);
+      });
     }
 
     function updateMonitorNotificationFields() {
       if ($("monitorWechatFields")) $("monitorWechatFields").classList.add("hidden");
+      updateBusinessNotificationRoomFieldVisibility();
       renderMonitorWechatMemberOptions();
       renderMonitoredPeopleList();
     }
 
     function updateCustomReminderNotificationFields() {
       if ($("customReminderWechatFields")) $("customReminderWechatFields").classList.add("hidden");
+      updateBusinessNotificationRoomFieldVisibility();
       renderCustomReminderWechatMemberOptions();
       renderCustomRemindersList();
     }
@@ -4908,6 +5013,7 @@
       if ($("monitorNotificationRoom")) $("monitorNotificationRoom").value = "";
       $("dailyTime").value = "07:50";
       $("beforeMinutes").value = "10";
+      if ($("monitorSendContentMode")) $("monitorSendContentMode").value = "both";
       $("monitorPersonEnabled").checked = true;
       $("restReminderEnabled").checked = false;
       $("restReminderTime").value = "08:30";
@@ -4928,6 +5034,7 @@
       if ($("monitorNotificationRoom")) $("monitorNotificationRoom").value = person.notification_room_id || "";
       $("dailyTime").value = person.daily_time || "07:50";
       $("beforeMinutes").value = String(person.before_shift_minutes || 10);
+      if ($("monitorSendContentMode")) $("monitorSendContentMode").value = person.send_content_mode || "both";
       $("monitorPersonEnabled").checked = person.enabled !== false;
       $("restReminderEnabled").checked = Boolean(person.rest_reminder_enabled);
       $("restReminderTime").value = person.rest_reminder_time || "08:30";
@@ -4948,6 +5055,7 @@
         ...selectedNotificationRoomPayload("monitorNotificationRoom"),
         daily_time: $("dailyTime").value || "07:50",
         before_shift_minutes: Number($("beforeMinutes").value || 10),
+        send_content_mode: $("monitorSendContentMode") ? ($("monitorSendContentMode").value || "both") : "both",
         rest_reminder_enabled: $("restReminderEnabled").checked,
         rest_reminder_time: $("restReminderTime").value || "08:30",
         rest_message_template: $("restMessageTemplate").value.trim(),
@@ -5004,6 +5112,7 @@
     }
 
     function monitorNotificationText(person) {
+      if (!isLightAgentNotificationSelected()) return "@ 使用消息通知渠道统一配置";
       const roomId = String(person.notification_room_id || "").trim();
       return `${roomId ? `发送群：${notificationRoomLabelById(roomId, person.notification_room_name)}` : "发送群：默认全部通知群"} · @ 使用消息通知渠道统一配置`;
     }
@@ -5013,7 +5122,7 @@
       $("peopleList").innerHTML = state.monitoredPeople.map((person) => `
         <div class="item reminder-config-card">
           <strong>${escapeHtml(person.name)}</strong>
-          <small>${person.enabled === false ? "已停用" : "已启用"} · ${monitorNotificationText(person)} · 每日提醒时间 ${escapeHtml(person.daily_time)} · 班次提前提醒 ${person.before_shift_minutes} 分钟 · 休息提醒 ${person.rest_reminder_enabled ? escapeHtml(person.rest_reminder_time) : "未启用"}</small>
+          <small>${person.enabled === false ? "已停用" : "已启用"} · ${monitorNotificationText(person)} · 发送方式 ${contentModeLabel(person.send_content_mode || "both")} · 每日提醒时间 ${escapeHtml(person.daily_time)} · 班次提前提醒 ${person.before_shift_minutes} 分钟 · 休息提醒 ${person.rest_reminder_enabled ? escapeHtml(person.rest_reminder_time) : "未启用"}</small>
           ${person.rest_reminder_enabled ? `<small>休息文案 ${escapeHtml(person.rest_message_template || "{name} {rest_status}")}</small>` : ""}
           <div class="settings-actions reminder-card-actions">
             <button type="button" data-edit-person="${escapeHtml(person.name)}">编辑</button>
@@ -5078,6 +5187,7 @@
       if ($("customReminderNotificationRoom")) $("customReminderNotificationRoom").value = "";
       $("customReminderShift").value = "early";
       $("customReminderTime").value = "07:50";
+      if ($("customReminderSendContentMode")) $("customReminderSendContentMode").value = "text";
       applyCustomReminderTimeRule();
       $("customReminderMessage").value = "";
       $("customReminderEnabled").checked = true;
@@ -5093,6 +5203,7 @@
       if ($("customReminderNotificationRoom")) $("customReminderNotificationRoom").value = reminder.notification_room_id || "";
       $("customReminderShift").value = reminder.shift_code || "early";
       $("customReminderTime").value = reminder.reminder_time || "21:00";
+      if ($("customReminderSendContentMode")) $("customReminderSendContentMode").value = reminder.send_content_mode || "text";
       applyCustomReminderTimeRule();
       $("customReminderMessage").value = reminder.message || "";
       $("customReminderEnabled").checked = reminder.enabled !== false;
@@ -5108,6 +5219,7 @@
     }
 
     function customReminderNotificationText(reminder) {
+      if (!isLightAgentNotificationSelected()) return "@ 使用消息通知渠道统一配置";
       const roomId = String(reminder.notification_room_id || "").trim();
       return `${roomId ? `发送群：${notificationRoomLabelById(roomId, reminder.notification_room_name)}` : "发送群：默认全部通知群"} · @ 使用消息通知渠道统一配置`;
     }
@@ -5117,7 +5229,7 @@
       $("customReminderList").innerHTML = state.customReminders.map((reminder) => `
         <div class="item reminder-config-card">
           <strong>${escapeHtml(reminder.name)} · ${escapeHtml(customReminderShiftLabel(reminder.shift_code))} · ${escapeHtml(reminder.reminder_time)}</strong>
-          <small>${customReminderNotificationText(reminder)} · ${reminder.enabled ? "已启用" : "已停用"}</small>
+          <small>${customReminderNotificationText(reminder)} · 发送方式 ${contentModeLabel(reminder.send_content_mode || "text")} · ${reminder.enabled ? "已启用" : "已停用"}</small>
           <div class="reminder-card-message">${escapeHtml(reminder.message || "").replace(/\n/g, "<br>")}</div>
           <div class="settings-actions reminder-card-actions">
             <button type="button" data-edit-custom-reminder="${reminder.id}">编辑</button>
@@ -5137,6 +5249,7 @@
         shift_code: $("customReminderShift").value,
         reminder_time: $("customReminderTime").value || (customReminderTimeRules[$("customReminderShift").value] || customReminderTimeRules.early).fallback,
         message: $("customReminderMessage").value.trim(),
+        send_content_mode: $("customReminderSendContentMode") ? ($("customReminderSendContentMode").value || "text") : "text",
         enabled: $("customReminderEnabled").checked
       };
     }
@@ -5731,6 +5844,7 @@
     }
 
     function selectedNotificationRoomPayload(selectId) {
+      if (!isLightAgentNotificationSelected()) return { notification_room_id: "", notification_room_name: "" };
       const select = $(selectId);
       if (!select) return { notification_room_id: "", notification_room_name: "" };
       const option = select.selectedOptions[0];
@@ -5763,6 +5877,7 @@
           select.insertAdjacentHTML("beforeend", `<option value="${escapeHtml(current)}" selected>已保存群 ${escapeHtml(shortWechatId(current))}</option>`);
         }
       });
+      updateBusinessNotificationRoomFieldVisibility();
     }
 
     function renderFeatureChannelRoomList() {
@@ -6143,6 +6258,7 @@
       state.dailyDutyConfig = config;
       $("dailyDutyEnabled").checked = config.enabled !== false;
       $("dailyDutyTime").value = config.reminder_time || "07:50";
+      if ($("dailyDutySendContentMode")) $("dailyDutySendContentMode").value = config.send_content_mode || "image";
       setNameListValue("bigDriverNames", config.big_driver_names || []);
       setNameListValue("smallDriverNames", config.small_driver_names || []);
       $("dailyDutyTemplate").value = config.message_template || "";
@@ -6161,6 +6277,7 @@
           big_driver_names: parseNameList($("bigDriverNames").value),
           small_driver_names: parseNameList($("smallDriverNames").value),
           message_template: $("dailyDutyTemplate").value.trim(),
+          send_content_mode: $("dailyDutySendContentMode") ? ($("dailyDutySendContentMode").value || "image") : "image",
           ...selectedNotificationRoomPayload("dailyDutyNotificationRoom")
         })
       });
@@ -6182,6 +6299,90 @@
 
     $("saveDailyDutyBtn").addEventListener("click", saveDailyDutyConfig);
     $("saveDriverNamesBtn").addEventListener("click", saveDailyDutyConfig);
+
+    function vacationReminderPayload() {
+      const startTemplates = vacationTemplateLines("vacationStartTemplate");
+      const endTemplates = vacationTemplateLines("vacationEndTemplate");
+      return {
+        enabled: $("vacationReminderEnabled").checked,
+        start_reminder_time: $("vacationStartTime").value || "07:50",
+        end_reminder_time: $("vacationEndTime").value || "07:50",
+        start_message_template: startTemplates[0] || "",
+        end_message_template: endTemplates[0] || "",
+        start_message_templates: startTemplates,
+        end_message_templates: endTemplates,
+        send_content_mode: $("vacationSendContentMode").value || "text",
+      };
+    }
+
+    function vacationTemplateLines(id) {
+      return $(id).value.split(/\n+/).map((item) => item.trim()).filter(Boolean);
+    }
+
+    async function loadVacationReminderConfig() {
+      const response = await fetch("/api/vacation-reminder-config");
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.detail || "读取假期提醒配置失败");
+      const config = body.config || {};
+      state.vacationReminderConfig = config;
+      $("vacationReminderEnabled").checked = config.enabled !== false;
+      $("vacationStartTime").value = config.start_reminder_time || "07:50";
+      $("vacationEndTime").value = config.end_reminder_time || "07:50";
+      $("vacationStartTemplate").value = (config.start_message_templates && config.start_message_templates.length ? config.start_message_templates : [config.start_message_template || "恭喜你今天下午可以开始休息了，加油一天要苦80块的男人，"]).join("\n");
+      $("vacationEndTemplate").value = (config.end_message_templates && config.end_message_templates.length ? config.end_message_templates : [config.end_message_template || "假期余额不足，今天下午就该返回站点了，加油天选打工人。"]).join("\n");
+      $("vacationSendContentMode").value = config.send_content_mode || "text";
+      renderSettingsOverview();
+    }
+
+    async function saveVacationReminderConfig(showStatus = true) {
+      if (showStatus) {
+        $("vacationReminderStatus").textContent = "正在保存...";
+        $("vacationReminderStatus").className = "status";
+      }
+      const response = await fetch("/api/vacation-reminder-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(vacationReminderPayload())
+      });
+      const body = await response.json();
+      if (!response.ok || !body.success) {
+        if (showStatus) {
+          $("vacationReminderStatus").textContent = body.detail || "保存失败";
+          $("vacationReminderStatus").className = "status error";
+        }
+        return false;
+      }
+      state.vacationReminderConfig = body.config || vacationReminderPayload();
+      if (showStatus) {
+        $("vacationReminderStatus").textContent = "已保存假期余额提醒配置";
+        $("vacationReminderStatus").className = "status ok";
+      }
+      renderSettingsOverview();
+      return true;
+    }
+
+    async function testVacationReminderConfig() {
+      $("vacationReminderStatus").textContent = "正在发送假期提醒测试...";
+      $("vacationReminderStatus").className = "status";
+      try {
+        await saveNotificationConfig(false);
+        const response = await fetch("/api/vacation-reminder-config/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(vacationReminderPayload())
+        });
+        const body = await response.json();
+        if (!response.ok || !body.success) throw new Error(body.detail || "测试发送失败");
+        $("vacationReminderStatus").textContent = `假期提醒测试已发送：${body.content || ""}`;
+        $("vacationReminderStatus").className = "status ok";
+      } catch (error) {
+        $("vacationReminderStatus").textContent = `测试发送失败：${error.message || error}`;
+        $("vacationReminderStatus").className = "status error";
+      }
+    }
+
+    $("saveVacationReminderBtn").addEventListener("click", () => saveVacationReminderConfig(true));
+    $("testVacationReminderBtn").addEventListener("click", testVacationReminderConfig);
 
     function dailyDutyImageUrl(targetDate) {
       return `/api/daily-duty-image${targetDate ? `?target_date=${encodeURIComponent(targetDate)}` : ""}`;
@@ -6414,6 +6615,8 @@
           : (body.success ? "已保存通知配置" : "保存失败");
         $("notificationStatus").className = `status ${body.success && !syncFailed ? "ok" : "error"}`;
       }
+      renderBusinessNotificationRoomSelects();
+      updateBusinessNotificationRoomFieldVisibility();
       renderSettingsOverview();
       return body.success;
     }
@@ -6449,6 +6652,7 @@
       await loadFeatureChannelConfig().catch(() => null);
       await loadPatrolWarningConfig();
       await loadDailyDutyConfig();
+      await loadVacationReminderConfig();
       await loadPersonnel();
       await loadCustomReminders();
       await loadPeople();
@@ -6504,16 +6708,73 @@
       const target = $("wecomAppMenuPreview");
       if (!target) return;
       const limits = menu && menu.limits || {};
+      state.wecomAppMenuLimits = limits;
+      state.wecomAppMenuDefaults = menu && menu.defaults || state.wecomAppMenuDefaults || [];
+      state.wecomAppMenuGroups = JSON.parse(JSON.stringify(menu && menu.groups || state.wecomAppMenuGroups || []));
       if ($("wecomAppMenuLimits")) {
         $("wecomAppMenuLimits").textContent = `一级菜单最多 ${limits.max_top_buttons || 3} 个；每个一级菜单最多 ${limits.max_sub_buttons || 5} 个二级菜单；一级菜单名最多 ${limits.max_top_name_bytes || 16} 字节，二级菜单名最多 ${limits.max_sub_name_bytes || 40} 字节。`;
       }
-      const groups = menu && menu.groups || [];
-      target.innerHTML = groups.length ? groups.map((group) => `
-        <div class="item">
-          <strong>${escapeHtml(group.name || "")}</strong>
-          <small>${(group.items || []).map((item) => `${escapeHtml(item.name || "")} → ${escapeHtml(item.command || "")}`).join("<br>")}</small>
+      const groups = state.wecomAppMenuGroups || [];
+      target.innerHTML = groups.length ? groups.map((group, groupIndex) => `
+        <div class="item" data-wecom-menu-group="${groupIndex}">
+          <div class="notification-title-row">
+            <strong>一级菜单 ${groupIndex + 1}</strong>
+            <button type="button" data-wecom-menu-remove-group="${groupIndex}">删除一级菜单</button>
+          </div>
+          <label>一级菜单名称
+            <input data-wecom-menu-group-name="${groupIndex}" value="${escapeHtml(group.name || "")}" placeholder="例如 监控在岗" />
+          </label>
+          <div class="stack">
+            ${(group.items || []).map((item, itemIndex) => `
+              <div class="item" data-wecom-menu-item="${groupIndex}-${itemIndex}">
+                <div class="notification-title-row">
+                  <strong>二级菜单 ${itemIndex + 1}</strong>
+                  <button type="button" data-wecom-menu-remove-item="${groupIndex}-${itemIndex}">删除</button>
+                </div>
+                <div class="field-grid">
+                  <label>显示名称 <input data-wecom-menu-item-name="${groupIndex}-${itemIndex}" value="${escapeHtml(item.name || "")}" placeholder="例如 今日在岗" /></label>
+                  <label>点击后发送命令 <input data-wecom-menu-item-command="${groupIndex}-${itemIndex}" value="${escapeHtml(item.command || "")}" placeholder="例如 查询今日在岗" /></label>
+                </div>
+              </div>
+            `).join("")}
+          </div>
+          <div class="settings-actions">
+            <button type="button" data-wecom-menu-add-item="${groupIndex}">添加二级菜单</button>
+          </div>
         </div>
       `).join("") : `<div class="item"><small>暂无菜单预览</small></div>`;
+    }
+
+    function currentWecomAppMenuGroupsFromEditor() {
+      const groups = JSON.parse(JSON.stringify(state.wecomAppMenuGroups || []));
+      groups.forEach((group, groupIndex) => {
+        const groupName = document.querySelector(`[data-wecom-menu-group-name="${groupIndex}"]`);
+        group.name = groupName ? groupName.value.trim() : (group.name || "");
+        (group.items || []).forEach((item, itemIndex) => {
+          const key = `${groupIndex}-${itemIndex}`;
+          const nameInput = document.querySelector(`[data-wecom-menu-item-name="${key}"]`);
+          const commandInput = document.querySelector(`[data-wecom-menu-item-command="${key}"]`);
+          item.name = nameInput ? nameInput.value.trim() : (item.name || "");
+          item.command = commandInput ? commandInput.value.trim() : (item.command || "");
+        });
+      });
+      return groups
+        .map((group) => ({
+          name: String(group.name || "").trim(),
+          items: (group.items || []).map((item) => ({
+            name: String(item.name || "").trim(),
+            command: String(item.command || "").trim()
+          })).filter((item) => item.name || item.command)
+        }))
+        .filter((group) => group.name || group.items.length);
+    }
+
+    function rerenderWecomAppMenuEditor(groups) {
+      renderWecomAppMenuPreview({
+        limits: state.wecomAppMenuLimits || {},
+        defaults: state.wecomAppMenuDefaults || [],
+        groups
+      });
     }
 
     async function loadWecomAppMenuPreview() {
@@ -6524,6 +6785,23 @@
       return body;
     }
 
+    async function saveWecomAppMenuConfig(showStatus = true) {
+      const groups = currentWecomAppMenuGroupsFromEditor();
+      const response = await fetch("/api/wecom-app/menu", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ groups })
+      });
+      const body = await response.json();
+      if (!response.ok || !body.success) throw new Error(body.detail || "保存自建应用菜单失败");
+      renderWecomAppMenuPreview(body.menu);
+      if (showStatus) {
+        $("notificationStatus").textContent = "自建应用菜单配置已保存，点击“创建/更新自建应用菜单”后才会同步到企业微信。";
+        $("notificationStatus").className = "status ok";
+      }
+      return body.menu;
+    }
+
     async function createWecomAppMenu() {
       const button = $("createWecomAppMenuBtn");
       button.disabled = true;
@@ -6532,6 +6810,7 @@
       try {
         const saved = await saveNotificationConfig(false);
         if (!saved) throw new Error("通知配置保存失败");
+        await saveWecomAppMenuConfig(false);
         const response = await fetch("/api/wecom-app/menu/create", { method: "POST" });
         const body = await response.json();
         if (!response.ok || !body.success) throw new Error(body.detail || "创建自建应用菜单失败");
@@ -6626,6 +6905,64 @@
     });
     $("createWecomAppMenuBtn").addEventListener("click", createWecomAppMenu);
     $("testWecomAppBtn").addEventListener("click", testWecomAppInteraction);
+    $("saveWecomAppMenuBtn").addEventListener("click", async () => {
+      try {
+        $("notificationStatus").textContent = "正在保存自建应用菜单配置...";
+        $("notificationStatus").className = "status";
+        await saveWecomAppMenuConfig(true);
+      } catch (error) {
+        $("notificationStatus").textContent = `保存自建应用菜单失败：${error.message || error}`;
+        $("notificationStatus").className = "status error";
+      }
+    });
+    $("addWecomAppMenuGroupBtn").addEventListener("click", () => {
+      const limits = state.wecomAppMenuLimits || {};
+      const groups = currentWecomAppMenuGroupsFromEditor();
+      if (groups.length >= (limits.max_top_buttons || 3)) {
+        $("notificationStatus").textContent = `一级菜单最多 ${(limits.max_top_buttons || 3)} 个`;
+        $("notificationStatus").className = "status error";
+        return;
+      }
+      groups.push({ name: "新菜单", items: [{ name: "新功能", command: "菜单" }] });
+      rerenderWecomAppMenuEditor(groups);
+    });
+    $("restoreWecomAppMenuBtn").addEventListener("click", () => {
+      rerenderWecomAppMenuEditor(JSON.parse(JSON.stringify(state.wecomAppMenuDefaults || [])));
+      $("notificationStatus").textContent = "已恢复默认菜单预览，点击“保存菜单配置”后生效。";
+      $("notificationStatus").className = "status";
+    });
+    $("wecomAppMenuPreview").addEventListener("click", (event) => {
+      const removeGroup = event.target.closest("[data-wecom-menu-remove-group]");
+      if (removeGroup) {
+        const groups = currentWecomAppMenuGroupsFromEditor();
+        groups.splice(Number(removeGroup.dataset.wecomMenuRemoveGroup), 1);
+        rerenderWecomAppMenuEditor(groups);
+        return;
+      }
+      const removeItem = event.target.closest("[data-wecom-menu-remove-item]");
+      if (removeItem) {
+        const [groupIndex, itemIndex] = String(removeItem.dataset.wecomMenuRemoveItem || "").split("-").map(Number);
+        const groups = currentWecomAppMenuGroupsFromEditor();
+        if (groups[groupIndex]) groups[groupIndex].items.splice(itemIndex, 1);
+        rerenderWecomAppMenuEditor(groups);
+        return;
+      }
+      const addItem = event.target.closest("[data-wecom-menu-add-item]");
+      if (addItem) {
+        const limits = state.wecomAppMenuLimits || {};
+        const groupIndex = Number(addItem.dataset.wecomMenuAddItem);
+        const groups = currentWecomAppMenuGroupsFromEditor();
+        const group = groups[groupIndex];
+        if (!group) return;
+        if ((group.items || []).length >= (limits.max_sub_buttons || 5)) {
+          $("notificationStatus").textContent = `每个一级菜单最多 ${(limits.max_sub_buttons || 5)} 个二级菜单`;
+          $("notificationStatus").className = "status error";
+          return;
+        }
+        group.items.push({ name: "新功能", command: "菜单" });
+        rerenderWecomAppMenuEditor(groups);
+      }
+    });
 
     async function syncLightAgentWechatStateForNotification(options = {}) {
       if ($("notificationSenderType").value !== "lightagent") return true;
@@ -8263,6 +8600,12 @@
         custom_test: "自定义提醒测试",
         custom_test_resend: "自定义提醒测试补发",
         custom_resend: "自定义提醒补发",
+        vacation_start: "假期开始提醒",
+        vacation_start_resend: "假期开始提醒补发",
+        vacation_end: "假期余额提醒",
+        vacation_end_resend: "假期余额提醒补发",
+        vacation_test: "假期提醒测试",
+        vacation_test_resend: "假期提醒测试补发",
         patrol_warning_start: "公路巡查预警",
         patrol_warning_start_resend: "公路巡查预警补发",
         patrol_warning_start_test: "公路巡查预警测试",
@@ -8993,6 +9336,7 @@
     $("previewBtn").addEventListener("click", async () => {
       await saveNotificationConfig(false);
       await saveDailyDutyConfig();
+      await saveVacationReminderConfig(false);
       const targetDate = $("previewDate").value;
       const response = await fetch("/api/reminders/preview", {
         method: "POST",
@@ -9056,6 +9400,7 @@
     loadTunnelMechanicalTemplates();
     loadPersonnel().then(loadCustomReminders);
     loadDailyDutyConfig();
+    loadVacationReminderConfig().catch(() => null);
     loadPeople();
   </script>
 </body>
