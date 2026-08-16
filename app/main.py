@@ -3467,6 +3467,17 @@ def _is_wecom_app_roster_import_request(text: str) -> bool:
     }
 
 
+def _wecom_app_roster_conflict_action_text(*, compact: bool = False) -> str:
+    if compact:
+        return "待确认：回复 1 覆盖｜2 取消；也可回复覆盖导入/取消导入"
+    return (
+        "请选择本次排班导入操作：\n"
+        "1. 覆盖现有排班：回复 1 / 覆盖导入 / 确认覆盖 / 覆盖 / 确认导入 / 导入\n"
+        "2. 取消本次导入：回复 2 / 取消导入 / 取消 / 放弃\n"
+        "提示：5 分钟内有效，过期后需要重新点击“导入排班”并发送图片。"
+    )
+
+
 def _remember_wecom_app_roster_image_request(query: WechatQueryRequest) -> None:
     key = _wecom_app_pending_key(query)
     if key:
@@ -3536,7 +3547,12 @@ def _build_wecom_app_pending_roster_response(repo: DutyRepository, query: Wechat
             "reply": f"已取消覆盖导入 {payload.get('year')}年{payload.get('month')}月排班表。",
         }
     if not _is_wecom_app_roster_overwrite_text(text):
-        return {"success": False, "query_type": "roster_import", "import_status": "unknown", "reply": "请回复“覆盖导入”确认替换，或回复“取消导入”放弃。"}
+        return {
+            "success": False,
+            "query_type": "roster_import",
+            "import_status": "unknown",
+            "reply": _wecom_app_roster_conflict_action_text(),
+        }
     payload = dict(pending.get("payload") or {})
     result = _build_wechat_roster_confirm_response(
         repo,
@@ -3631,12 +3647,13 @@ def _build_wechat_roster_confirm_response(
             "source_image_path": source_image_path,
             "source_image_url": source_image_url,
             "grid": sanitized_grid,
-            "diffs": diffs[:50],
+            "diffs": diffs,
             "issues": list(issues or []),
             "query_type": "roster_import",
+            "action_text": _wecom_app_roster_conflict_action_text(),
             "reply": (
                 f"{year}年{month}月排班表已存在{preview}。\n"
-                "5 分钟内回复“覆盖导入”可替换现有排班；回复“取消导入”放弃。"
+                "可回复 1/覆盖导入 覆盖现有排班；回复 2/取消导入 放弃本次导入。"
             ),
         }
     repo.save_roster_month(year, month, sanitized_grid, source_image_path)
@@ -4095,7 +4112,10 @@ def _wecom_app_query_news_description(result: dict[str, Any], fallback: str = ""
     if query_type == "roster_import":
         status = str(result.get("import_status") or "")
         if status == "conflict":
-            return _compact_wecom_news_text(f"{result.get('year')}年{result.get('month')}月已存在｜差异{len(result.get('diffs') or [])}处｜回复覆盖导入/取消导入")
+            return _compact_wecom_news_text(
+                f"{result.get('year')}年{result.get('month')}月已存在｜差异{len(result.get('diffs') or [])}处｜"
+                f"{_wecom_app_roster_conflict_action_text(compact=True)}"
+            )
         if result.get("success"):
             return _compact_wecom_news_text(f"{result.get('year')}年{result.get('month')}月｜{result.get('people_count') or len(result.get('grid') or [])}人｜已导入")
         return _compact_wecom_news_text(str(result.get("reply") or "排班导入需要处理"))
@@ -9818,7 +9838,7 @@ def _save_notification_news_detail(title: str, description: str, image_bytes: by
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{safe_title}</title>
 <style>
-*{{box-sizing:border-box}}body{{margin:0;background:#f3f4f6;color:#111827;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}}.page{{max-width:760px;margin:0 auto;padding:14px}}.card{{background:#fff;border-radius:18px;box-shadow:0 8px 24px rgba(15,23,42,.08);overflow:hidden}}.header{{padding:18px 18px 10px}}h1{{margin:0;font-size:20px;line-height:1.35}}.desc{{margin:10px 0 0;color:#4b5563;font-size:15px;line-height:1.65;white-space:pre-wrap;word-break:break-word}}img{{display:block;width:100%;height:auto;border-top:1px solid #e5e7eb}}.tip{{padding:10px 18px 16px;color:#9ca3af;font-size:12px}}
+*{{box-sizing:border-box}}body{{margin:0;background:#f3f4f6;color:#111827;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}}.page{{max-width:760px;margin:0 auto;padding:14px}}.card{{background:#fff;border-radius:18px;box-shadow:0 8px 24px rgba(15,23,42,.08)}}.header{{padding:18px 18px 10px}}h1{{margin:0;font-size:20px;line-height:1.35}}.desc{{margin:10px 0 0;color:#4b5563;font-size:15px;line-height:1.65;white-space:pre-wrap;word-break:break-word}}img{{display:block;width:100%;height:auto;border-top:1px solid #e5e7eb}}.tip{{padding:10px 18px 16px;color:#9ca3af;font-size:12px}}
 </style>
 </head>
 <body>
@@ -9829,7 +9849,7 @@ def _save_notification_news_detail(title: str, description: str, image_bytes: by
       <div class="desc">{safe_description}</div>
     </section>
     <img src="data:image/png;base64,{image_data}" alt="{safe_title}">
-    <div class="tip">如图片显示不完整，可双指放大查看。</div>
+    <div class="tip">可上下滑动查看完整内容，双指可放大。</div>
   </article>
 </main>
 </body>

@@ -345,7 +345,8 @@ def test_wecom_app_roster_image_conflict_requires_overwrite_confirmation(tmp_pat
 
     assert repo.get_roster_month(2026, 8)["grid"][0]["days"]["1"] == "早"
     assert "sqh" in main_module.WECOM_APP_PENDING_ROSTER_IMPORTS
-    assert "回复覆盖导入" in fake.news[-1][1]["description"]
+    assert "回复 1 覆盖" in fake.news[-1][1]["description"]
+    assert "2 取消" in fake.news[-1][1]["description"]
 
     asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
         "content": "覆盖导入",

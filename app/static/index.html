@@ -1328,6 +1328,75 @@
       max-height: 376px;
       overflow: auto;
     }
+    .wecom-target-config {
+      display: grid;
+      gap: 10px;
+    }
+    .wecom-target-section {
+      gap: 8px;
+    }
+    .wecom-target-picker {
+      display: grid;
+      gap: 8px;
+      min-width: 0;
+    }
+    .wecom-target-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .wecom-target-toolbar small {
+      color: var(--muted);
+    }
+    .wecom-target-actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .wecom-target-actions button {
+      padding: 5px 9px;
+      font-size: 12px;
+    }
+    .wecom-target-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+      gap: 8px;
+      max-height: 246px;
+      overflow: auto;
+      padding: 2px;
+    }
+    .wecom-target-option {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 8px;
+      align-items: start;
+      padding: 9px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      cursor: pointer;
+      min-width: 0;
+    }
+    .wecom-target-option input {
+      margin-top: 2px;
+    }
+    .wecom-target-option strong,
+    .wecom-target-option small {
+      display: block;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .wecom-target-option.is-selected {
+      border-color: var(--primary);
+      background: #eff6ff;
+    }
+    .wecom-target-option.is-disabled {
+      cursor: not-allowed;
+      opacity: 0.62;
+      background: #f8fafc;
+    }
     .wecom-menu-editor {
       display: grid;
       gap: 10px;
@@ -3289,23 +3358,37 @@
                       <label>回调 Token <input id="wecomAppToken" type="password" autocomplete="new-password" placeholder="接收消息页面的 Token，已配置时可留空" /></label>
                       <label>EncodingAESKey <input id="wecomAppEncodingAesKey" type="password" autocomplete="new-password" placeholder="43 位，已配置时可留空" /></label>
                     </div>
-                    <label>公共通知接收人
-                      <textarea id="wecomAppTargetNames" rows="3" placeholder="每行一个姓名；留空=发送给所有已绑定企业微信成员。个人监控/自定义/假期提醒仍按对应姓名单独发送。"></textarea>
-                    </label>
-                    <div class="grid">
-                      <label>今日在岗接收人
-                        <textarea id="wecomAppDailyDutyTargetNames" rows="3" placeholder="每行一个姓名；留空=使用公共通知接收人"></textarea>
-                      </label>
-                      <label>公路预警接收人
-                        <textarea id="wecomAppPatrolWarningTargetNames" rows="3" placeholder="每行一个姓名；留空=使用公共通知接收人"></textarea>
-                      </label>
-                      <label>系统测试接收人
-                        <textarea id="wecomAppSystemTargetNames" rows="3" placeholder="每行一个姓名；留空=使用公共通知接收人"></textarea>
-                      </label>
+                    <div class="wecom-target-config">
+                      <div class="item wecom-target-section">
+                        <strong>公共通知接收人</strong>
+                        <small>直接勾选已绑定企业微信的人员；留空=发送给所有已绑定成员。个人监控/自定义/假期提醒仍按对应姓名单独发送。</small>
+                        <input id="wecomAppTargetNames" type="hidden" />
+                        <div id="wecomAppTargetNamesPicker" class="wecom-target-picker" data-target-input="wecomAppTargetNames" data-empty-label="全部已绑定成员"></div>
+                      </div>
+                      <div class="grid">
+                        <div class="item wecom-target-section">
+                          <strong>今日在岗接收人</strong>
+                          <small>留空=使用公共通知接收人。</small>
+                          <input id="wecomAppDailyDutyTargetNames" type="hidden" />
+                          <div id="wecomAppDailyDutyTargetNamesPicker" class="wecom-target-picker" data-target-input="wecomAppDailyDutyTargetNames" data-empty-label="使用公共通知接收人"></div>
+                        </div>
+                        <div class="item wecom-target-section">
+                          <strong>公路预警接收人</strong>
+                          <small>留空=使用公共通知接收人。</small>
+                          <input id="wecomAppPatrolWarningTargetNames" type="hidden" />
+                          <div id="wecomAppPatrolWarningTargetNamesPicker" class="wecom-target-picker" data-target-input="wecomAppPatrolWarningTargetNames" data-empty-label="使用公共通知接收人"></div>
+                        </div>
+                        <div class="item wecom-target-section">
+                          <strong>系统测试接收人</strong>
+                          <small>留空=使用公共通知接收人。</small>
+                          <input id="wecomAppSystemTargetNames" type="hidden" />
+                          <div id="wecomAppSystemTargetNamesPicker" class="wecom-target-picker" data-target-input="wecomAppSystemTargetNames" data-empty-label="使用公共通知接收人"></div>
+                        </div>
+                      </div>
                     </div>
                     <div class="item">
                       <strong>企业微信绑定状态</strong>
-                      <small>个人提醒会严格按这里的姓名绑定单发；未绑定人员不会发送。</small>
+                      <small>这里只展示每个人当前绑定和接收范围；上面的接收人用勾选维护，未绑定人员不能选择。</small>
                       <div id="wecomAppBindingSummary" class="people-list reminder-card-list"></div>
                     </div>
                     <div class="item">
@@ -5546,6 +5629,96 @@
       return userid ? `企业微信单发：${name} → ${userid}` : `企业微信未绑定：${name} 不会发送`;
     }
 
+    const WECOM_APP_TARGET_PICKERS = [
+      { pickerId: "wecomAppTargetNamesPicker", inputId: "wecomAppTargetNames", emptyLabel: "全部已绑定成员" },
+      { pickerId: "wecomAppDailyDutyTargetNamesPicker", inputId: "wecomAppDailyDutyTargetNames", emptyLabel: "使用公共通知接收人" },
+      { pickerId: "wecomAppPatrolWarningTargetNamesPicker", inputId: "wecomAppPatrolWarningTargetNames", emptyLabel: "使用公共通知接收人" },
+      { pickerId: "wecomAppSystemTargetNamesPicker", inputId: "wecomAppSystemTargetNames", emptyLabel: "使用公共通知接收人" },
+    ];
+
+    function currentWecomTargetNames() {
+      return WECOM_APP_TARGET_PICKERS.flatMap((item) => parseNameList($(item.inputId)?.value || ""));
+    }
+
+    function wecomTargetPickerNames() {
+      return Array.from(new Set([...allKnownPersonnelNames(), ...currentWecomTargetNames()]))
+        .sort((a, b) => a.localeCompare(b, "zh-CN"));
+    }
+
+    function selectedNamesFromWecomTargetPicker(pickerId) {
+      const picker = $(pickerId);
+      if (!picker) return [];
+      const boxes = Array.from(picker.querySelectorAll("input[type='checkbox']"));
+      if (!boxes.length && picker.dataset.targetInput && $(picker.dataset.targetInput)) {
+        return parseNameList($(picker.dataset.targetInput).value);
+      }
+      return boxes
+        .filter((input) => input.checked && !input.disabled)
+        .map((input) => input.value)
+        .filter(Boolean);
+    }
+
+    function syncWecomTargetInputFromPicker(pickerId) {
+      const picker = $(pickerId);
+      const inputId = picker ? picker.dataset.targetInput : "";
+      if (!inputId || !$(inputId)) return;
+      $(inputId).value = formatNameList(selectedNamesFromWecomTargetPicker(pickerId));
+    }
+
+    function setWecomTargetPickerSelection(pickerId, names) {
+      const picker = $(pickerId);
+      if (!picker) return;
+      const selected = new Set(names || []);
+      picker.querySelectorAll("input[type='checkbox']").forEach((input) => {
+        input.checked = !input.disabled && selected.has(input.value);
+        input.closest(".wecom-target-option")?.classList.toggle("is-selected", input.checked);
+      });
+      syncWecomTargetInputFromPicker(pickerId);
+      renderWecomAppBindingSummary();
+      renderSettingsOverview();
+    }
+
+    function renderWecomTargetPicker({ pickerId, inputId, emptyLabel }) {
+      const picker = $(pickerId);
+      if (!picker) return;
+      const names = wecomTargetPickerNames();
+      const selected = new Set(parseNameList($(inputId)?.value || ""));
+      const selectedBoundCount = names.filter((name) => selected.has(name) && wecomUserIdByName(name)).length;
+      const boundCount = names.filter((name) => wecomUserIdByName(name)).length;
+      const selectedText = selectedBoundCount ? `已选择 ${selectedBoundCount} 人` : `未单独选择，${emptyLabel}`;
+      const list = names.map((name) => {
+        const userid = wecomUserIdByName(name);
+        const checked = userid && selected.has(name) ? " checked" : "";
+        const disabled = userid ? "" : " disabled";
+        const cls = `wecom-target-option${checked ? " is-selected" : ""}${userid ? "" : " is-disabled"}`;
+        return `
+          <label class="${cls}">
+            <input type="checkbox" value="${escapeHtml(name)}"${checked}${disabled} />
+            <span>
+              <strong>${escapeHtml(name)}</strong>
+              <small>${userid ? `已绑定：${escapeHtml(userid)}` : "未绑定，不能接收企业微信通知"}</small>
+            </span>
+          </label>
+        `;
+      }).join("");
+      picker.innerHTML = `
+        <div class="wecom-target-toolbar">
+          <small>${escapeHtml(selectedText)} · 已绑定 ${boundCount} 人</small>
+          <div class="wecom-target-actions">
+            <button type="button" data-wecom-target-action="select-bound">全选已绑定</button>
+            <button type="button" data-wecom-target-action="clear">清空</button>
+          </div>
+        </div>
+        <div class="wecom-target-list">
+          ${list || `<div class="item empty"><small>暂无人员；请先导入排班或维护人员名单，绑定企业微信后才能选择。</small></div>`}
+        </div>
+      `;
+    }
+
+    function renderWecomAppTargetPickers() {
+      WECOM_APP_TARGET_PICKERS.forEach(renderWecomTargetPicker);
+    }
+
     function wecomAppPublicTargetNames() {
       if ($("wecomAppTargetNames")) return parseNameList($("wecomAppTargetNames").value);
       return (state.notificationConfig && state.notificationConfig.wecom_app_target_names) || [];
@@ -5574,20 +5747,32 @@
     function renderWecomAppBindingSummary() {
       const target = $("wecomAppBindingSummary");
       if (!target) return;
+      renderWecomAppTargetPickers();
       const names = allKnownPersonnelNames();
       const configuredTargets = wecomAppPublicTargetNames();
       const targetSet = new Set(configuredTargets);
+      const functionTargets = {
+        daily_duty: new Set(wecomAppFunctionTargetNames("daily_duty")),
+        patrol_warning: new Set(wecomAppFunctionTargetNames("patrol_warning")),
+        system: new Set(wecomAppFunctionTargetNames("system")),
+      };
       const boundNames = names.filter((name) => wecomUserIdByName(name));
       const publicNames = configuredTargets.length ? configuredTargets : boundNames;
       const cards = names.map((name) => {
         const userid = wecomUserIdByName(name);
         const publicTag = publicNames.includes(name) ? "公共通知接收人" : "仅个人提醒";
+        const functionTags = [
+          functionTargets.daily_duty.has(name) ? "今日在岗" : "",
+          functionTargets.patrol_warning.has(name) ? "公路预警" : "",
+          functionTargets.system.has(name) ? "系统测试" : "",
+        ].filter(Boolean).join("、");
         const cls = userid ? "ok" : "error";
         return `
           <div class="item reminder-config-card">
             <strong>${escapeHtml(name)}</strong>
             <small class="${cls}">${escapeHtml(wecomBindingLabel(name))}</small>
             <small>${escapeHtml(publicTag)}${configuredTargets.length && targetSet.has(name) && !userid ? " · 已选但未绑定，公共通知不会发给他" : ""}</small>
+            ${functionTags ? `<small>功能接收：${escapeHtml(functionTags)}</small>` : ""}
           </div>
         `;
       });
@@ -6883,11 +7068,11 @@
           wecom_app_secret: $("wecomAppSecret").value.trim(),
           wecom_app_token: $("wecomAppToken").value.trim(),
           wecom_app_encoding_aes_key: $("wecomAppEncodingAesKey").value.trim(),
-          wecom_app_target_names: parseNameList($("wecomAppTargetNames") ? $("wecomAppTargetNames").value : ""),
+          wecom_app_target_names: $("wecomAppTargetNamesPicker") ? selectedNamesFromWecomTargetPicker("wecomAppTargetNamesPicker") : parseNameList($("wecomAppTargetNames") ? $("wecomAppTargetNames").value : ""),
           wecom_app_function_target_names: {
-            daily_duty: parseNameList($("wecomAppDailyDutyTargetNames") ? $("wecomAppDailyDutyTargetNames").value : ""),
-            patrol_warning: parseNameList($("wecomAppPatrolWarningTargetNames") ? $("wecomAppPatrolWarningTargetNames").value : ""),
-            system: parseNameList($("wecomAppSystemTargetNames") ? $("wecomAppSystemTargetNames").value : ""),
+            daily_duty: $("wecomAppDailyDutyTargetNamesPicker") ? selectedNamesFromWecomTargetPicker("wecomAppDailyDutyTargetNamesPicker") : parseNameList($("wecomAppDailyDutyTargetNames") ? $("wecomAppDailyDutyTargetNames").value : ""),
+            patrol_warning: $("wecomAppPatrolWarningTargetNamesPicker") ? selectedNamesFromWecomTargetPicker("wecomAppPatrolWarningTargetNamesPicker") : parseNameList($("wecomAppPatrolWarningTargetNames") ? $("wecomAppPatrolWarningTargetNames").value : ""),
+            system: $("wecomAppSystemTargetNamesPicker") ? selectedNamesFromWecomTargetPicker("wecomAppSystemTargetNamesPicker") : parseNameList($("wecomAppSystemTargetNames") ? $("wecomAppSystemTargetNames").value : ""),
           },
           lightagent_url: useLightAgent ? $("lightAgentUrl").value.trim() : "",
           lightagent_token: useLightAgent ? $("lightAgentToken").value.trim() : "",
@@ -7243,6 +7428,26 @@
           renderSettingsOverview();
         });
       }
+    });
+    WECOM_APP_TARGET_PICKERS.forEach(({ pickerId }) => {
+      const picker = $(pickerId);
+      if (!picker) return;
+      picker.addEventListener("change", (event) => {
+        if (!event.target.matches("input[type='checkbox']")) return;
+        event.target.closest(".wecom-target-option")?.classList.toggle("is-selected", event.target.checked);
+        syncWecomTargetInputFromPicker(pickerId);
+        renderWecomAppBindingSummary();
+        renderSettingsOverview();
+      });
+      picker.addEventListener("click", (event) => {
+        const action = event.target.closest("[data-wecom-target-action]")?.dataset.wecomTargetAction;
+        if (!action) return;
+        if (action === "clear") {
+          setWecomTargetPickerSelection(pickerId, []);
+        } else if (action === "select-bound") {
+          setWecomTargetPickerSelection(pickerId, wecomTargetPickerNames().filter((name) => wecomUserIdByName(name)));
+        }
+      });
     });
     $("refreshWecomAiBotStatusBtn").addEventListener("click", async () => {
       try {
