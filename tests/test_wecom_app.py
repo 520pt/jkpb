@@ -252,6 +252,15 @@ def test_wecom_app_image_imports_roster_and_sends_news(tmp_path: Path, monkeypat
     monkeypatch.setattr(main_module, "extract_roster_image", fake_extract)
     monkeypatch.setattr(main_module, "recheck_template_roster_cells", lambda *args, **kwargs: None)
     main_module.WECOM_APP_PENDING_ROSTER_IMPORTS.clear()
+    main_module.WECOM_APP_PENDING_ROSTER_IMAGE_REQUESTS.clear()
+
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "",
+        "media_id": "",
+        "event_key": "DR_ROSTER_IMPORT",
+        "from_user": "sqh",
+        "msg_type": "event",
+    })()))
 
     asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
         "content": "media-1",
@@ -269,6 +278,32 @@ def test_wecom_app_image_imports_roster_and_sends_news(tmp_path: Path, monkeypat
     assert fake.news[-1][0] == "sqh"
     assert fake.news[-1][1]["title"] == "排班导入确认"
     assert fake.news[-1][1]["image_bytes"].startswith(b"\x89PNG")
+
+
+def test_wecom_app_image_without_roster_import_prompt_does_not_import(tmp_path: Path, monkeypatch):
+    repo = main_module.DutyRepository(tmp_path / "duty.db")
+    fake = FakeWeComAppClient()
+    fake.media["media-random"] = b"random-image"
+    monkeypatch.setattr(main_module, "_wecom_app_client_from_repo", lambda repo: fake)
+
+    def fail_extract(path):
+        raise AssertionError("random image should not be downloaded or parsed")
+
+    monkeypatch.setattr(main_module, "extract_roster_image", fail_extract)
+    main_module.WECOM_APP_PENDING_ROSTER_IMPORTS.clear()
+    main_module.WECOM_APP_PENDING_ROSTER_IMAGE_REQUESTS.clear()
+
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "media-random",
+        "media_id": "media-random",
+        "event_key": "",
+        "from_user": "sqh",
+        "msg_type": "image",
+    })()))
+
+    assert repo.get_roster_month(2026, 8) is None
+    assert fake.news == []
+    assert any("请先点击“更多查询 → 导入排班”" in content for _, content in fake.texts)
 
 
 def test_wecom_app_roster_image_conflict_requires_overwrite_confirmation(tmp_path: Path, monkeypatch):
@@ -290,6 +325,15 @@ def test_wecom_app_roster_image_conflict_requires_overwrite_confirmation(tmp_pat
     monkeypatch.setattr(main_module, "extract_roster_image", fake_extract)
     monkeypatch.setattr(main_module, "recheck_template_roster_cells", lambda *args, **kwargs: None)
     main_module.WECOM_APP_PENDING_ROSTER_IMPORTS.clear()
+    main_module.WECOM_APP_PENDING_ROSTER_IMAGE_REQUESTS.clear()
+
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "导入排班",
+        "media_id": "",
+        "event_key": "",
+        "from_user": "sqh",
+        "msg_type": "text",
+    })()))
 
     asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
         "content": "media-2",
@@ -437,6 +481,8 @@ def test_create_wecom_app_menu_endpoint_uses_limited_grouped_menu(tmp_path: Path
         "DR_TUNNEL_MODIFY_TEMPLATE",
         "DR_ORANGE_PATROL_RECORD",
     ]
+    assert buttons[2]["name"] == "更多查询"
+    assert buttons[2]["sub_button"][-1] == {"type": "click", "name": "导入排班", "key": "DR_ROSTER_IMPORT"}
 
 
 def test_wecom_app_menu_moves_tunnel_today_submit_to_top_and_keeps_legacy_key(tmp_path: Path, monkeypatch):

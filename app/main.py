@@ -119,6 +119,7 @@ WECOM_APP_MENU_COMMANDS = {
     "DR_TUNNEL_MODIFY_TEMPLATE": "修改模板",
     "DR_ORANGE_PATROL_RECORD": "橙色预警巡查记录查询",
     "DR_TUNNEL_TODAY_SUBMIT": "录入今日机电",
+    "DR_ROSTER_IMPORT": "导入排班",
     "DR_NEXT_7_DAYS": "查询未来7天",
     "DR_BINDING": "查询我的绑定",
     "DR_HELP": "菜单",
@@ -141,6 +142,7 @@ WECOM_APP_LEGACY_INDEX_MENU_COMMANDS = {
     "DR_MENU_2_1": "查询未来7天",
     "DR_MENU_2_2": "查询休息",
     "DR_MENU_2_3": "查询我的绑定",
+    "DR_MENU_2_4": "导入排班",
 }
 DEFAULT_WECOM_APP_MENU_GROUPS = [
     {
@@ -169,6 +171,7 @@ DEFAULT_WECOM_APP_MENU_GROUPS = [
             {"name": "未来7天", "command": "查询未来7天"},
             {"name": "查询休息", "command": "查询休息"},
             {"name": "我的绑定", "command": "查询我的绑定"},
+            {"name": "导入排班", "command": "导入排班"},
         ],
     },
 ]
@@ -178,6 +181,7 @@ DEFAULT_WECOM_APP_MENU_GROUPS = [
 WECOM_APP_PENDING_TUNNEL_SUBMISSIONS: dict[str, dict[str, Any]] = {}
 WECOM_APP_PENDING_TUNNEL_TTL_SECONDS = 30 * 60
 WECOM_APP_PENDING_ROSTER_IMPORTS: dict[str, dict[str, Any]] = {}
+WECOM_APP_PENDING_ROSTER_IMAGE_REQUESTS: dict[str, dict[str, Any]] = {}
 WECOM_APP_PENDING_ROSTER_TTL_SECONDS = 5 * 60
 WECHAT_QUERY_PENDING_MENUS: dict[str, float] = {}
 WECHAT_QUERY_MENU_TTL_SECONDS = 5 * 60
@@ -1475,7 +1479,8 @@ def create_app(
         if message.msg_type == "image" and str(message.media_id or "").strip():
             background_tasks.add_task(_handle_wecom_app_message, repo, uploads, message)
         elif message.msg_type in {"text", "voice"} and (
-            is_pending_confirm
+            _is_wecom_app_roster_import_request(command_text)
+            or is_pending_confirm
             or is_pending_account_help
             or is_pending_roster
             or _is_tunnel_mechanical_partner_command(command_text)
@@ -2596,12 +2601,16 @@ def _wecom_app_menu_groups(repo: DutyRepository | None = None) -> list[dict[str,
     raw = repo.get_wecom_app_menu_config() if repo is not None else []
     groups = _normalize_wecom_app_menu_groups(raw or DEFAULT_WECOM_APP_MENU_GROUPS, allow_empty=False)
     for group in groups:
-        if group.get("name") != "机电预警":
-            continue
-        items = [item for item in group.get("items", []) if str(item.get("command") or "").strip() != "录入今日机电"]
-        group["items"] = [{"name": "录入今日机电", "command": "录入今日机电"}, *items][
-            : WECOM_APP_MENU_LIMITS["max_sub_buttons"]
-        ]
+        if group.get("name") == "机电预警":
+            items = [item for item in group.get("items", []) if str(item.get("command") or "").strip() != "录入今日机电"]
+            group["items"] = [{"name": "录入今日机电", "command": "录入今日机电"}, *items][
+                : WECOM_APP_MENU_LIMITS["max_sub_buttons"]
+            ]
+        if group.get("name") == "更多查询":
+            items = [item for item in group.get("items", []) if str(item.get("command") or "").strip() != "导入排班"]
+            if len(items) < WECOM_APP_MENU_LIMITS["max_sub_buttons"]:
+                items.append({"name": "导入排班", "command": "导入排班"})
+            group["items"] = items[: WECOM_APP_MENU_LIMITS["max_sub_buttons"]]
     return groups
 
 
@@ -3447,6 +3456,52 @@ def _remember_wecom_app_roster_import(query: WechatQueryRequest, result: dict[st
     }
 
 
+def _is_wecom_app_roster_import_request(text: str) -> bool:
+    return _normalize_wechat_query_text(text) in {
+        "导入排班",
+        "导入排班表",
+        "上传排班",
+        "上传排班表",
+        "排班导入",
+        "排班表导入",
+    }
+
+
+def _remember_wecom_app_roster_image_request(query: WechatQueryRequest) -> None:
+    key = _wecom_app_pending_key(query)
+    if key:
+        WECOM_APP_PENDING_ROSTER_IMAGE_REQUESTS[key] = {
+            "expires_at": time.time() + WECOM_APP_PENDING_ROSTER_TTL_SECONDS,
+        }
+
+
+def _consume_wecom_app_roster_image_request(query: WechatQueryRequest) -> bool:
+    key = _wecom_app_pending_key(query)
+    if not key:
+        return False
+    pending = WECOM_APP_PENDING_ROSTER_IMAGE_REQUESTS.get(key)
+    if not pending:
+        return False
+    if float(pending.get("expires_at") or 0) < time.time():
+        WECOM_APP_PENDING_ROSTER_IMAGE_REQUESTS.pop(key, None)
+        return False
+    WECOM_APP_PENDING_ROSTER_IMAGE_REQUESTS.pop(key, None)
+    return True
+
+
+def _build_wecom_app_roster_import_prompt_response(query: WechatQueryRequest) -> dict[str, Any]:
+    _remember_wecom_app_roster_image_request(query)
+    return {
+        "success": True,
+        "query_type": "roster_import_prompt",
+        "reply": (
+            "已进入排班导入模式。\n"
+            "请在 5 分钟内发送一张完整、清晰的排班表图片。\n"
+            "导入后系统会自动核对并发送图文确认；如果月份已存在，会先让你确认是否覆盖。"
+        ),
+    }
+
+
 def _is_wecom_app_roster_overwrite_text(text: str) -> bool:
     return _normalize_wechat_query_text(text) in {"覆盖导入", "确认覆盖", "覆盖", "确认导入", "导入", "1"}
 
@@ -3502,7 +3557,13 @@ async def _handle_wecom_app_roster_image(repo: DutyRepository, uploads: Path, cl
     media_id = str(getattr(message, "media_id", "") or getattr(message, "content", "") or "").strip()
     if not userid or not media_id:
         return
-    query = _wecom_app_query_from_message(message, "排班图片导入")
+    query = _wecom_app_query_from_message(message, "导入排班")
+    if not _consume_wecom_app_roster_image_request(query):
+        try:
+            await client.send_text(userid, "收到图片，但当前没有进入排班导入模式。如需导入排班，请先点击“更多查询 → 导入排班”，再发送排班表图片。")
+        except Exception:
+            LOGGER.exception("企业微信自建应用发送排班导入入口提示失败")
+        return
     try:
         await client.send_text(userid, "收到排班表图片，正在识别并自动核对，请稍候…")
         image_bytes = await client.download_media(media_id)
@@ -3610,6 +3671,8 @@ async def _build_wechat_query_response(
     if pending_response is not None:
         return pending_response
     text = _consume_wechat_query_menu_selection(query, raw_text)
+    if _is_wecom_app_query(query) and _is_wecom_app_roster_import_request(text):
+        return _build_wecom_app_roster_import_prompt_response(query)
     if (
         _is_wecom_app_query(query)
         and not _is_wechat_self_bind_command(text)
@@ -3904,6 +3967,9 @@ async def _handle_wecom_app_message(repo: DutyRepository, uploads: Path, message
             except Exception:
                 LOGGER.exception("企业微信自建应用发送排班导入失败提示失败")
         return
+    if _is_wecom_app_roster_import_request(text):
+        await _send_wecom_app_result(client, userid, _build_wecom_app_roster_import_prompt_response(query), uploads)
+        return
     pending = WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.get(_wecom_app_pending_key(query))
     if _is_wecom_app_pending_account_help_text(text) and _wecom_app_pending_allows_account_help(pending):
         pending["prompt"] = "account_help_retry"
@@ -4127,6 +4193,7 @@ def _looks_like_duty_wechat_command(
             _is_wechat_binding_query,
             _is_wechat_daily_duty_query,
             _is_wechat_rest_query,
+            _is_wecom_app_roster_import_request,
             _is_wechat_next_reminder_query,
             _is_wechat_monitor_query,
         )
