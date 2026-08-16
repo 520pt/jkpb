@@ -7835,3 +7835,88 @@ def test_resend_record_uses_original_notification_room(tmp_path, monkeypatch):
     assert sent == [["room-2"]]
     resend = repo.list_send_records()[0]
     assert resend["notification_room_id"] == "room-2"
+
+
+def test_resend_ignores_invalid_numeric_notification_room(tmp_path, monkeypatch):
+    sent: list[list[str] | None] = []
+
+    class FakePersonalWechatClient(main_module.WechatBridgeNotifyClient):
+        def __init__(self):
+            pass
+
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None, *, target_ids: list[str] | None = None):
+            sent.append(target_ids)
+
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/notification-config",
+        json={
+            "sender_type": "lightagent",
+            "lightagent_targets": [{"id": "room-actual", "name": "测试群"}],
+        },
+    )
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_send_record(
+        kind="custom",
+        target="商邱宏",
+        status="failed",
+        content="补发内容",
+        notification_room_id="1",
+        notification_room_name="1",
+    )
+    record_id = repo.list_send_records()[0]["id"]
+    monkeypatch.setattr(main_module, "_notification_client_from_repo", lambda repo: FakePersonalWechatClient())
+
+    response = client.post(f"/api/send-records/{record_id}/resend")
+
+    assert response.status_code == 200
+    assert sent == [None]
+    resend = repo.list_send_records()[0]
+    assert resend["notification_room_id"] == ""
+
+
+def test_resend_tunnel_mechanical_confirmation_record_sends_result_not_digit(tmp_path, monkeypatch):
+    sent_news: list[dict[str, object]] = []
+
+    class FakeWeComAppNotifyClient:
+        is_wecom_app_notify = True
+
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None, *, target_ids: list[str] | None = None):
+            raise AssertionError("隧道机电补发不应该把确认数字当文字发送")
+
+        async def send_image(self, image_bytes: bytes, *, target_ids: list[str] | None = None):
+            raise AssertionError("自建应用应优先发送图文")
+
+        async def send_news(self, *, title: str, description: str, image_bytes: bytes, url: str, target_ids: list[str] | None = None):
+            sent_news.append({"title": title, "description": description, "target_ids": target_ids, "image_bytes": image_bytes})
+
+    async def fake_query_tunnel_result(repo, request, upload_dir):
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        image_path = upload_dir / "tunnel-result.png"
+        image_path.write_bytes(b"\x89PNG\r\n\x1a\nfake")
+        return {"success": True, "result_rows": [{"assetName": "照明"}], "result_image_url": "/api/uploads/tunnel-result.png"}
+
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_send_record(
+        kind="tunnel_mechanical_wechat",
+        target="2026-08-16 罗富耀/商邱宏",
+        status="success",
+        content="1",
+    )
+    record_id = repo.list_send_records()[0]["id"]
+    monkeypatch.setattr(main_module, "_notification_client_from_repo", lambda repo: FakeWeComAppNotifyClient())
+    monkeypatch.setattr(main_module, "_query_tunnel_mechanical_result_image", fake_query_tunnel_result)
+
+    response = client.post(f"/api/send-records/{record_id}/resend")
+
+    assert response.status_code == 200
+    assert sent_news
+    assert sent_news[0]["title"] == "隧道机电录入结果"
+    assert sent_news[0]["description"] != "1"
+    assert "2026-08-16" in str(sent_news[0]["description"])
+    resend = repo.list_send_records()[0]
+    assert resend["kind"] == "tunnel_mechanical_wechat_resend"
+    assert resend["content"] != "1"

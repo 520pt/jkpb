@@ -6093,7 +6093,12 @@
     function notificationRoomLabelById(id, fallbackName = "") {
       const roomId = String(id || "").trim();
       const room = normalizeFeatureChannelRooms(state.notificationTargetRooms || []).find((item) => item.id === roomId) || {};
-      return cleanWechatVisibleName(fallbackName || room.name || "", roomId) || (roomId ? `微信群 ${shortWechatId(roomId)}` : "默认全部通知群");
+      const rawFallback = String(fallbackName || "").trim();
+      const label = cleanWechatVisibleName((/^\d+$/.test(roomId) && rawFallback === roomId) ? (room.name || "") : (rawFallback || room.name || ""), roomId);
+      if (label) return label;
+      if (!roomId) return "默认全部通知群";
+      if (/^\d+$/.test(roomId)) return `已失效发送目标（${roomId}）`;
+      return `微信群 ${shortWechatId(roomId)}`;
     }
 
     function selectedNotificationRoomPayload(selectId) {

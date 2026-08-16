@@ -1830,7 +1830,7 @@ def create_app(
         record = repo.get_send_record(record_id)
         if record is None:
             raise HTTPException(status_code=404, detail="发送记录不存在")
-        return await _resend_send_record(repo, record)
+        return await _resend_send_record(repo, record, uploads=uploads)
 
     @app.get("/api/system-status")
     def system_status():
@@ -4259,38 +4259,40 @@ async def _submit_tunnel_mechanical_wechat_request(
         result = await _submit_tunnel_mechanical(repo, request, result_upload_dir=uploads)
     except HTTPException as exc:
         detail = str(exc.detail)
+        reply = f"隧道机电录入失败：{detail}"
         repo.save_send_record(
             kind="tunnel_mechanical_wechat",
             target=f"{request.checkTime.isoformat()} {request.checker}/{request.recorder}",
             status="failed",
-            content=str(query.text or ""),
+            content=reply,
             error=detail,
         )
-        return {"success": False, "query_type": "tunnel_mechanical", "reply": f"隧道机电录入失败：{detail}"}
+        return {"success": False, "query_type": "tunnel_mechanical", "reply": reply}
     except Exception as exc:
+        reply = f"隧道机电录入失败：{exc}"
         repo.save_send_record(
             kind="tunnel_mechanical_wechat",
             target=f"{request.checkTime.isoformat()} {request.checker}/{request.recorder}",
             status="failed",
-            content=str(query.text or ""),
+            content=reply,
             error=str(exc),
         )
-        return {"success": False, "query_type": "tunnel_mechanical", "reply": f"隧道机电录入失败：{exc}"}
+        return {"success": False, "query_type": "tunnel_mechanical", "reply": reply}
     selected_count = len([row for row in request.rows if row.enabled])
     result_image_url = _public_app_url(str(result.get("result_image_url") or ""))
-    repo.save_send_record(
-        kind="tunnel_mechanical_wechat",
-        target=f"{request.checkTime.isoformat()} {request.checker}/{request.recorder}",
-        status="success" if result.get("success") else "failed",
-        content=str(query.text or ""),
-        error="" if result.get("success") else "平台返回部分记录失败",
-    )
     reply = (
         f"隧道机电{'预览' if request.dry_run else '录入'}完成：{request.checkTime.isoformat()}，"
         f"负责人{request.checker}，记录人{request.recorder}，天气{request.weather}，共{selected_count}条。"
         + (f"\n查询结果生成失败：{result.get('result_query_error')}" if result.get("result_query_error") else "")
         if result.get("success")
         else "隧道机电录入未全部成功，请到页面查看提交结果。"
+    )
+    repo.save_send_record(
+        kind="tunnel_mechanical_wechat",
+        target=f"{request.checkTime.isoformat()} {request.checker}/{request.recorder}",
+        status="success" if result.get("success") else "failed",
+        content=reply,
+        error="" if result.get("success") else "平台返回部分记录失败",
     )
     return {
         "success": bool(result.get("success")),
@@ -4514,31 +4516,38 @@ async def _build_tunnel_mechanical_wechat_result_query_response(
         result = await _query_tunnel_mechanical_result_image(repo, request, uploads)
     except HTTPException as exc:
         detail = str(exc.detail)
+        reply = f"隧道机电查询失败：{detail}"
         repo.save_send_record(
             kind="tunnel_mechanical_query_wechat",
             target=target_date.isoformat(),
             status="failed",
-            content=str(query.text or ""),
+            content=reply,
             error=detail,
         )
-        return {"success": False, "query_type": "tunnel_mechanical_result", "reply": f"隧道机电查询失败：{detail}"}
+        return {"success": False, "query_type": "tunnel_mechanical_result", "reply": reply}
     except Exception as exc:
+        reply = f"隧道机电查询失败：{exc}"
         repo.save_send_record(
             kind="tunnel_mechanical_query_wechat",
             target=target_date.isoformat(),
             status="failed",
-            content=str(query.text or ""),
+            content=reply,
             error=str(exc),
         )
-        return {"success": False, "query_type": "tunnel_mechanical_result", "reply": f"隧道机电查询失败：{exc}"}
+        return {"success": False, "query_type": "tunnel_mechanical_result", "reply": reply}
     result_image_url = str(result.get("result_image_url") or "")
     image_full_url = _public_app_url(result_image_url)
     success = bool(result.get("success"))
+    reply = (
+        f"已查询 {target_date.isoformat()} 隧道机电结果，共 {len(result.get('result_rows') or [])} 条，图片已生成，正在发送。"
+        if success
+        else f"隧道机电查询失败：{result.get('result_query_error') or '未生成查询结果图片'}"
+    )
     repo.save_send_record(
         kind="tunnel_mechanical_query_wechat",
         target=target_date.isoformat(),
         status="success" if success else "failed",
-        content=str(query.text or ""),
+        content=reply,
         error="" if success else str(result.get("result_query_error") or "未生成查询结果图片"),
     )
     row_count = len(result.get("result_rows") or [])
@@ -4547,11 +4556,7 @@ async def _build_tunnel_mechanical_wechat_result_query_response(
         "query_type": "tunnel_mechanical_result",
         "checkTime": target_date.isoformat(),
         "count": row_count,
-        "reply": (
-            f"已查询 {target_date.isoformat()} 隧道机电结果，共 {row_count} 条，图片已生成，正在发送。"
-            if success
-            else f"隧道机电查询失败：{result.get('result_query_error') or '未生成查询结果图片'}"
-        ),
+        "reply": reply,
         "image_url": result_image_url,
         "image_full_url": image_full_url,
         "result": result,
@@ -4614,31 +4619,38 @@ async def _build_tunnel_mechanical_wechat_modify_response(
         result = await _modify_tunnel_mechanical(repo, request, result_upload_dir=uploads)
     except HTTPException as exc:
         detail = str(exc.detail)
+        reply = f"隧道机电修改失败：{detail}"
         repo.save_send_record(
             kind="tunnel_mechanical_wechat_modify",
             target=f"{request.checkTime.isoformat()} {request.checker}/{request.recorder}",
             status="failed",
-            content=str(query.text or ""),
+            content=reply,
             error=detail,
         )
-        return {"success": False, "query_type": "tunnel_mechanical_modify", "reply": f"隧道机电修改失败：{detail}"}
+        return {"success": False, "query_type": "tunnel_mechanical_modify", "reply": reply}
     except Exception as exc:
+        reply = f"隧道机电修改失败：{exc}"
         repo.save_send_record(
             kind="tunnel_mechanical_wechat_modify",
             target=f"{request.checkTime.isoformat()} {request.checker}/{request.recorder}",
             status="failed",
-            content=str(query.text or ""),
+            content=reply,
             error=str(exc),
         )
-        return {"success": False, "query_type": "tunnel_mechanical_modify", "reply": f"隧道机电修改失败：{exc}"}
+        return {"success": False, "query_type": "tunnel_mechanical_modify", "reply": reply}
     success = bool(result.get("success"))
     final_date = (request.newCheckTime or request.checkTime).isoformat()
     change_text = "，".join(_tunnel_mechanical_modify_change_labels(request))
+    reply = (
+        f"隧道机电修改完成：{request.checkTime.isoformat()} -> {final_date}，{change_text or '已更新'}。"
+        if success
+        else "隧道机电修改未全部成功，请到页面查看提交结果。"
+    )
     repo.save_send_record(
         kind="tunnel_mechanical_wechat_modify",
         target=f"{request.checkTime.isoformat()} -> {final_date}",
         status="success" if success else "failed",
-        content=str(query.text or ""),
+        content=reply,
         error="" if success else "平台返回部分记录修改失败",
     )
     result_image_url = str(result.get("result_image_url") or "")
@@ -9298,7 +9310,14 @@ def _public_send_record(repo: DutyRepository, record: dict[str, Any]) -> dict[st
         item["target"] = _wechat_test_record_target(repo, target)
     room_id = str(item.get("notification_room_id") or "").strip()
     if room_id:
-        item["notification_room_name"] = _wechat_room_display_lookup(repo).get(room_id) or item.get("notification_room_name") or room_id
+        saved_room_name = str(item.get("notification_room_name") or "").strip()
+        if re.fullmatch(r"\d+", room_id) and saved_room_name == room_id:
+            saved_room_name = ""
+        item["notification_room_name"] = (
+            _wechat_room_display_lookup(repo).get(room_id)
+            or saved_room_name
+            or (f"已失效发送目标（{room_id}）" if re.fullmatch(r"\d+", room_id) else room_id)
+        )
     for key in ("content", "error"):
         if item.get(key):
             item[key] = _sanitize_wechat_ids_for_display(repo, str(item.get(key) or ""))
@@ -9389,12 +9408,12 @@ def _raise_if_wecom_app_unbound_person(repo: DutyRepository, client: Any, event:
 
 def _daily_duty_target_room_ids(repo: DutyRepository) -> list[str] | None:
     room_id = str(repo.get_daily_duty_config().get("notification_room_id") or "").strip()
-    return [room_id] if room_id else None
+    return _saved_notification_room_ids(repo, room_id)
 
 
 def _patrol_warning_target_room_ids(repo: DutyRepository) -> list[str] | None:
     room_id = str(repo.get_patrol_warning_config().get("notification_room_id") or "").strip()
-    return [room_id] if room_id else None
+    return _saved_notification_room_ids(repo, room_id)
 
 
 def _configured_person_target_room_ids(repo: DutyRepository, name: str) -> list[str] | None:
@@ -9402,13 +9421,26 @@ def _configured_person_target_room_ids(repo: DutyRepository, name: str) -> list[
     for person in repo.list_monitored_people():
         if str(person.get("name") or "").strip() == clean:
             room_id = str(person.get("notification_room_id") or "").strip()
-            return [room_id] if room_id else None
+            return _saved_notification_room_ids(repo, room_id)
     return None
 
 
-def _record_target_room_ids(record: dict[str, Any]) -> list[str] | None:
+def _record_target_room_ids(repo: DutyRepository, record: dict[str, Any]) -> list[str] | None:
     room_id = str(record.get("notification_room_id") or "").strip()
-    return [room_id] if room_id else None
+    return _saved_notification_room_ids(repo, room_id)
+
+
+def _saved_notification_room_ids(repo: DutyRepository | None, room_id: str) -> list[str] | None:
+    clean = str(room_id or "").strip()
+    if not clean:
+        return None
+    if re.fullmatch(r"\d+", clean):
+        return None
+    if repo is not None:
+        configured = _notification_wechat_target_room_ids(repo)
+        if configured and clean not in configured:
+            return None
+    return [clean]
 
 
 async def _notify_send_text(client: Any, content: str, mentions: list[str] | None = None, target_ids: list[str] | None = None) -> None:
@@ -9551,7 +9583,84 @@ def _is_wecom_app_notify_client(client: Any) -> bool:
     return isinstance(client, WeComAppNotifyClient) or bool(getattr(client, "is_wecom_app_notify", False))
 
 
-async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> dict[str, Any]:
+def _tunnel_mechanical_record_date(record: dict[str, Any]) -> date | None:
+    for key in ("target", "content", "scheduled_at", "created_at"):
+        value = str(record.get(key) or "")
+        match = re.search(r"\d{4}-\d{2}-\d{2}", value)
+        if not match:
+            continue
+        try:
+            return date.fromisoformat(match.group(0))
+        except ValueError:
+            continue
+    return None
+
+
+def _tunnel_mechanical_resend_title(kind: str) -> str:
+    base = _base_reminder_kind(kind)
+    if "modify" in base:
+        return "隧道机电修改结果"
+    if "query" in base or "result" in base:
+        return "隧道机电查询结果"
+    return "隧道机电录入结果"
+
+
+async def _resend_tunnel_mechanical_record(
+    repo: DutyRepository,
+    client: Any,
+    record: dict[str, Any],
+    *,
+    uploads: Path | None = None,
+) -> str:
+    kind = str(record.get("kind") or "")
+    target = str(record.get("target") or "").strip()
+    target_date = _tunnel_mechanical_record_date(record)
+    title = _tunnel_mechanical_resend_title(kind)
+    upload_dir = uploads or Path(os.getenv("UPLOAD_DIR", "uploads"))
+    image_bytes: bytes | None = None
+    row_count = 0
+    query_error = ""
+    if target_date is not None and hasattr(client, "send_image"):
+        try:
+            result = await _query_tunnel_mechanical_result_image(
+                repo,
+                TunnelMechanicalResultImageRequest(checkTime=target_date),
+                upload_dir,
+            )
+            row_count = len(result.get("result_rows") or [])
+            image_path = _wechat_query_result_image_path({"result_image_url": result.get("result_image_url")}, upload_dir)
+            if image_path:
+                image_bytes = image_path.read_bytes()
+            elif result.get("result_query_error"):
+                query_error = str(result.get("result_query_error") or "")
+        except Exception as exc:
+            query_error = str(exc)
+    date_text = target_date.isoformat() if target_date else ""
+    description = (
+        f"{date_text} {title}补发，共{row_count}条"
+        if image_bytes and date_text
+        else f"{title}补发：{target or date_text or '未识别日期'}"
+    )
+    if query_error and not image_bytes:
+        description += f"\n重新生成图片失败：{query_error}"
+    fake_event = ReminderEvent(kind=kind, person_name="", send_at=datetime.now(TZ), content=description)
+    target_ids = _notification_target_ids_for_event(repo, client, fake_event) if _is_wecom_app_notify_client(client) else None
+    if image_bytes:
+        await _send_graphic_or_text_image(
+            client,
+            title=title,
+            text=description,
+            image_bytes=image_bytes,
+            mentions=[],
+            target_ids=target_ids,
+            mode="both",
+        )
+    else:
+        await _notify_send_text(client, description, [], target_ids)
+    return description
+
+
+async def _resend_send_record(repo: DutyRepository, record: dict[str, Any], *, uploads: Path | None = None) -> dict[str, Any]:
     client = _notification_client_from_repo(repo)
     if client is None:
         raise HTTPException(status_code=400, detail="请先配置通知发送通道")
@@ -9561,7 +9670,9 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
     scheduled_at = str(record.get("scheduled_at") or "")
     content = str(record.get("content") or "")
     resend_kind = kind if kind.endswith("_resend") else f"{kind}_resend"
-    record_target_ids = _record_target_room_ids(record)
+    record_target_ids = _record_target_room_ids(repo, record)
+    record_room_id = str(record.get("notification_room_id") or "").strip() if record_target_ids else ""
+    record_room_name = str(record.get("notification_room_name") or "").strip() if record_room_id else ""
     try:
         if kind in {"daily_duty", "daily_duty_test", "daily_duty_resend"}:
             preview_date = _date_from_record(record) or _today_in_tz()
@@ -9584,6 +9695,8 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
             content = _notification_content_for_event(repo, client, fake_event)
             target_ids = _notification_target_ids_for_event(repo, client, fake_event) if _is_wecom_app_notify_client(client) else (record_target_ids or _patrol_warning_target_room_ids(repo))
             await _notify_send_text(client, content, _notification_true_mentions_for_event(repo, client, fake_event), target_ids)
+        elif kind.startswith("tunnel_mechanical"):
+            content = await _resend_tunnel_mechanical_record(repo, client, record, uploads=uploads)
         elif (_is_shift_reminder_kind(kind) or kind.startswith(("custom", "vacation", "rest"))) and hasattr(client, "send_image"):
             fake_event = ReminderEvent(
                 kind=kind,
@@ -9630,8 +9743,8 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
             scheduled_at=scheduled_at,
             status="success",
             content=content,
-            notification_room_id=str(record.get("notification_room_id") or ""),
-            notification_room_name=str(record.get("notification_room_name") or ""),
+            notification_room_id=record_room_id,
+            notification_room_name=record_room_name,
         )
     except HTTPException:
         raise
@@ -9643,8 +9756,8 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
             status="failed",
             content=content,
             error=str(exc),
-            notification_room_id=str(record.get("notification_room_id") or ""),
-            notification_room_name=str(record.get("notification_room_name") or ""),
+            notification_room_id=record_room_id,
+            notification_room_name=record_room_name,
         )
         raise HTTPException(status_code=502, detail=_sanitize_wechat_ids_for_display(repo, str(exc))) from exc
     except Exception as exc:
@@ -9656,8 +9769,8 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
             status="failed",
             content=content,
             error=error,
-            notification_room_id=str(record.get("notification_room_id") or ""),
-            notification_room_name=str(record.get("notification_room_name") or ""),
+            notification_room_id=record_room_id,
+            notification_room_name=record_room_name,
         )
         raise HTTPException(status_code=502, detail=_sanitize_wechat_ids_for_display(repo, error)) from exc
     return {"success": True}
