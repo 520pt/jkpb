@@ -80,6 +80,23 @@ class WeComClient:
             raise WeComError("WeCom media upload failed: media_id missing")
         return media_id
 
+    async def download_media(self, media_id: str) -> bytes:
+        token = await self.get_access_token()
+        try:
+            response = await self.http_client.get(
+                f"{self.base_url}/media/get",
+                params={"access_token": token, "media_id": str(media_id or "").strip()},
+            )
+        except httpx.HTTPError as exc:
+            raise WeComError(f"WeCom media download failed: {exc.__class__.__name__}") from exc
+        content_type = str(response.headers.get("content-type") or "").lower()
+        if "application/json" in content_type:
+            data = response.json()
+            raise WeComError(f"WeCom media download failed: {data.get('errmsg', 'unknown error')}")
+        if response.status_code >= 400:
+            raise WeComError(f"WeCom media download failed: HTTP {response.status_code}")
+        return response.content
+
     async def upload_image_url(self, filename: str, content: bytes) -> str:
         token = await self.get_access_token()
         try:

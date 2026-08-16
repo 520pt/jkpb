@@ -48,6 +48,7 @@ from app.patrol_warning_image import render_patrol_warning_image
 from app.patrol_record_image import render_patrol_record_image
 from app.reminders import DEFAULT_MESSAGE_TEMPLATE, ReminderEvent, ReminderSettings, plan_reminders_for_day
 from app.roster import Shift, ShiftAssignment, normalize_shift_code
+from app.roster_import_image import render_roster_import_image
 from app.shift_reminder_image import render_shift_reminder_image
 from app.storage import (
     DEFAULT_DAILY_DUTY_TEMPLATE,
@@ -176,6 +177,8 @@ DEFAULT_WECOM_APP_MENU_GROUPS = [
 # ponytail: in-memory pending confirmation; restart only requires the user to click the menu again.
 WECOM_APP_PENDING_TUNNEL_SUBMISSIONS: dict[str, dict[str, Any]] = {}
 WECOM_APP_PENDING_TUNNEL_TTL_SECONDS = 30 * 60
+WECOM_APP_PENDING_ROSTER_IMPORTS: dict[str, dict[str, Any]] = {}
+WECOM_APP_PENDING_ROSTER_TTL_SECONDS = 5 * 60
 WECHAT_QUERY_PENDING_MENUS: dict[str, float] = {}
 WECHAT_QUERY_MENU_TTL_SECONDS = 5 * 60
 
@@ -1459,6 +1462,7 @@ def create_app(
         command_text = _wecom_app_message_command_text(message, repo)
         callback_query = _wecom_app_query_from_message(message, command_text)
         callback_pending = WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.get(_wecom_app_pending_key(callback_query))
+        roster_pending = WECOM_APP_PENDING_ROSTER_IMPORTS.get(_wecom_app_pending_key(callback_query))
         is_pending_confirm = (
             _wecom_app_pending_allows_confirm(callback_pending)
             and _is_wecom_app_pending_confirm_text(command_text)
@@ -1467,9 +1471,13 @@ def create_app(
             _wecom_app_pending_allows_account_help(callback_pending)
             and _is_wecom_app_pending_account_help_text(command_text)
         )
-        if message.msg_type in {"text", "voice"} and (
+        is_pending_roster = bool(roster_pending) and _is_wecom_app_roster_pending_text(command_text)
+        if message.msg_type == "image" and str(message.media_id or "").strip():
+            background_tasks.add_task(_handle_wecom_app_message, repo, uploads, message)
+        elif message.msg_type in {"text", "voice"} and (
             is_pending_confirm
             or is_pending_account_help
+            or is_pending_roster
             or _is_tunnel_mechanical_partner_command(command_text)
             or _looks_like_duty_wechat_command(_normalize_wechat_query_text(command_text), repo, query=callback_query)
         ):
@@ -1787,7 +1795,10 @@ def create_app(
     ):
         _require_wechat_query_auth(http_request)
         _require_feature_channel_for_roster_import(repo, room_id=room_id, stable_room_id=stable_room_id)
-        return _build_wechat_roster_import_response(repo, uploads, file, overwrite=overwrite)
+        result = _build_wechat_roster_import_response(repo, uploads, file, overwrite=overwrite)
+        result.setdefault("query_type", "roster_import")
+        _attach_roster_import_image(result, uploads)
+        return result
 
     @app.post("/api/wechat-roster/confirm")
     def wechat_roster_confirm(http_request: Request, request: WechatRosterConfirmRequest):
@@ -1797,7 +1808,7 @@ def create_app(
             room_id=str(request.room_id or ""),
             stable_room_id=str(request.stable_room_id or ""),
         )
-        return _build_wechat_roster_confirm_response(
+        result = _build_wechat_roster_confirm_response(
             repo,
             int(request.year),
             int(request.month),
@@ -1805,6 +1816,9 @@ def create_app(
             source_image_path=str(request.source_image_path or ""),
             overwrite=bool(request.overwrite),
         )
+        result.setdefault("query_type", "roster_import")
+        _attach_roster_import_image(result, uploads)
+        return result
 
     @app.get("/api/send-records")
     def list_send_records(
@@ -2000,6 +2014,25 @@ def _save_roster_upload(file: UploadFile, uploads: Path) -> Path:
     target = uploads / f"{uuid.uuid4().hex}{suffix}"
     try:
         _save_upload_file(file, target)
+        _cleanup_old_uploads(uploads)
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+    return target
+
+
+def _save_roster_upload_bytes(filename: str, content_type: str, content: bytes, uploads: Path) -> Path:
+    suffix = Path(filename or "roster.png").suffix.lower() or ".png"
+    if suffix not in ALLOWED_UPLOAD_SUFFIXES:
+        suffix = ".png"
+    if content_type and content_type.lower() not in ALLOWED_UPLOAD_TYPES:
+        raise HTTPException(status_code=400, detail="上传文件类型不是图片")
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"图片不能超过 {MAX_UPLOAD_BYTES // 1024 // 1024}MB")
+    target = uploads / f"{uuid.uuid4().hex}{suffix}"
+    try:
+        uploads.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
         _cleanup_old_uploads(uploads)
     except Exception:
         target.unlink(missing_ok=True)
@@ -2816,6 +2849,19 @@ def _attach_wechat_query_image(result: dict[str, Any], uploads: Path | None) -> 
         result["replies"] = [f"{_wechat_query_image_reply_title(result)}结果如下："]
 
 
+def _attach_roster_import_image(result: dict[str, Any], uploads: Path | None) -> None:
+    if uploads is None:
+        return
+    if str(result.get("image_url") or "").strip():
+        return
+    uploads.mkdir(parents=True, exist_ok=True)
+    filename = f"roster-import-{uuid.uuid4().hex}.png"
+    (uploads / filename).write_bytes(render_roster_import_image(result))
+    image_url = f"/api/uploads/{filename}"
+    result["image_url"] = image_url
+    result["image_full_url"] = _public_app_url(image_url)
+
+
 def _wechat_query_image_reply_title(result: dict[str, Any]) -> str:
     query_type = str(result.get("query_type") or "").strip()
     return {
@@ -2838,6 +2884,7 @@ def _wechat_query_image_reply_title(result: dict[str, Any]) -> str:
         "tunnel_mechanical": "隧道机电录入结果",
         "tunnel_mechanical_modify": "隧道机电修改结果",
         "tunnel_mechanical_result": "隧道机电查询结果",
+        "roster_import": "排班导入确认",
     }.get(query_type, "查询")
 
 
@@ -3279,6 +3326,7 @@ def _build_wechat_roster_import_response(
     target = _save_roster_upload(file, uploads)
     try:
         result = extract_roster_image(str(target))
+        result = _auto_recheck_wechat_roster_result(target, result)
     except Exception as exc:
         target.unlink(missing_ok=True)
         LOGGER.exception("微信群排班表识别失败：%s", exc)
@@ -3311,7 +3359,164 @@ def _build_wechat_roster_import_response(
         overwrite=overwrite,
         ocr_status=str(result.get("ocr_status") or ""),
         source_image_url=str(result.get("source_image_url") or ""),
+        issues=list(result.get("issues") or []),
     )
+
+
+def _build_wechat_roster_import_response_from_path(
+    repo: DutyRepository,
+    source_path: Path,
+    *,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    try:
+        result = extract_roster_image(str(source_path))
+        result = _auto_recheck_wechat_roster_result(source_path, result)
+    except Exception as exc:
+        LOGGER.exception("企业微信排班表识别失败：%s", exc)
+        return {
+            "success": False,
+            "query_type": "roster_import",
+            "import_status": "ocr_failed",
+            "reply": "排班表图片识别失败，请换一张更清晰的原图，或到 duty-reminder 网页端上传校对。",
+        }
+    result["source_image_url"] = f"/api/uploads/{Path(result.get('source_image_path') or source_path).name}"
+    grid = list(result.get("grid") or [])
+    year = int(result.get("year") or _today_in_tz().year)
+    month = int(result.get("month") or _today_in_tz().month)
+    if result.get("ocr_status") not in {"ok", "template_ok"} or not grid:
+        return {
+            "success": False,
+            "query_type": "roster_import",
+            "import_status": "ocr_failed",
+            "ocr_status": str(result.get("ocr_status") or ""),
+            "year": year,
+            "month": month,
+            "source_image_path": str(result.get("source_image_path") or source_path),
+            "source_image_url": result["source_image_url"],
+            "reply": "没有从图片中识别到可导入的排班表，请换一张完整、清晰的排班表图片。",
+        }
+    return _build_wechat_roster_confirm_response(
+        repo,
+        year,
+        month,
+        grid,
+        source_image_path=str(result.get("source_image_path") or source_path),
+        overwrite=overwrite,
+        ocr_status=str(result.get("ocr_status") or ""),
+        source_image_url=str(result.get("source_image_url") or ""),
+        issues=list(result.get("issues") or []),
+    )
+
+
+def _auto_recheck_wechat_roster_result(source_path: Path, result: dict[str, Any]) -> dict[str, Any]:
+    grid = list(result.get("grid") or [])
+    if not grid:
+        return result
+    year = int(result.get("year") or _today_in_tz().year)
+    month = int(result.get("month") or _today_in_tz().month)
+    try:
+        checked = recheck_template_roster_cells(source_path, grid, year=year, month=month)
+    except Exception:
+        LOGGER.exception("排班图片自动核对失败")
+        checked = None
+    if not checked:
+        return result
+    return {
+        **result,
+        "grid": checked.get("grid") or grid,
+        "issues": checked.get("issues") or [],
+        "auto_rechecked": True,
+    }
+
+
+def _remember_wecom_app_roster_import(query: WechatQueryRequest, result: dict[str, Any]) -> None:
+    key = _wecom_app_pending_key(query)
+    if not key or not result.get("conflict"):
+        return
+    WECOM_APP_PENDING_ROSTER_IMPORTS[key] = {
+        "expires_at": time.time() + WECOM_APP_PENDING_ROSTER_TTL_SECONDS,
+        "payload": {
+            "year": int(result.get("year") or 0),
+            "month": int(result.get("month") or 0),
+            "grid": list(result.get("grid") or []),
+            "source_image_path": str(result.get("source_image_path") or ""),
+            "source_image_url": str(result.get("source_image_url") or ""),
+            "issues": list(result.get("issues") or []),
+        },
+    }
+
+
+def _is_wecom_app_roster_overwrite_text(text: str) -> bool:
+    return _normalize_wechat_query_text(text) in {"覆盖导入", "确认覆盖", "覆盖", "确认导入", "导入", "1"}
+
+
+def _is_wecom_app_roster_cancel_text(text: str) -> bool:
+    return _normalize_wechat_query_text(text) in {"取消导入", "取消", "放弃", "2"}
+
+
+def _is_wecom_app_roster_pending_text(text: str) -> bool:
+    return _is_wecom_app_roster_overwrite_text(text) or _is_wecom_app_roster_cancel_text(text)
+
+
+def _build_wecom_app_pending_roster_response(repo: DutyRepository, query: WechatQueryRequest, text: str) -> dict[str, Any]:
+    key = _wecom_app_pending_key(query)
+    pending = WECOM_APP_PENDING_ROSTER_IMPORTS.get(key)
+    if not pending:
+        return {"success": False, "query_type": "roster_import", "import_status": "expired", "reply": "没有待确认覆盖的排班导入，请重新发送排班表图片。"}
+    if float(pending.get("expires_at") or 0) < time.time():
+        WECOM_APP_PENDING_ROSTER_IMPORTS.pop(key, None)
+        return {"success": False, "query_type": "roster_import", "import_status": "expired", "reply": "排班导入确认已过期，请重新发送排班表图片。"}
+    if _is_wecom_app_roster_cancel_text(text):
+        WECOM_APP_PENDING_ROSTER_IMPORTS.pop(key, None)
+        payload = dict(pending.get("payload") or {})
+        return {
+            "success": False,
+            "query_type": "roster_import",
+            "import_status": "cancelled",
+            "year": payload.get("year"),
+            "month": payload.get("month"),
+            "grid": list(payload.get("grid") or []),
+            "issues": list(payload.get("issues") or []),
+            "reply": f"已取消覆盖导入 {payload.get('year')}年{payload.get('month')}月排班表。",
+        }
+    if not _is_wecom_app_roster_overwrite_text(text):
+        return {"success": False, "query_type": "roster_import", "import_status": "unknown", "reply": "请回复“覆盖导入”确认替换，或回复“取消导入”放弃。"}
+    payload = dict(pending.get("payload") or {})
+    result = _build_wechat_roster_confirm_response(
+        repo,
+        int(payload.get("year") or 0),
+        int(payload.get("month") or 0),
+        list(payload.get("grid") or []),
+        source_image_path=str(payload.get("source_image_path") or ""),
+        overwrite=True,
+        source_image_url=str(payload.get("source_image_url") or ""),
+        issues=list(payload.get("issues") or []),
+    )
+    WECOM_APP_PENDING_ROSTER_IMPORTS.pop(key, None)
+    return result
+
+
+async def _handle_wecom_app_roster_image(repo: DutyRepository, uploads: Path, client: WeComClient, message: Any) -> None:
+    userid = str(message.from_user or "").strip()
+    media_id = str(getattr(message, "media_id", "") or getattr(message, "content", "") or "").strip()
+    if not userid or not media_id:
+        return
+    query = _wecom_app_query_from_message(message, "排班图片导入")
+    try:
+        await client.send_text(userid, "收到排班表图片，正在识别并自动核对，请稍候…")
+        image_bytes = await client.download_media(media_id)
+        source_path = _save_roster_upload_bytes(f"wecom-roster-{media_id}.jpg", "image/jpeg", image_bytes, uploads)
+        result = _build_wechat_roster_import_response_from_path(repo, source_path)
+        _remember_wecom_app_roster_import(query, result)
+        _attach_roster_import_image(result, uploads)
+        await _send_wecom_app_result(client, userid, result, uploads)
+    except Exception as exc:
+        LOGGER.exception("企业微信自建应用排班图片导入失败")
+        try:
+            await client.send_text(userid, f"排班表图片导入失败：{exc}")
+        except Exception:
+            LOGGER.exception("企业微信自建应用发送排班导入失败提示失败")
 
 
 def _build_wechat_roster_confirm_response(
@@ -3324,6 +3529,7 @@ def _build_wechat_roster_confirm_response(
     overwrite: bool = False,
     ocr_status: str = "",
     source_image_url: str = "",
+    issues: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     try:
         sanitized_grid = _sanitize_roster_grid_for_month(grid, year, month)
@@ -3343,6 +3549,8 @@ def _build_wechat_roster_confirm_response(
             "source_image_path": source_image_path,
             "source_image_url": source_image_url,
             "grid": sanitized_grid,
+            "issues": list(issues or []),
+            "query_type": "roster_import",
             "reply": (
                 f"已识别 {year}年{month}月排班表，共 {len(sanitized_grid)} 行，"
                 "但姓名没有识别完整，暂不自动导入。请到 duty-reminder 网页端上传校对后确认。"
@@ -3363,6 +3571,8 @@ def _build_wechat_roster_confirm_response(
             "source_image_url": source_image_url,
             "grid": sanitized_grid,
             "diffs": diffs[:50],
+            "issues": list(issues or []),
+            "query_type": "roster_import",
             "reply": (
                 f"{year}年{month}月排班表已存在{preview}。\n"
                 "5 分钟内回复“覆盖导入”可替换现有排班；回复“取消导入”放弃。"
@@ -3371,6 +3581,7 @@ def _build_wechat_roster_confirm_response(
     repo.save_roster_month(year, month, sanitized_grid, source_image_path)
     return {
         "success": True,
+        "query_type": "roster_import",
         "import_status": "imported_overwrite" if existing and overwrite else "imported",
         "ocr_status": ocr_status,
         "year": year,
@@ -3378,6 +3589,8 @@ def _build_wechat_roster_confirm_response(
         "people_count": len(sanitized_grid),
         "source_image_path": source_image_path,
         "source_image_url": source_image_url,
+        "grid": sanitized_grid,
+        "issues": list(issues or []),
         "reply": (
             f"已导入 {year}年{month}月排班表，共 {len(sanitized_grid)} 人。"
             if not existing
@@ -3666,12 +3879,31 @@ def _wecom_app_notify_client_from_config(config: dict[str, Any], repo: DutyRepos
 
 
 async def _handle_wecom_app_message(repo: DutyRepository, uploads: Path, message) -> None:
-    text = _wecom_app_message_command_text(message, repo)
     userid = str(message.from_user or "").strip()
-    if not text or not userid:
+    if not userid:
+        return
+    client = _wecom_app_client_from_repo(repo)
+    if str(message.msg_type or "").strip() == "image":
+        await _handle_wecom_app_roster_image(repo, uploads, client, message)
+        return
+    text = _wecom_app_message_command_text(message, repo)
+    if not text:
         return
     query = _wecom_app_query_from_message(message, text)
-    client = _wecom_app_client_from_repo(repo)
+    roster_pending = WECOM_APP_PENDING_ROSTER_IMPORTS.get(_wecom_app_pending_key(query))
+    if _is_wecom_app_roster_pending_text(text) and roster_pending:
+        try:
+            await client.send_text(userid, "正在处理排班导入，请稍候…")
+            result = _build_wecom_app_pending_roster_response(repo, query, text)
+            _attach_roster_import_image(result, uploads)
+            await _send_wecom_app_result(client, userid, result, uploads)
+        except Exception:
+            LOGGER.exception("企业微信自建应用处理排班导入确认失败")
+            try:
+                await client.send_text(userid, "排班导入确认处理失败，请稍后再试或到网页端导入。")
+            except Exception:
+                LOGGER.exception("企业微信自建应用发送排班导入失败提示失败")
+        return
     pending = WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.get(_wecom_app_pending_key(query))
     if _is_wecom_app_pending_account_help_text(text) and _wecom_app_pending_allows_account_help(pending):
         pending["prompt"] = "account_help_retry"
@@ -3688,35 +3920,39 @@ async def _handle_wecom_app_message(repo: DutyRepository, uploads: Path, message
     try:
         await client.send_text(userid, "正在查询，请稍候…")
         result = await _build_wechat_query_response_with_log(repo, query, uploads=uploads)
-        replies = [str(item or "").strip() for item in (result.get("replies") or []) if str(item or "").strip()]
-        reply = str(result.get("reply") or "").strip()
-        if not replies and reply:
-            replies = [reply]
-        content = "\n".join(replies).strip() or ("查询完成" if result.get("success") else "没有查询到结果")
-        image_path = _wechat_query_result_image_path(result, uploads)
-        if image_path and _wecom_app_query_result_should_send_news(result):
-            image_bytes = image_path.read_bytes()
-            title = _wechat_query_image_reply_title(result)
-            description = _wecom_app_query_news_description(result, content)
-            await client.send_news(
-                userid,
-                title=title,
-                description=description,
-                image_bytes=image_bytes,
-                url=_notification_news_url(
-                    title=title,
-                    description=description,
-                    image_bytes=image_bytes,
-                ),
-            )
-        elif content:
-            await client.send_text(userid, content)
+        await _send_wecom_app_result(client, userid, result, uploads)
     except Exception:
         LOGGER.exception("企业微信自建应用处理消息失败")
         try:
             await client.send_text(userid, "查询失败，请稍后再试或联系管理员查看后台日志。")
         except Exception:
             LOGGER.exception("企业微信自建应用发送失败提示失败")
+
+
+async def _send_wecom_app_result(client: WeComClient, userid: str, result: dict[str, Any], uploads: Path) -> None:
+    replies = [str(item or "").strip() for item in (result.get("replies") or []) if str(item or "").strip()]
+    reply = str(result.get("reply") or "").strip()
+    if not replies and reply:
+        replies = [reply]
+    content = "\n".join(replies).strip() or ("处理完成" if result.get("success") else "没有查询到结果")
+    image_path = _wechat_query_result_image_path(result, uploads)
+    if image_path and _wecom_app_query_result_should_send_news(result):
+        image_bytes = image_path.read_bytes()
+        title = _wechat_query_image_reply_title(result)
+        description = _wecom_app_query_news_description(result, content)
+        await client.send_news(
+            userid,
+            title=title,
+            description=description,
+            image_bytes=image_bytes,
+            url=_notification_news_url(
+                title=title,
+                description=description,
+                image_bytes=image_bytes,
+            ),
+        )
+    elif content:
+        await client.send_text(userid, content)
 
 
 def _wecom_app_message_command_text(message: Any, repo: DutyRepository) -> str:
@@ -3758,6 +3994,7 @@ def _wecom_app_query_result_should_send_news(result: dict[str, Any]) -> bool:
         "next_reminder_all",
         "rest_query",
         "patrol_record",
+        "roster_import",
         "tunnel_mechanical",
         "tunnel_mechanical_modify",
         "tunnel_mechanical_result",
@@ -3789,6 +4026,13 @@ def _wecom_app_query_news_description(result: dict[str, Any], fallback: str = ""
             f"{result.get('name') or ''} {result.get('start_date') or ''}至{result.get('end_date') or ''}，"
             f"{int(result.get('count') or 0)}条，{_patrol_record_group_count(result.get('records') or [])}次"
         )
+    if query_type == "roster_import":
+        status = str(result.get("import_status") or "")
+        if status == "conflict":
+            return _compact_wecom_news_text(f"{result.get('year')}年{result.get('month')}月已存在｜差异{len(result.get('diffs') or [])}处｜回复覆盖导入/取消导入")
+        if result.get("success"):
+            return _compact_wecom_news_text(f"{result.get('year')}年{result.get('month')}月｜{result.get('people_count') or len(result.get('grid') or [])}人｜已导入")
+        return _compact_wecom_news_text(str(result.get("reply") or "排班导入需要处理"))
     if query_type in {"tunnel_mechanical", "tunnel_mechanical_modify", "tunnel_mechanical_result"}:
         date_text = str(result.get("finalCheckTime") or result.get("checkTime") or "").strip()
         count = int(result.get("count") or 0)

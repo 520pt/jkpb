@@ -23,6 +23,8 @@ class WeComAppMessage:
     agent_id: str = ""
     event: str = ""
     event_key: str = ""
+    media_id: str = ""
+    pic_url: str = ""
 
 
 class WeComAppCrypto:
@@ -90,6 +92,8 @@ def parse_wecom_app_message(xml_text: str) -> WeComAppMessage:
         content = str(root.findtext("Recognition") or "").strip()
     elif msg_type == "event":
         content = str(root.findtext("EventKey") or "").strip()
+    elif msg_type == "image":
+        content = str(root.findtext("MediaId") or "").strip()
     return WeComAppMessage(
         from_user=str(root.findtext("FromUserName") or "").strip(),
         to_user=str(root.findtext("ToUserName") or "").strip(),
@@ -99,4 +103,6 @@ def parse_wecom_app_message(xml_text: str) -> WeComAppMessage:
         agent_id=str(root.findtext("AgentID") or "").strip(),
         event=str(root.findtext("Event") or "").strip(),
         event_key=str(root.findtext("EventKey") or "").strip(),
+        media_id=str(root.findtext("MediaId") or "").strip(),
+        pic_url=str(root.findtext("PicUrl") or "").strip(),
     )

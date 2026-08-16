@@ -38,6 +38,7 @@ class FakeWeComAppClient:
         self.images: list[tuple[str, bytes]] = []
         self.news: list[tuple[str, dict]] = []
         self.menus: list[dict] = []
+        self.media: dict[str, bytes] = {}
 
     async def send_text(self, touser: str, content: str) -> None:
         self.texts.append((touser, content))
@@ -60,6 +61,9 @@ class FakeWeComAppClient:
 
     async def create_menu(self, menu: dict) -> None:
         self.menus.append(menu)
+
+    async def download_media(self, media_id: str) -> bytes:
+        return self.media.get(media_id, b"fake-image")
 
 
 def _save_simple_tunnel_template(repo) -> None:
@@ -225,6 +229,91 @@ def test_wecom_app_today_duty_menu_click_sends_daily_duty_image(tmp_path: Path, 
     assert fake.news and fake.news[0][0] == "shangqiuhong"
     assert fake.news[0][1]["title"] == "今日在岗查询"
     assert fake.news[0][1]["image_bytes"].startswith(b"\x89PNG")
+
+
+def test_wecom_app_image_imports_roster_and_sends_news(tmp_path: Path, monkeypatch):
+    repo = main_module.DutyRepository(tmp_path / "duty.db")
+    fake = FakeWeComAppClient()
+    fake.media["media-1"] = b"fake-roster-image"
+    monkeypatch.setattr(main_module, "_wecom_app_client_from_repo", lambda repo: fake)
+
+    def fake_extract(path):
+        return {
+            "year": 2026,
+            "month": 8,
+            "ocr_status": "template_ok",
+            "source_image_path": path,
+            "grid": [
+                {"name": "商邱宏", "days": {"1": "早", "2": "休"}},
+                {"name": "罗富耀", "days": {"1": "中", "2": "晚"}},
+            ],
+        }
+
+    monkeypatch.setattr(main_module, "extract_roster_image", fake_extract)
+    monkeypatch.setattr(main_module, "recheck_template_roster_cells", lambda *args, **kwargs: None)
+    main_module.WECOM_APP_PENDING_ROSTER_IMPORTS.clear()
+
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "media-1",
+        "media_id": "media-1",
+        "event_key": "",
+        "from_user": "sqh",
+        "msg_type": "image",
+    })()))
+
+    roster = repo.get_roster_month(2026, 8)
+    assert roster is not None
+    assert roster["grid"][0]["name"] == "商邱宏"
+    assert any("收到排班表图片" in content for _, content in fake.texts)
+    assert fake.news
+    assert fake.news[-1][0] == "sqh"
+    assert fake.news[-1][1]["title"] == "排班导入确认"
+    assert fake.news[-1][1]["image_bytes"].startswith(b"\x89PNG")
+
+
+def test_wecom_app_roster_image_conflict_requires_overwrite_confirmation(tmp_path: Path, monkeypatch):
+    repo = main_module.DutyRepository(tmp_path / "duty.db")
+    repo.save_roster_month(2026, 8, [{"name": "商邱宏", "days": {"1": "早"}}], "old.png")
+    fake = FakeWeComAppClient()
+    fake.media["media-2"] = b"fake-roster-image"
+    monkeypatch.setattr(main_module, "_wecom_app_client_from_repo", lambda repo: fake)
+
+    def fake_extract(path):
+        return {
+            "year": 2026,
+            "month": 8,
+            "ocr_status": "template_ok",
+            "source_image_path": path,
+            "grid": [{"name": "商邱宏", "days": {"1": "中"}}],
+        }
+
+    monkeypatch.setattr(main_module, "extract_roster_image", fake_extract)
+    monkeypatch.setattr(main_module, "recheck_template_roster_cells", lambda *args, **kwargs: None)
+    main_module.WECOM_APP_PENDING_ROSTER_IMPORTS.clear()
+
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "media-2",
+        "media_id": "media-2",
+        "event_key": "",
+        "from_user": "sqh",
+        "msg_type": "image",
+    })()))
+
+    assert repo.get_roster_month(2026, 8)["grid"][0]["days"]["1"] == "早"
+    assert "sqh" in main_module.WECOM_APP_PENDING_ROSTER_IMPORTS
+    assert "回复覆盖导入" in fake.news[-1][1]["description"]
+
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "覆盖导入",
+        "media_id": "",
+        "event_key": "",
+        "from_user": "sqh",
+        "msg_type": "text",
+    })()))
+
+    assert repo.get_roster_month(2026, 8)["grid"][0]["days"]["1"] == "中"
+    assert "sqh" not in main_module.WECOM_APP_PENDING_ROSTER_IMPORTS
+    assert fake.news[-1][1]["title"] == "排班导入确认"
 
 
 def test_wecom_app_unbound_command_requires_binding(tmp_path: Path, monkeypatch):
