@@ -16,6 +16,7 @@ LINE = "#dbeafe"
 BLUE = "#2d60e6"
 CYAN = "#19a9d5"
 CARD = "#ffffff"
+MUTED = "#64748b"
 
 TEMPLATE_QUERY_TYPES = {
     "tunnel_mechanical_template",
@@ -55,7 +56,7 @@ def render_wechat_query_image(result: dict[str, Any]) -> bytes | None:
     if query_type in {"next_reminder", "next_reminder_all"}:
         return _render_table(title, query_type, ["日期", "人员", "内容"], _parse_next_reminder(reply), [180, 145, 565], content_cols={2}, nowrap_cols={0}, min_h=520)
     if query_type == "rest_query":
-        return _render_message_card(title, query_type, reply)
+        return _render_rest_query_card(result)
     if query_type == "help":
         return _render_help_image()
     return _render_message_card(title, query_type, reply)
@@ -148,6 +149,80 @@ def _render_message_card(title: str, query_type: str, reply: str) -> bytes:
     _rounded(draw, box, 18, "#f8fafc", LINE)
     _draw_lines(draw, lines, box[0] + 24, box[1] + 24, font_body, INK, 32)
     return _png_bytes(image)
+
+
+def _render_rest_query_card(result: dict[str, Any]) -> bytes:
+    title = _title_for_result(result)
+    details = dict(result.get("details") or {})
+    person = str(result.get("person_name") or "").strip() or "休息人员"
+    target_date = str(result.get("target_date") or "").strip()
+    ranges = list(details.get("ranges") or [])
+    total = int(details.get("total_days") or 0)
+    rested = int(details.get("rested_days") or 0)
+    remaining = int(details.get("remaining_days") or max(0, total - rested))
+    reply = str(result.get("reply") or "").strip()
+    width = 900
+    header_y = 44
+    y = 188
+    row_h = 92
+    height = max(520, y + 108 + 28 + max(1, len(ranges)) * row_h + 92)
+    image = Image.new("RGB", (width, height), BG)
+    draw = ImageDraw.Draw(image)
+    _rounded(draw, (24, 25, width - 24, height - 24), 30, CARD, "#cbd5e1")
+    _rounded(draw, (44, header_y, 856, header_y + 120), 20, BLUE)
+    draw.text((70, 58), title, font=_font(34), fill="#ffffff")
+    draw.text((70, 107), f"{person} · {target_date}", font=_font(22), fill="#ffffff")
+
+    metric_w = 244
+    metric_defs = [("本月休息", f"{total}天", "#2563eb"), ("已经休息", f"{rested}天", "#059669"), ("还剩休息", f"{remaining}天", "#d97706")]
+    x = 56
+    for label, value, color in metric_defs:
+        box = (x, y, x + metric_w, y + 96)
+        _rounded(draw, box, 18, "#f8fafc", LINE)
+        draw.text((box[0] + 20, box[1] + 16), label, font=_font(19), fill=MUTED)
+        draw.text((box[0] + 20, box[1] + 48), value, font=_font(30), fill=color)
+        x += metric_w + 22
+    y += 124
+
+    draw.text((64, y), "休息区间", font=_font(24), fill=INK)
+    y += 38
+    if ranges:
+        for index, item in enumerate(ranges, start=1):
+            start = str(item.get("start") or "")
+            end = str(item.get("end") or "")
+            days = int(item.get("days") or 0)
+            status = _rest_range_status(target_date, start, end)
+            box = (56, y, 844, y + 78)
+            _rounded(draw, box, 16, "#f8fafc", LINE)
+            badge = (box[0] + 18, box[1] + 17, box[0] + 126, box[1] + 61)
+            _rounded(draw, badge, 14, "#dbeafe")
+            _draw_center_text(draw, badge, f"第{index}次", _font(21), BLUE)
+            draw.text((box[0] + 150, box[1] + 16), f"{_md_label(start)} 至 {_md_label(end)}", font=_font(25), fill=INK)
+            draw.text((box[0] + 150, box[1] + 48), f"共{days}天 · {status}", font=_font(18), fill=MUTED)
+            y += row_h
+    else:
+        lines = _wrap_text(draw, reply or "本月没有休息排班", _font(24), 740)
+        box = (56, y, 844, y + 54 + len(lines) * 32)
+        _rounded(draw, box, 16, "#f8fafc", LINE)
+        _draw_lines(draw, lines, box[0] + 24, box[1] + 24, _font(24), INK, 32)
+    return _png_bytes(image)
+
+
+def _rest_range_status(target_date: str, start: str, end: str) -> str:
+    if not target_date or not start or not end:
+        return ""
+    if target_date < start:
+        return "还未开始"
+    if start <= target_date <= end:
+        return "正在休息"
+    return "已结束"
+
+
+def _md_label(value: str) -> str:
+    match = re.match(r"\d{4}-(\d{2})-(\d{2})", value)
+    if not match:
+        return value or "-"
+    return f"{int(match.group(1))}月{int(match.group(2))}日"
 
 
 def _render_help_image() -> bytes:
@@ -331,6 +406,21 @@ def _wrap_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, 
 def _draw_lines(draw: ImageDraw.ImageDraw, lines: list[str], x: int, y: int, font: ImageFont.ImageFont, fill: str, line_height: int) -> None:
     for index, line in enumerate(lines):
         draw.text((x, y + index * line_height), line, font=font, fill=fill)
+
+
+def _draw_center_text(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], text: str, font: ImageFont.ImageFont, fill: str) -> None:
+    text_box = draw.textbbox((0, 0), str(text), font=font)
+    text_w = text_box[2] - text_box[0]
+    text_h = text_box[3] - text_box[1]
+    draw.text(
+        (
+            box[0] + (box[2] - box[0] - text_w) / 2 - text_box[0],
+            box[1] + (box[3] - box[1] - text_h) / 2 - text_box[1],
+        ),
+        str(text),
+        font=font,
+        fill=fill,
+    )
 
 
 def _text_width(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) -> int:

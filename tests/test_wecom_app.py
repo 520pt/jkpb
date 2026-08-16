@@ -4,6 +4,7 @@ import asyncio
 import base64
 import hashlib
 import struct
+from datetime import date
 from pathlib import Path
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -35,6 +36,7 @@ class FakeWeComAppClient:
     def __init__(self) -> None:
         self.texts: list[tuple[str, str]] = []
         self.images: list[tuple[str, bytes]] = []
+        self.news: list[tuple[str, dict]] = []
         self.menus: list[dict] = []
 
     async def send_text(self, touser: str, content: str) -> None:
@@ -43,8 +45,48 @@ class FakeWeComAppClient:
     async def send_image(self, touser: str, image_bytes: bytes) -> None:
         self.images.append((touser, image_bytes))
 
+    async def send_news(self, touser: str, *, title: str, description: str, image_bytes: bytes, url: str) -> None:
+        self.news.append(
+            (
+                touser,
+                {
+                    "title": title,
+                    "description": description,
+                    "image_bytes": image_bytes,
+                    "url": url,
+                },
+            )
+        )
+
     async def create_menu(self, menu: dict) -> None:
         self.menus.append(menu)
+
+
+def _save_simple_tunnel_template(repo) -> None:
+    repo.save_tunnel_mechanical_template(
+        {
+            "base_url": "https://example.test",
+            "people": [{"id": "1001", "name": "商邱宏"}, {"id": "1002", "name": "罗富耀"}],
+            "assets": [
+                {
+                    "assetId": "asset-1",
+                    "assetName": "示例隧道上行",
+                    "assetCode": "A001",
+                    "routeCode": "S41",
+                    "routeName": "南涧－宁洱",
+                    "maintenanceSectionId": "",
+                    "domainId": "",
+                    "deptName": "",
+                    "devName": "照明设施",
+                    "location": "K1+000",
+                    "content": "",
+                    "result": 1,
+                    "carLicense": "",
+                    "nums": "",
+                }
+            ],
+        }
+    )
 
 
 def test_wecom_app_callback_verification_returns_plain_echo(tmp_path: Path):
@@ -70,7 +112,7 @@ def test_wecom_app_callback_verification_returns_plain_echo(tmp_path: Path):
     assert response.text == "hello"
 
 
-def test_wecom_app_callback_replies_text_and_image(tmp_path: Path, monkeypatch):
+def test_wecom_app_callback_replies_news_when_query_has_image(tmp_path: Path, monkeypatch):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     app.state.repo.save_notification_config(
         webhook_url="",
@@ -102,8 +144,10 @@ def test_wecom_app_callback_replies_text_and_image(tmp_path: Path, monkeypatch):
     assert response.status_code == 200
     assert response.text == "success"
     assert fake.texts[0] == ("luofuyao", "正在查询，请稍候…")
-    assert any("监控查询菜单" in content for _, content in fake.texts)
-    assert fake.images and fake.images[0][1].startswith(b"\x89PNG")
+    assert not fake.images
+    assert fake.news and fake.news[0][0] == "luofuyao"
+    assert fake.news[0][1]["title"] == "帮助菜单"
+    assert fake.news[0][1]["image_bytes"].startswith(b"\x89PNG")
 
 
 def test_wecom_app_menu_click_event_runs_mapped_command(tmp_path: Path, monkeypatch):
@@ -140,7 +184,7 @@ def test_wecom_app_menu_click_event_runs_mapped_command(tmp_path: Path, monkeypa
 
     assert response.status_code == 200
     assert fake.texts[0] == ("luofuyao", "正在查询，请稍候…")
-    assert any("监控查询菜单" in content for _, content in fake.texts)
+    assert fake.news and fake.news[0][1]["title"] == "帮助菜单"
 
 
 def test_wecom_app_today_duty_menu_click_sends_daily_duty_image(tmp_path: Path, monkeypatch):
@@ -176,8 +220,11 @@ def test_wecom_app_today_duty_menu_click_sends_daily_duty_image(tmp_path: Path, 
     )
 
     assert response.status_code == 200
-    assert any("今日在岗信息图片" in content for _, content in fake.texts)
-    assert fake.images and fake.images[0][1].startswith(b"\x89PNG")
+    assert not any("今日在岗信息图片" in content for _, content in fake.texts)
+    assert not fake.images
+    assert fake.news and fake.news[0][0] == "shangqiuhong"
+    assert fake.news[0][1]["title"] == "今日在岗查询"
+    assert fake.news[0][1]["image_bytes"].startswith(b"\x89PNG")
 
 
 def test_wecom_app_unbound_command_requires_binding(tmp_path: Path, monkeypatch):
@@ -298,6 +345,7 @@ def test_create_wecom_app_menu_endpoint_uses_limited_grouped_menu(tmp_path: Path
         "DR_MENU_1_0",
         "DR_MENU_1_1",
         "DR_MENU_1_2",
+        "DR_MENU_1_3",
     ]
 
 
@@ -345,7 +393,8 @@ def test_wecom_app_menu_can_be_saved_and_dynamic_key_maps_to_command(tmp_path: P
     )
 
     assert callback_response.status_code == 200
-    assert fake.images and fake.images[-1][1].startswith(b"\x89PNG")
+    assert not fake.images
+    assert fake.news and fake.news[-1][1]["image_bytes"].startswith(b"\x89PNG")
 
 
 def test_wecom_app_test_endpoint_sends_interaction_check_message(tmp_path: Path, monkeypatch):
@@ -393,6 +442,56 @@ def test_wecom_app_test_endpoint_requires_callback_fields(tmp_path: Path):
     assert "Token / EncodingAESKey" in response.json()["detail"]
 
 
+def test_wecom_app_notification_image_mode_uses_single_news_message():
+    class FakeNotifyClient:
+        is_wecom_app_notify = True
+
+        def __init__(self) -> None:
+            self.news: list[dict] = []
+
+        async def send_news(self, *, title: str, description: str, image_bytes: bytes, url: str, target_ids=None) -> None:
+            self.news.append(
+                {
+                    "title": title,
+                    "description": description,
+                    "image_bytes": image_bytes,
+                    "url": url,
+                    "target_ids": target_ids,
+                }
+            )
+
+        async def send_text(self, *args, **kwargs) -> None:
+            raise AssertionError("text should not be sent for wecom app image mode")
+
+        async def send_image(self, *args, **kwargs) -> None:
+            raise AssertionError("image should not be sent separately for wecom app image mode")
+
+    fake = FakeNotifyClient()
+
+    asyncio.run(
+        main_module._send_graphic_or_text_image(
+            fake,
+            title="图文提醒",
+            text="图文内容",
+            image_bytes=b"png-bytes",
+            mentions=[],
+            target_ids=["shangqiuhong"],
+            mode="image",
+        )
+    )
+
+    assert fake.news == [
+        {
+            "title": "图文提醒",
+            "description": "图文内容",
+            "image_bytes": b"png-bytes",
+            "url": fake.news[0]["url"],
+            "target_ids": ["shangqiuhong"],
+        }
+    ]
+    assert "/notification-detail/notification-detail-" in fake.news[0]["url"] or fake.news[0]["url"] == "https://work.weixin.qq.com"
+
+
 def test_wecom_app_message_binding_uses_enterprise_userid(tmp_path: Path, monkeypatch):
     repo = main_module.DutyRepository(tmp_path / "duty.db")
     repo.upsert_personnel_names(["罗富耀"])
@@ -416,6 +515,98 @@ def test_wecom_app_message_binding_uses_enterprise_userid(tmp_path: Path, monkey
 
     assert repo.list_personnel()[0]["wecom_userid"] == "luofuyao"
     assert any("绑定成功：罗富耀" in content for _, content in fake.texts)
+
+
+def test_wecom_app_tunnel_today_submit_requires_partner_then_confirms_and_submits(tmp_path: Path, monkeypatch):
+    repo = main_module.DutyRepository(tmp_path / "duty.db")
+    repo.upsert_personnel_names(["商邱宏", "罗富耀"])
+    repo.upsert_personnel_contacts([{"name": "商邱宏", "wecom_userid": "shangqiuhong"}])
+    _save_simple_tunnel_template(repo)
+    fake = FakeWeComAppClient()
+    monkeypatch.setattr(main_module, "_wecom_app_client_from_repo", lambda repo: fake)
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2026, 8, 16))
+    submitted = []
+
+    async def fake_submit(repo, request, result_upload_dir=None):
+        submitted.append(request)
+        return {"success": True, "result_image_url": ""}
+
+    monkeypatch.setattr(main_module, "_submit_tunnel_mechanical", fake_submit)
+    main_module.WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.clear()
+
+    message = type("M", (), {
+        "content": "录入今日机电",
+        "event_key": "",
+        "from_user": "shangqiuhong",
+        "msg_type": "text",
+    })()
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", message))
+
+    assert any("第一次使用“录入今日机电”前" in content for _, content in fake.texts)
+    assert not submitted
+
+    fake.texts.clear()
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "设置机电负责人罗富耀",
+        "event_key": "",
+        "from_user": "shangqiuhong",
+        "msg_type": "text",
+    })()))
+    assert any("已设置你的机电负责人/搭档：罗富耀" in content for _, content in fake.texts)
+
+    fake.texts.clear()
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", message))
+    assert any("请确认今日隧道机电录入信息" in content and "负责人：罗富耀" in content and "记录人：商邱宏" in content for _, content in fake.texts)
+    assert not submitted
+
+    fake.texts.clear()
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "1",
+        "event_key": "",
+        "from_user": "shangqiuhong",
+        "msg_type": "text",
+    })()))
+    assert submitted
+    assert submitted[0].checker == "罗富耀"
+    assert submitted[0].recorder == "商邱宏"
+    assert submitted[0].checkTime == date(2026, 8, 16)
+    assert any("隧道机电录入完成" in content for _, content in fake.texts)
+
+
+def test_wecom_app_tunnel_manual_entry_updates_pending_weather(tmp_path: Path, monkeypatch):
+    repo = main_module.DutyRepository(tmp_path / "duty.db")
+    repo.upsert_personnel_names(["商邱宏", "罗富耀"])
+    repo.upsert_personnel_contacts([{"name": "商邱宏", "wecom_userid": "shangqiuhong"}])
+    _save_simple_tunnel_template(repo)
+    fake = FakeWeComAppClient()
+    monkeypatch.setattr(main_module, "_wecom_app_client_from_repo", lambda repo: fake)
+    submitted = []
+
+    async def fake_submit(repo, request, result_upload_dir=None):
+        submitted.append(request)
+        return {"success": True, "result_image_url": ""}
+
+    monkeypatch.setattr(main_module, "_submit_tunnel_mechanical", fake_submit)
+    main_module.WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.clear()
+
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "隧道机电录入 日期2026-08-16 负责人罗富耀 记录人商邱宏 天气雨",
+        "event_key": "",
+        "from_user": "shangqiuhong",
+        "msg_type": "text",
+    })()))
+
+    assert any("天气：雨" in content for _, content in fake.texts)
+    assert not submitted
+
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "确认",
+        "event_key": "",
+        "from_user": "shangqiuhong",
+        "msg_type": "text",
+    })()))
+
+    assert submitted and submitted[0].weather == "雨"
 
 
 

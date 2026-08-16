@@ -40,6 +40,12 @@ REMINDER_CONTENT_RE = re.compile(
 
 
 def render_shift_reminder_image(event: ReminderEvent) -> bytes:
+    kind = str(event.kind or "")
+    if kind.startswith("rest"):
+        return _render_rest_reminder_image(event)
+    if kind.startswith("vacation"):
+        return _render_vacation_reminder_image(event)
+
     items = [_parse_content_line(line, event.person_name) for line in str(event.content or "").splitlines() if line.strip()]
     items = [item for item in items if item]
     if not items:
@@ -122,6 +128,270 @@ def _render_generic_shift_image(event: ReminderEvent) -> bytes:
     draw.text((box[0] + 24, box[1] + 22), "提醒内容", font=_font(20), fill=BLUE)
     _draw_plain_lines(draw, lines, box[0] + 24, box[1] + 62, font_body, INK, 34)
     return _png_bytes(image)
+
+
+def _render_rest_reminder_image(event: ReminderEvent) -> bytes:
+    person, status, range_text = _parse_rest_content(event)
+    theme = _rest_theme(status)
+    return _render_status_reminder_image(
+        event,
+        title="休息提醒",
+        header_color=theme["main"],
+        person=person,
+        status=status,
+        status_color=theme["main"],
+        status_bg=theme["soft"],
+        meta=[
+            ("休息状态", status),
+            _rest_range_meta(status, range_text),
+        ],
+        sections=[
+            ("提醒说明", _rest_action_tokens(status, range_text), INK),
+        ],
+    )
+
+
+def _render_vacation_reminder_image(event: ReminderEvent) -> bytes:
+    kind = str(event.kind or "")
+    if kind.startswith("vacation_end"):
+        title = "假期余额不足"
+        status = "今日下午到岗"
+        main = ORANGE
+        soft = "#fff7ed"
+        action = "假期余额不足，今天下午就该返回站点了"
+    else:
+        title = "假期余额提醒"
+        status = "今日下午休息"
+        main = GREEN
+        soft = "#dcfce7"
+        action = "恭喜你，今天下午可以开始休息了"
+    range_text = _range_label_from_event(event)
+    return _render_status_reminder_image(
+        event,
+        title=title,
+        header_color=main,
+        person=str(event.person_name or "").strip(),
+        status=status,
+        status_color=main,
+        status_bg=soft,
+        meta=[
+            ("休息状态", status),
+            _rest_range_meta(status, range_text),
+        ],
+        sections=[
+            ("提醒说明", _vacation_action_tokens(status, range_text), main),
+            ("文案", str(event.content or "").strip(), INK),
+        ],
+    )
+
+
+def _render_status_reminder_image(
+    event: ReminderEvent,
+    *,
+    title: str,
+    header_color: str,
+    person: str,
+    status: str,
+    status_color: str,
+    status_bg: str,
+    meta: list[tuple[str, str]],
+    sections: list[tuple[str, Any, str]],
+) -> bytes:
+    dummy = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+    font_body = _font(25)
+    section_layouts: list[tuple[str, list[Any], str, str]] = []
+    for label, text, color in sections:
+        if isinstance(text, list):
+            token_lines = _layout_tokens(dummy, text or [_token("-")], INNER_RIGHT - INNER_LEFT - 48, font_body)
+            section_layouts.append((label, token_lines, color, "tokens"))
+        else:
+            clean = str(text or "").strip() or "-"
+            section_layouts.append((label, _wrap_plain(dummy, clean, font_body, INNER_RIGHT - INNER_LEFT - 48), color, "plain"))
+    section_heights = []
+    for _, lines, _, mode in section_layouts:
+        if mode == "tokens":
+            section_heights.append(58 + _token_lines_height(dummy, lines, font_body, 12) + 20)
+        else:
+            section_heights.append(58 + len(lines) * 34 + 20)
+    content_bottom = (
+        166  # first content y after header
+        + 94  # person row
+        + 106  # meta row + gap
+        + sum(section_heights)
+        + 14 * max(0, len(section_heights) - 1)
+        + 52  # bottom padding
+    )
+    height = max(560, content_bottom)
+    image = Image.new("RGB", (WIDTH, height), BG)
+    draw = ImageDraw.Draw(image)
+    _rounded(draw, (CARD_MARGIN, 24, WIDTH - CARD_MARGIN, height - 24), 30, "#ffffff", "#cbd5e1", 2)
+    header_box = (48, 48, 852, 138)
+    _draw_header(draw, header_box, header_color, "状态提醒", title)
+    _draw_header_right_text(draw, header_box, _event_date_week_label(event))
+
+    y = 166
+    y = _draw_person_only_row(draw, INNER_LEFT, y, INNER_RIGHT, person)
+
+    meta_items = [(label, value) for label, value in meta if str(label or value).strip()]
+    meta_count = max(1, min(3, len(meta_items)))
+    if meta_count == 2:
+        meta_widths = [188, INNER_RIGHT - INNER_LEFT - 12 - 188]
+    else:
+        meta_widths = [(INNER_RIGHT - INNER_LEFT - 12 * (meta_count - 1)) // meta_count] * meta_count
+    x = INNER_LEFT
+    for index, (label, value) in enumerate(meta_items[:meta_count]):
+        meta_width = meta_widths[index]
+        box = (x, y, x + meta_width, y + 84)
+        is_status = label == "休息状态"
+        _rounded(draw, box, 18, status_bg if is_status else "#f8fafc", status_color if is_status else LINE, 2 if is_status else 1)
+        _draw_vcenter_text(draw, box[0] + 18, box[1] + 28, label, _font(17), MUTED)
+        _draw_vcenter_text(draw, box[0] + 18, box[1] + 58, value, _font(27 if is_status else 24), status_color if is_status else INK)
+        x += meta_width + 12
+    y += 106
+
+    for index, (label, lines, color, mode) in enumerate(section_layouts):
+        box_h = section_heights[index]
+        box = (INNER_LEFT, y, INNER_RIGHT, y + box_h)
+        _rounded(draw, box, 20, "#f8fafc", LINE, 1)
+        draw.text((box[0] + 24, box[1] + 20), label, font=_font(20), fill=BLUE)
+        if mode == "tokens":
+            _draw_token_lines(draw, lines, box[0] + 24, box[1] + 58, font_body, 12)
+        else:
+            for line_index, line in enumerate(lines):
+                draw.text((box[0] + 24, box[1] + 58 + line_index * 34), line, font=font_body, fill=color)
+        y += box_h + 14
+    return _png_bytes(image)
+
+
+def _parse_rest_content(event: ReminderEvent) -> tuple[str, str, str]:
+    content = str(event.content or "").strip()
+    person = str(event.person_name or "").strip()
+    if person and content.startswith(person):
+        status_text = content[len(person):].strip()
+    else:
+        parts = content.split(maxsplit=1)
+        if not person and parts:
+            person = parts[0]
+        status_text = parts[1].strip() if len(parts) > 1 else content
+    range_text = _range_label_from_event(event)
+    if not range_text:
+        date_match = re.search(r"(\d{4}-\d{2}-\d{2})", status_text)
+        range_text = _rest_range_label(date_match.group(1), date_match.group(1)) if date_match else ""
+    if "今日下午休息" in status_text:
+        status = "今日下午休息"
+    elif "今日下午到岗" in status_text:
+        status = "今日下午到岗"
+    elif "正在休息" in status_text:
+        status = "正在休息中"
+    else:
+        status = status_text or "休息提醒"
+    return person, status, range_text
+
+
+def _rest_action_tokens(status: str, range_text: str) -> list[dict[str, Any]]:
+    rest_text = f"{range_text}休息" if range_text else ""
+    if status == "今日下午休息":
+        tokens = [_token("今日再坚持一下，"), _token("下午", GREEN, "#dcfce7"), _token("就进入"), _token("休息状态", GREEN, "#dcfce7")]
+        if rest_text:
+            tokens.extend([_token("，即将从 "), _token(rest_text, ORANGE, "#fff7ed")])
+        tokens.append(_token("。"))
+        return tokens
+    if status == "今日下午到岗":
+        tokens = [_token("假期余额不足", ORANGE, "#fff7ed"), _token("，今天下午需要"), _token("返回站点", RED, "#fee2e2")]
+        if rest_text:
+            tokens.extend([_token("，本次休息为 "), _token(rest_text, ORANGE, "#fff7ed")])
+        tokens.append(_token("。"))
+        return tokens
+    if status == "正在休息中":
+        tokens = [_token("继续保持"), _token("休息状态", BLUE, "#dbeafe")]
+        if rest_text:
+            tokens.extend([_token("，本次休息为 "), _token(rest_text, ORANGE, "#fff7ed")])
+        tokens.append(_token("。"))
+        return tokens
+    return [_token(status)]
+
+
+def _vacation_action_tokens(status: str, range_text: str) -> list[dict[str, Any]]:
+    rest_text = f"{range_text}休息" if range_text else ""
+    if status == "今日下午休息":
+        tokens = [_token("恭喜你，"), _token("今天下午", GREEN, "#dcfce7"), _token("可以开始"), _token("休息", GREEN, "#dcfce7")]
+        if rest_text:
+            tokens.extend([_token("，即将从 "), _token(rest_text, ORANGE, "#fff7ed")])
+        tokens.append(_token("。"))
+        return tokens
+    tokens = [_token("假期余额不足", ORANGE, "#fff7ed"), _token("，今天下午需要"), _token("返回站点", RED, "#fee2e2")]
+    if rest_text:
+        tokens.extend([_token("，本次休息为 "), _token(rest_text, ORANGE, "#fff7ed")])
+    tokens.append(_token("。"))
+    return tokens
+
+
+def _rest_range_meta(status: str, range_text: str) -> tuple[str, str]:
+    value = f"{range_text}休息" if range_text else "-"
+    if status == "今日下午休息":
+        return "即将休息", value
+    return "本次休息", value
+
+
+def _event_date_week_label(event: ReminderEvent) -> str:
+    try:
+        value = event.send_at.date()
+    except Exception:
+        return "-"
+    weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][value.weekday()]
+    return f"{value.month}月{value.day}日 {weekday}"
+
+
+def _draw_header_right_text(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], text: str) -> None:
+    value = str(text or "").strip()
+    if not value or value == "-":
+        return
+    font = _font(22)
+    text_w, text_h, text_box = _text_size(draw, value, font)
+    x = box[2] - 28 - text_w - text_box[0]
+    y = box[1] + (box[3] - box[1] - text_h) / 2 - text_box[1]
+    draw.text((x, y), value, font=font, fill="#eff6ff")
+
+
+def _range_label_from_event(event: ReminderEvent) -> str:
+    key = str(getattr(event, "key_suffix", "") or "").strip()
+    match = re.search(r"rest_range:(\d{4}-\d{2}-\d{2}):(\d{4}-\d{2}-\d{2})", key)
+    if not match:
+        return ""
+    return _rest_range_label(match.group(1), match.group(2))
+
+
+def _rest_range_label(start_text: str | None, end_text: str | None) -> str:
+    start = _month_day_week_label(start_text)
+    end = _month_day_week_label(end_text)
+    if not start and not end:
+        return ""
+    if start and end and start != end:
+        return f"{start} 至 {end}"
+    return start or end
+
+
+def _month_day_week_label(value: str | None) -> str:
+    text = str(value or "").strip()
+    match = re.match(r"\d{4}-(\d{2})-(\d{2})", text)
+    if not match:
+        return ""
+    try:
+        weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][datetime.fromisoformat(text).weekday()]
+    except ValueError:
+        weekday = ""
+    suffix = f"（{weekday}）" if weekday else ""
+    return f"{int(match.group(1))}月{int(match.group(2))}日{suffix}"
+
+
+def _rest_theme(status: str) -> dict[str, str]:
+    if status == "今日下午休息":
+        return {"main": GREEN, "soft": "#dcfce7"}
+    if status == "今日下午到岗":
+        return {"main": ORANGE, "soft": "#fff7ed"}
+    if status == "正在休息中":
+        return {"main": BLUE, "soft": "#dbeafe"}
+    return {"main": PURPLE, "soft": "#ede9fe"}
 
 
 def _header_title(event: ReminderEvent) -> str:

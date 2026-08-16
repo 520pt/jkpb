@@ -305,6 +305,7 @@ class DutyRepository:
                     wechat_group_member_id TEXT NOT NULL DEFAULT '',
                     wechat_group_runtime_sender_id TEXT NOT NULL DEFAULT '',
                     wechat_group_member_name TEXT NOT NULL DEFAULT '',
+                    tunnel_mechanical_partner TEXT NOT NULL DEFAULT '',
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -514,6 +515,8 @@ class DutyRepository:
                 conn.execute("ALTER TABLE personnel_names ADD COLUMN wechat_group_runtime_sender_id TEXT NOT NULL DEFAULT ''")
             if "wechat_group_member_name" not in personnel_columns:
                 conn.execute("ALTER TABLE personnel_names ADD COLUMN wechat_group_member_name TEXT NOT NULL DEFAULT ''")
+            if "tunnel_mechanical_partner" not in personnel_columns:
+                conn.execute("ALTER TABLE personnel_names ADD COLUMN tunnel_mechanical_partner TEXT NOT NULL DEFAULT ''")
             custom_columns = {row["name"] for row in conn.execute("PRAGMA table_info(custom_reminders)").fetchall()}
             if "notification_room_id" not in custom_columns:
                 conn.execute("ALTER TABLE custom_reminders ADD COLUMN notification_room_id TEXT NOT NULL DEFAULT ''")
@@ -789,6 +792,7 @@ class DutyRepository:
                 "wechat_group_member_id": str(contact.get("wechat_group_member_id") or "").strip(),
                 "wechat_group_runtime_sender_id": str(contact.get("wechat_group_runtime_sender_id") or "").strip(),
                 "wechat_group_member_name": str(contact.get("wechat_group_member_name") or "").strip(),
+                "tunnel_mechanical_partner": str(contact.get("tunnel_mechanical_partner") or "").strip(),
             }
             existing = clean_contacts.setdefault(
                 name,
@@ -800,6 +804,7 @@ class DutyRepository:
                     "wechat_group_member_id": "",
                     "wechat_group_runtime_sender_id": "",
                     "wechat_group_member_name": "",
+                    "tunnel_mechanical_partner": "",
                 },
             )
             for key, value in values.items():
@@ -811,9 +816,10 @@ class DutyRepository:
                     """
                     INSERT INTO personnel_names (
                         name, mention_mobile, wecom_userid, wechat_group_room_id, wechat_group_room_name,
-                        wechat_group_member_id, wechat_group_runtime_sender_id, wechat_group_member_name
+                        wechat_group_member_id, wechat_group_runtime_sender_id, wechat_group_member_name,
+                        tunnel_mechanical_partner
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(name) DO UPDATE SET
                         mention_mobile = CASE
                             WHEN excluded.mention_mobile != '' THEN excluded.mention_mobile
@@ -843,6 +849,10 @@ class DutyRepository:
                             WHEN excluded.wechat_group_member_name != '' THEN excluded.wechat_group_member_name
                             ELSE personnel_names.wechat_group_member_name
                         END,
+                        tunnel_mechanical_partner = CASE
+                            WHEN excluded.tunnel_mechanical_partner != '' THEN excluded.tunnel_mechanical_partner
+                            ELSE personnel_names.tunnel_mechanical_partner
+                        END,
                         updated_at = CURRENT_TIMESTAMP
                     """,
                     (
@@ -854,6 +864,7 @@ class DutyRepository:
                         values["wechat_group_member_id"],
                         values["wechat_group_runtime_sender_id"],
                         values["wechat_group_member_name"],
+                        values["tunnel_mechanical_partner"],
                     ),
                 )
 
@@ -884,9 +895,10 @@ class DutyRepository:
                     """
                     INSERT INTO personnel_names (
                         name, mention_mobile, wecom_userid, wechat_group_room_id, wechat_group_room_name,
-                        wechat_group_member_id, wechat_group_runtime_sender_id, wechat_group_member_name
+                        wechat_group_member_id, wechat_group_runtime_sender_id, wechat_group_member_name,
+                        tunnel_mechanical_partner
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(name) DO UPDATE SET
                         mention_mobile = excluded.mention_mobile,
                         wecom_userid = excluded.wecom_userid,
@@ -906,6 +918,7 @@ class DutyRepository:
                         str(contact.get("wechat_group_member_id") or "").strip(),
                         str(contact.get("wechat_group_runtime_sender_id") or "").strip(),
                         str(contact.get("wechat_group_member_name") or "").strip(),
+                        str(contact.get("tunnel_mechanical_partner") or "").strip(),
                     ),
                 )
 
@@ -968,7 +981,8 @@ class DutyRepository:
                 """
                 SELECT
                     name, mention_mobile, wecom_userid, wechat_group_room_id, wechat_group_room_name,
-                    wechat_group_member_id, wechat_group_runtime_sender_id, wechat_group_member_name
+                    wechat_group_member_id, wechat_group_runtime_sender_id, wechat_group_member_name,
+                    tunnel_mechanical_partner
                 FROM personnel_names
                 ORDER BY name
                 """
@@ -987,8 +1001,26 @@ class DutyRepository:
             }
             if any(str(value or "").strip() for value in wechat_fields.values()):
                 item.update(wechat_fields)
+            if str(row["tunnel_mechanical_partner"] or "").strip():
+                item["tunnel_mechanical_partner"] = row["tunnel_mechanical_partner"]
             people.append(item)
         return people
+
+    def set_tunnel_mechanical_partner(self, name: str, partner_name: str) -> None:
+        clean_name = str(name or "").strip()
+        clean_partner = str(partner_name or "").strip()
+        if not clean_name:
+            return
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO personnel_names (name, tunnel_mechanical_partner) VALUES (?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    tunnel_mechanical_partner = excluded.tunnel_mechanical_partner,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (clean_name, clean_partner),
+            )
 
     def save_monitored_person(
         self,
