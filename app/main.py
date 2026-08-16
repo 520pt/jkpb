@@ -176,6 +176,8 @@ DEFAULT_WECOM_APP_MENU_GROUPS = [
 # ponytail: in-memory pending confirmation; restart only requires the user to click the menu again.
 WECOM_APP_PENDING_TUNNEL_SUBMISSIONS: dict[str, dict[str, Any]] = {}
 WECOM_APP_PENDING_TUNNEL_TTL_SECONDS = 30 * 60
+WECHAT_QUERY_PENDING_MENUS: dict[str, float] = {}
+WECHAT_QUERY_MENU_TTL_SECONDS = 5 * 60
 
 
 class RosterConfirmRequest(BaseModel):
@@ -1428,19 +1430,21 @@ def create_app(
             raise HTTPException(status_code=403, detail="企业微信自建应用消息签名不正确")
         message = parse_wecom_app_message(crypto.decrypt(encrypted))
         command_text = _wecom_app_message_command_text(message, repo)
+        callback_query = _wecom_app_query_from_message(message, command_text)
+        callback_pending = WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.get(_wecom_app_pending_key(callback_query))
         is_pending_confirm = (
-            str(message.from_user or "").strip() in WECOM_APP_PENDING_TUNNEL_SUBMISSIONS
+            _wecom_app_pending_allows_confirm(callback_pending)
             and _is_wecom_app_pending_confirm_text(command_text)
         )
         is_pending_account_help = (
-            str(message.from_user or "").strip() in WECOM_APP_PENDING_TUNNEL_SUBMISSIONS
+            _wecom_app_pending_allows_account_help(callback_pending)
             and _is_wecom_app_pending_account_help_text(command_text)
         )
         if message.msg_type in {"text", "voice"} and (
             is_pending_confirm
             or is_pending_account_help
             or _is_tunnel_mechanical_partner_command(command_text)
-            or _looks_like_duty_wechat_command(_normalize_wechat_query_text(command_text), repo)
+            or _looks_like_duty_wechat_command(_normalize_wechat_query_text(command_text), repo, query=callback_query)
         ):
             background_tasks.add_task(_handle_wecom_app_message, repo, uploads, message)
         elif message.msg_type == "event" and str(message.event or "").strip().lower() == "click" and command_text:
@@ -1633,7 +1637,7 @@ def create_app(
             sender_name=request.sender_name,
             target_date=request.target_date,
         )
-        if not _looks_like_duty_wechat_command(_normalize_wechat_query_text(query.text), repo):
+        if not _looks_like_duty_wechat_command(_normalize_wechat_query_text(query.text), repo, query=query):
             return _ignored_wechat_message_response()
         result = await _build_wechat_query_response_with_log(repo, query, uploads=uploads)
         image_path = _wechat_query_result_image_path(result, uploads)
@@ -1741,7 +1745,7 @@ def create_app(
     @app.post("/api/wechat-query")
     async def wechat_query(http_request: Request, query: WechatQueryRequest):
         _require_wechat_query_auth(http_request)
-        if not _looks_like_duty_wechat_command(_normalize_wechat_query_text(query.text), repo):
+        if not _looks_like_duty_wechat_command(_normalize_wechat_query_text(query.text), repo, query=query):
             return _ignored_wechat_message_response()
         return await _build_wechat_query_response_with_log(repo, query, uploads=uploads)
 
@@ -3250,13 +3254,7 @@ async def _build_wechat_query_response(
     pending_response = await _build_wecom_app_pending_tunnel_response(repo, query, raw_text, uploads=uploads)
     if pending_response is not None:
         return pending_response
-    if _is_wecom_app_query(query) and _is_wecom_app_pending_account_help_text(raw_text) and _wecom_app_pending_key(query) in WECOM_APP_PENDING_TUNNEL_SUBMISSIONS:
-        return {
-            "success": True,
-            "query_type": "tunnel_mechanical_account_help",
-            "reply": _wecom_app_tunnel_account_help_reply(),
-        }
-    text = _wechat_query_menu_selection_command(raw_text)
+    text = _consume_wechat_query_menu_selection(query, raw_text)
     if (
         _is_wecom_app_query(query)
         and not _is_wechat_self_bind_command(text)
@@ -3287,6 +3285,7 @@ async def _build_wechat_query_response(
     if _is_wechat_rest_query(text):
         return _build_wechat_rest_query_response(repo, query, text)
     if _is_wechat_query_help(text):
+        _remember_wechat_query_menu_prompt(query)
         return _wechat_query_help_response()
     person = _person_for_wechat_query(repo, query)
     requested_person_name = _wechat_query_requested_person_name(repo, text)
@@ -3351,18 +3350,9 @@ def _handle_wechat_bridge_message(repo: DutyRepository, uploads: Path, message: 
     text = str(message.get("text") or "").strip()
     if not text:
         return
-    normalized = _normalize_wechat_query_text(text)
-    if not _looks_like_duty_wechat_command(normalized, repo):
-        return
-    LOGGER.warning(
-        "内置微信桥收到功能命令：room=%s sender=%s text=%s",
-        message.get("stable_room_id") or message.get("room_id") or "",
-        message.get("sender_name") or message.get("sender_id") or "",
-        text,
-    )
-    manager = get_wechat_bridge_manager()
     query = WechatQueryRequest(
         text=text,
+        channel="wechat_bridge",
         room_id=str(message.get("room_id") or ""),
         stable_room_id=str(message.get("stable_room_id") or ""),
         room_name=str(message.get("room_name") or ""),
@@ -3371,6 +3361,16 @@ def _handle_wechat_bridge_message(repo: DutyRepository, uploads: Path, message: 
         stable_member_id=str(message.get("stable_member_id") or message.get("sender_id") or ""),
         sender_name=str(message.get("sender_name") or ""),
     )
+    normalized = _normalize_wechat_query_text(text)
+    if not _looks_like_duty_wechat_command(normalized, repo, query=query):
+        return
+    LOGGER.warning(
+        "内置微信桥收到功能命令：room=%s sender=%s text=%s",
+        message.get("stable_room_id") or message.get("room_id") or "",
+        message.get("sender_name") or message.get("sender_id") or "",
+        text,
+    )
+    manager = get_wechat_bridge_manager()
     try:
         result = asyncio.run(_build_wechat_query_response_with_log(repo, query, uploads=uploads))
     except HTTPException as exc:
@@ -3497,20 +3497,20 @@ async def _handle_wecom_app_message(repo: DutyRepository, uploads: Path, message
     userid = str(message.from_user or "").strip()
     if not text or not userid:
         return
-    query = WechatQueryRequest(
-        text=text,
-        channel="wecom_app",
-        room_id=f"wecom_app_user:{userid}",
-        stable_room_id=f"wecom_app_user:{userid}",
-        room_name="企业微信自建应用",
-        sender_id=f"wecom_user:{userid}",
-        runtime_sender_id=f"wecom_user:{userid}",
-        stable_member_id=f"wecom_user:{userid}",
-        sender_name=userid,
-    )
+    query = _wecom_app_query_from_message(message, text)
     client = _wecom_app_client_from_repo(repo)
-    if _is_wecom_app_pending_account_help_text(text) and _wecom_app_pending_key(query) in WECOM_APP_PENDING_TUNNEL_SUBMISSIONS:
+    pending = WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.get(_wecom_app_pending_key(query))
+    if _is_wecom_app_pending_account_help_text(text) and _wecom_app_pending_allows_account_help(pending):
+        pending["prompt"] = "account_help_retry"
+        pending["expires_at"] = time.time() + WECOM_APP_PENDING_TUNNEL_TTL_SECONDS
         await client.send_text(userid, _wecom_app_tunnel_account_help_reply())
+        return
+    normalized = _normalize_wechat_query_text(text)
+    if not (
+        (_is_wecom_app_pending_confirm_text(text) and _wecom_app_pending_allows_confirm(pending))
+        or _is_tunnel_mechanical_partner_command(text)
+        or _looks_like_duty_wechat_command(normalized, repo, query=query)
+    ):
         return
     try:
         await client.send_text(userid, "正在查询，请稍候…")
@@ -3552,6 +3552,21 @@ def _wecom_app_message_command_text(message: Any, repo: DutyRepository) -> str:
     return str(getattr(message, "content", "") or "").strip()
 
 
+def _wecom_app_query_from_message(message: Any, text: str) -> WechatQueryRequest:
+    userid = str(getattr(message, "from_user", "") or "").strip()
+    return WechatQueryRequest(
+        text=text,
+        channel="wecom_app",
+        room_id=f"wecom_app_user:{userid}",
+        stable_room_id=f"wecom_app_user:{userid}",
+        room_name="企业微信自建应用",
+        sender_id=f"wecom_user:{userid}",
+        runtime_sender_id=f"wecom_user:{userid}",
+        stable_member_id=f"wecom_user:{userid}",
+        sender_name=userid,
+    )
+
+
 def _wecom_app_query_result_should_send_news(result: dict[str, Any]) -> bool:
     query_type = str(result.get("query_type") or "").strip()
     return query_type in {
@@ -3582,9 +3597,6 @@ def _handle_wecom_aibot_message(
     if bool(_notification_config_with_env_defaults(repo.get_notification_config()).get("wecom_app_enabled")):
         return
     text = str(message.get("text") or "").strip()
-    normalized = _normalize_wechat_query_text(text)
-    if not text or not _looks_like_duty_wechat_command(normalized, repo):
-        return
     userid = str(message.get("userid") or "").strip()
     chatid = str(message.get("chatid") or "").strip()
     chattype = str(message.get("chattype") or "").strip()
@@ -3601,6 +3613,9 @@ def _handle_wecom_aibot_message(
         stable_member_id=sender_id,
         sender_name=userid,
     )
+    normalized = _normalize_wechat_query_text(text)
+    if not text or not _looks_like_duty_wechat_command(normalized, repo, query=query):
+        return
     try:
         manager.reply_progress(message)
     except Exception:
@@ -3625,8 +3640,17 @@ def _handle_wecom_aibot_message(
         LOGGER.exception("企业微信智能机器人发送查询结果失败")
 
 
-def _looks_like_duty_wechat_command(text: str, repo: DutyRepository | None = None) -> bool:
-    value = _wechat_query_menu_selection_command(str(text or "").strip())
+def _looks_like_duty_wechat_command(
+    text: str,
+    repo: DutyRepository | None = None,
+    query: WechatQueryRequest | None = None,
+) -> bool:
+    raw_value = str(text or "").strip()
+    value = (
+        _wechat_query_menu_selection_command(raw_value)
+        if query is not None and _is_wechat_query_pending_menu_selection(query, raw_value)
+        else raw_value
+    )
     if not value:
         return False
     if repo is not None and _is_wechat_interaction_trigger(repo, value):
@@ -3878,6 +3902,18 @@ def _wecom_app_pending_key(query: WechatQueryRequest) -> str:
     return userid.removeprefix("wecom_user:")
 
 
+def _wecom_app_pending_prompt(pending: dict[str, Any] | None) -> str:
+    return str((pending or {}).get("prompt") or "confirm").strip() or "confirm"
+
+
+def _wecom_app_pending_allows_confirm(pending: dict[str, Any] | None) -> bool:
+    return _wecom_app_pending_prompt(pending) in {"confirm", "retry_options", "account_help_retry"}
+
+
+def _wecom_app_pending_allows_account_help(pending: dict[str, Any] | None) -> bool:
+    return _wecom_app_pending_prompt(pending) == "retry_options"
+
+
 def _is_wecom_app_pending_confirm_text(text: str) -> bool:
     return _normalize_wechat_query_text(text) in {"确认", "1", "重试", "1.重试", "1重试", "重新提交"}
 
@@ -3959,6 +3995,7 @@ def _remember_wecom_app_tunnel_submission(query: WechatQueryRequest, request: Tu
     if key:
         WECOM_APP_PENDING_TUNNEL_SUBMISSIONS[key] = {
             "expires_at": time.time() + WECOM_APP_PENDING_TUNNEL_TTL_SECONDS,
+            "prompt": "confirm",
             "payload": request.model_dump(mode="json"),
         }
     selected_count = len([row for row in request.rows if row.enabled])
@@ -4075,12 +4112,18 @@ async def _build_wecom_app_pending_tunnel_response(
             return {"success": False, "query_type": "tunnel_mechanical_confirm", "reply": "没有待确认的机电录入，请先点击“录入今日机电”。"}
         return None
     if _is_wecom_app_pending_account_help_text(text):
+        if not _wecom_app_pending_allows_account_help(pending):
+            return None
+        pending["prompt"] = "account_help_retry"
+        pending["expires_at"] = time.time() + WECOM_APP_PENDING_TUNNEL_TTL_SECONDS
         return {
             "success": True,
             "query_type": "tunnel_mechanical_account_help",
             "reply": _wecom_app_tunnel_account_help_reply(),
         }
     if not _is_wecom_app_pending_confirm_text(text):
+        return None
+    if not _wecom_app_pending_allows_confirm(pending):
         return None
     if float(pending.get("expires_at") or 0) < time.time():
         WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.pop(key, None)
@@ -4091,6 +4134,7 @@ async def _build_wecom_app_pending_tunnel_response(
         WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.pop(key, None)
     else:
         pending["expires_at"] = time.time() + WECOM_APP_PENDING_TUNNEL_TTL_SECONDS
+        pending["prompt"] = "retry_options"
         reply = str(result.get("reply") or "").strip()
         if reply:
             result["reply"] = (
@@ -4803,6 +4847,51 @@ def _wechat_query_menu_selection_command(text: str) -> str:
         "10": "隧道机电",
         "11": "查询休息",
     }.get(text, text)
+
+
+def _wechat_query_context_key(query: WechatQueryRequest) -> str:
+    channel = str(query.channel or "").strip() or "wechat"
+    room = str(query.stable_room_id or query.room_id or "").strip()
+    sender = str(
+        query.runtime_sender_id
+        or query.sender_id
+        or query.stable_member_id
+        or query.sender_name
+        or ""
+    ).strip()
+    return "|".join([channel, room, sender])
+
+
+def _remember_wechat_query_menu_prompt(query: WechatQueryRequest) -> None:
+    key = _wechat_query_context_key(query)
+    if key.strip("|"):
+        WECHAT_QUERY_PENDING_MENUS[key] = time.time() + WECHAT_QUERY_MENU_TTL_SECONDS
+
+
+def _consume_wechat_query_menu_selection(query: WechatQueryRequest, text: str) -> str:
+    value = str(text or "").strip()
+    mapped = _wechat_query_menu_selection_command(value)
+    if mapped == value:
+        return value
+    key = _wechat_query_context_key(query)
+    expires_at = float(WECHAT_QUERY_PENDING_MENUS.get(key) or 0)
+    if expires_at < time.time():
+        WECHAT_QUERY_PENDING_MENUS.pop(key, None)
+        return value
+    WECHAT_QUERY_PENDING_MENUS.pop(key, None)
+    return mapped
+
+
+def _is_wechat_query_pending_menu_selection(query: WechatQueryRequest, text: str) -> bool:
+    value = str(text or "").strip()
+    if _wechat_query_menu_selection_command(value) == value:
+        return False
+    key = _wechat_query_context_key(query)
+    expires_at = float(WECHAT_QUERY_PENDING_MENUS.get(key) or 0)
+    if expires_at < time.time():
+        WECHAT_QUERY_PENDING_MENUS.pop(key, None)
+        return False
+    return True
 
 
 def _is_wechat_binding_query(text: str) -> bool:

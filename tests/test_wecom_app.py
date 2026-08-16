@@ -640,6 +640,15 @@ def test_wecom_app_tunnel_today_submit_keeps_pending_after_platform_failure(tmp_
 
     fake.texts.clear()
     asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "2",
+        "event_key": "",
+        "from_user": "shangqiuhong",
+        "msg_type": "text",
+    })()))
+    assert fake.texts == []
+
+    fake.texts.clear()
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
         "content": "1",
         "event_key": "",
         "from_user": "shangqiuhong",
@@ -665,6 +674,24 @@ def test_wecom_app_tunnel_today_submit_keeps_pending_after_platform_failure(tmp_
 
     assert pending_key in main_module.WECOM_APP_PENDING_TUNNEL_SUBMISSIONS
     assert any("配置中心 → 隧道机电" in content and "登录测试" in content for _, content in fake.texts)
+
+    fake.texts.clear()
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "2",
+        "event_key": "",
+        "from_user": "shangqiuhong",
+        "msg_type": "text",
+    })()))
+    assert fake.texts == []
+
+    fake.texts.clear()
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "1",
+        "event_key": "",
+        "from_user": "shangqiuhong",
+        "msg_type": "text",
+    })()))
+    assert any("用户不存在/密码错误" in content and "1. 重试" in content for _, content in fake.texts)
 
     fake.texts.clear()
     asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", menu_message))

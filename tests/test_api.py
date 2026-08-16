@@ -3236,10 +3236,26 @@ def test_wechat_query_numbered_menu_selection_runs_command(tmp_path, monkeypatch
 
     monkeypatch.setattr(main_module, "_query_tunnel_mechanical_result_image", fake_query)
 
+    direct_response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "8", "runtime_sender_id": "@number-menu-member"},
+    )
+    assert direct_response.status_code == 200
+    assert direct_response.json()["query_type"] == "ignored"
+
+    menu_response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "查询", "runtime_sender_id": "@number-menu-member"},
+    )
+    assert menu_response.status_code == 200
+    assert menu_response.json()["query_type"] == "help"
+
     response = client.post(
         "/api/wechat-query",
         headers={"X-Duty-Query-Token": "unit-token"},
-        json={"text": "8"},
+        json={"text": "8", "runtime_sender_id": "@number-menu-member"},
     )
 
     assert response.status_code == 200
@@ -3247,6 +3263,14 @@ def test_wechat_query_numbered_menu_selection_runs_command(tmp_path, monkeypatch
     assert body["success"] is True
     assert body["query_type"] == "tunnel_mechanical_result"
     assert body["checkTime"] == "2026-07-23"
+
+    repeated_response = client.post(
+        "/api/wechat-query",
+        headers={"X-Duty-Query-Token": "unit-token"},
+        json={"text": "8", "runtime_sender_id": "@number-menu-member"},
+    )
+    assert repeated_response.status_code == 200
+    assert repeated_response.json()["query_type"] == "ignored"
 
 
 def test_wechat_query_tunnel_mechanical_returns_fill_template(tmp_path, monkeypatch):
@@ -3635,7 +3659,6 @@ def test_wechat_bridge_group_command_requires_at_mention(tmp_path, monkeypatch):
 
     assert calls == [
         "@闷葫芦 查询今日机电",
-        "@闷葫芦 8",
         "@闷葫芦 绑定张三",
         "查询今日机电@闷葫芦",
         "查询@闷葫芦",
