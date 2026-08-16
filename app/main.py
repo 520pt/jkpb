@@ -80,6 +80,7 @@ ALLOWED_UPLOAD_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 ALLOWED_UPLOAD_TYPES = {"image/jpeg", "image/png", "image/webp", "image/bmp"}
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_MB", "10")) * 1024 * 1024
 UPLOAD_KEEP_DAYS = int(os.getenv("UPLOAD_KEEP_DAYS", "90"))
+GENERATED_UPLOAD_KEEP_DAYS = int(os.getenv("GENERATED_UPLOAD_KEEP_DAYS", "1"))
 TUNNEL_MECHANICAL_KEEPALIVE_ENABLED = os.getenv("TUNNEL_MECHANICAL_KEEPALIVE_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
 TUNNEL_MECHANICAL_KEEPALIVE_INTERVAL_MINUTES = max(5, int(os.getenv("TUNNEL_MECHANICAL_KEEPALIVE_INTERVAL_MINUTES", "30") or 30))
 TUNNEL_MECHANICAL_KEEPALIVE_REFRESH_BEFORE_MINUTES = max(5, int(os.getenv("TUNNEL_MECHANICAL_KEEPALIVE_REFRESH_BEFORE_MINUTES", "30") or 30))
@@ -1906,12 +1907,31 @@ def _save_roster_upload(file: UploadFile, uploads: Path) -> Path:
 
 
 def _cleanup_old_uploads(uploads: Path) -> None:
-    if UPLOAD_KEEP_DAYS <= 0:
-        return
-    cutoff = datetime.now(TZ).timestamp() - UPLOAD_KEEP_DAYS * 86400
+    now_ts = datetime.now(TZ).timestamp()
     for path in uploads.iterdir():
-        if path.is_file() and path.stat().st_mtime < cutoff:
+        if not path.is_file():
+            continue
+        keep_days = GENERATED_UPLOAD_KEEP_DAYS if _is_generated_upload(path.name) else UPLOAD_KEEP_DAYS
+        if keep_days <= 0:
+            continue
+        try:
+            expired = path.stat().st_mtime < now_ts - keep_days * 86400
+        except FileNotFoundError:
+            continue
+        if expired:
             path.unlink(missing_ok=True)
+
+
+def _is_generated_upload(filename: str) -> bool:
+    return filename.startswith(
+        (
+            "wechat-query-",
+            "daily-duty-query-",
+            "patrol-record-",
+            "tunnel-mechanical-result-",
+            "notification-detail-",
+        )
+    )
 
 
 def _cleanup_uploads_job(uploads: Path) -> None:

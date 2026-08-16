@@ -27,6 +27,9 @@ services:
       # 公网访问地址；企业微信图文卡片点击详情需要这个地址。
       DUTY_REMINDER_PUBLIC_URL: "${DUTY_REMINDER_PUBLIC_URL:-https://jk.79c.cc}"
 
+      # 生成的查询图片/图文详情页默认只保留 1 天，第二天自动清理。
+      GENERATED_UPLOAD_KEEP_DAYS: "${GENERATED_UPLOAD_KEEP_DAYS:-1}"
+
       # 可选：只给智慧养护/隧道机电接口使用的代理出口。
       # 留空不会启用；不会影响企业微信、个人微信群、GitHub 或其他外联。
       DUTY_REMINDER_TUNNEL_PROXY: "${DUTY_REMINDER_TUNNEL_PROXY:-}"

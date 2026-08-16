@@ -1854,6 +1854,30 @@ def test_cleanup_old_uploads_removes_expired_files(tmp_path, monkeypatch):
     assert fresh.exists()
 
 
+def test_cleanup_old_uploads_removes_generated_files_after_one_day_only(tmp_path, monkeypatch):
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    old_generated = upload_dir / "daily-duty-query-old.png"
+    old_detail = upload_dir / "notification-detail-old.html"
+    old_original = upload_dir / "uploaded-roster.png"
+    fresh_generated = upload_dir / "wechat-query-fresh.png"
+    for path in (old_generated, old_detail, old_original, fresh_generated):
+        path.write_bytes(b"x")
+    old_timestamp = (datetime.now(main_module.TZ) - timedelta(days=2)).timestamp()
+    os.utime(old_generated, (old_timestamp, old_timestamp))
+    os.utime(old_detail, (old_timestamp, old_timestamp))
+    os.utime(old_original, (old_timestamp, old_timestamp))
+    monkeypatch.setattr(main_module, "UPLOAD_KEEP_DAYS", 90)
+    monkeypatch.setattr(main_module, "GENERATED_UPLOAD_KEEP_DAYS", 1)
+
+    main_module._cleanup_old_uploads(upload_dir)
+
+    assert not old_generated.exists()
+    assert not old_detail.exists()
+    assert old_original.exists()
+    assert fresh_generated.exists()
+
+
 def test_confirm_roster_and_preview_reminders(tmp_path):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
