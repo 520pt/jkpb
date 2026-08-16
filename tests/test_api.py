@@ -1780,6 +1780,25 @@ def test_app_login_protects_pages_and_api_when_configured(tmp_path):
     assert client.get("/api/rosters").status_code == 401
 
 
+def test_notification_detail_page_is_public_and_embeds_full_image(tmp_path, monkeypatch):
+    uploads = tmp_path / "uploads"
+    monkeypatch.setenv("UPLOAD_DIR", str(uploads))
+    monkeypatch.setenv("DUTY_REMINDER_PUBLIC_URL", "https://jk.79c.cc")
+
+    url = main_module._notification_news_url(title="图文详情", description="完整提醒内容", image_bytes=b"png-bytes")
+    path = "/" + url.split("https://jk.79c.cc/", 1)[1]
+    app = create_app(data_dir=tmp_path / "data", upload_dir=uploads, start_scheduler=False, admin_password="secret")
+    client = TestClient(app)
+
+    response = client.get(path)
+
+    assert response.status_code == 200
+    assert "图文详情" in response.text
+    assert "完整提醒内容" in response.text
+    assert "data:image/png;base64,cG5nLWJ5dGVz" in response.text
+    assert client.get("/api/rosters").status_code == 401
+
+
 def test_upload_image_returns_review_grid(tmp_path, monkeypatch):
     def fake_extract(path):
         return {
@@ -6009,6 +6028,7 @@ def test_daily_duty_preview_summarizes_on_duty_people_and_drivers(tmp_path):
             "reminder_time": "07:20",
             "big_driver_names": ["示例庚"],
             "small_driver_names": ["示例丙"],
+            "send_content_mode": "image",
         },
     )
 
@@ -6147,6 +6167,7 @@ def test_daily_duty_preview_excludes_resting_driver(tmp_path):
             "reminder_time": "07:20",
             "big_driver_names": ["示例庚"],
             "small_driver_names": ["示例丙"],
+            "send_content_mode": "image",
         },
     )
 
@@ -6204,6 +6225,7 @@ def test_daily_duty_test_sends_preview_image_to_webhook(tmp_path, monkeypatch):
             "reminder_time": "07:20",
             "big_driver_names": ["示例庚"],
             "small_driver_names": ["示例丙"],
+            "send_content_mode": "image",
         },
     )
 
@@ -6394,6 +6416,7 @@ def test_due_custom_reminder_sends_with_saved_personnel_mobile(tmp_path, monkeyp
         shift_code="night",
         reminder_time="21:00",
         message="需要关闭隧道灯",
+        send_content_mode="text",
         enabled=True,
     )
     monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
@@ -6432,6 +6455,7 @@ def test_due_custom_reminder_does_not_send_when_person_lacks_matching_shift(tmp_
         shift_code="night",
         reminder_time="21:00",
         message="@罗富耀\n需要开启隧道灯",
+        send_content_mode="text",
         enabled=True,
     )
     monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
@@ -6474,6 +6498,7 @@ def test_due_custom_reminder_sends_early_shift_at_configured_morning_time(tmp_pa
         shift_code="early",
         reminder_time="07:50",
         message="开启隧道灯",
+        send_content_mode="text",
         enabled=True,
     )
     monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
@@ -6528,6 +6553,7 @@ def test_personal_wechat_custom_reminder_uses_actual_person_not_fixed_mention_ta
         shift_code="night",
         reminder_time="21:00",
         message="关闭隧道灯",
+        send_content_mode="text",
         enabled=True,
     )
     monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
@@ -6569,6 +6595,7 @@ def test_wecom_custom_reminder_uses_actual_person_mobile_not_fixed_mention_targe
         shift_code="night",
         reminder_time="21:00",
         message="关闭隧道灯",
+        send_content_mode="text",
         enabled=True,
     )
     monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
@@ -6625,6 +6652,7 @@ def test_three_people_custom_reminders_follow_actual_roster_shift_not_fixed_targ
             shift_code="early",
             reminder_time="07:50",
             message="开启隧道灯",
+            send_content_mode="text",
             enabled=True,
         )
         repo.save_custom_reminder(
@@ -6632,6 +6660,7 @@ def test_three_people_custom_reminders_follow_actual_roster_shift_not_fixed_targ
             shift_code="night",
             reminder_time="21:00",
             message="关闭隧道灯",
+            send_content_mode="text",
             enabled=True,
         )
     monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
@@ -6691,6 +6720,7 @@ def test_due_custom_reminder_sends_with_saved_wechat_member(tmp_path, monkeypatc
         shift_code="night",
         reminder_time="21:00",
         message="需要关闭隧道灯",
+        send_content_mode="text",
         enabled=True,
     )
     monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
@@ -6739,6 +6769,7 @@ def test_due_custom_reminder_without_wechat_binding_adds_visible_at_name(tmp_pat
         shift_code="night",
         reminder_time="21:00",
         message="需要关闭隧道灯",
+        send_content_mode="text",
         enabled=True,
     )
     monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
@@ -7275,7 +7306,7 @@ def test_due_daily_duty_routes_to_configured_wechat_room(tmp_path, monkeypatch):
         webhook_url="",
         lightagent_targets=[{"id": "room-1", "name": "一群"}, {"id": "room-2", "name": "二群"}],
     )
-    repo.save_daily_duty_config(enabled=True, reminder_time="07:50", notification_room_id="room-1", notification_room_name="一群")
+    repo.save_daily_duty_config(enabled=True, reminder_time="07:50", notification_room_id="room-1", notification_room_name="一群", send_content_mode="image")
     monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
     monkeypatch.setattr(main_module, "_wecom_webhook_client_from_repo", lambda repo: FakePersonalWechatClient())
 

@@ -318,7 +318,7 @@ class CustomReminderRequest(BaseModel):
     reminder_time: str
     message: str
     enabled: bool = True
-    send_content_mode: str = "text"
+    send_content_mode: str = "both"
 
     @field_validator("name", "message")
     @classmethod
@@ -361,7 +361,7 @@ class DailyDutyConfigRequest(BaseModel):
     message_template: str = DEFAULT_DAILY_DUTY_TEMPLATE
     notification_room_id: str = ""
     notification_room_name: str = ""
-    send_content_mode: str = "image"
+    send_content_mode: str = "both"
 
     @field_validator("reminder_time")
     @classmethod
@@ -377,7 +377,7 @@ class VacationReminderConfigRequest(BaseModel):
     end_message_template: str = DEFAULT_VACATION_END_TEMPLATE
     start_message_templates: list[str] = Field(default_factory=lambda: list(DEFAULT_VACATION_START_TEMPLATES))
     end_message_templates: list[str] = Field(default_factory=lambda: list(DEFAULT_VACATION_END_TEMPLATES))
-    send_content_mode: str = "text"
+    send_content_mode: str = "both"
 
     @field_validator("start_reminder_time", "end_reminder_time")
     @classmethod
@@ -554,6 +554,8 @@ def create_app(
                 return await call_next(request)
             if request.url.path == "/api/wecom-app/callback":
                 return await call_next(request)
+            if request.url.path.startswith("/notification-detail/"):
+                return await call_next(request)
             if _is_wechat_internal_api_request(request):
                 return await call_next(request)
             if _is_request_authorized(request, admin_username, configured_admin_password, session_secret):
@@ -658,6 +660,17 @@ def create_app(
         if upload_root not in target.parents or not target.is_file():
             raise HTTPException(status_code=404, detail="not found")
         return FileResponse(target)
+
+    @app.get("/notification-detail/{filename}")
+    def get_notification_detail(filename: str):
+        safe_name = Path(filename).name
+        if not safe_name.startswith("notification-detail-") or not safe_name.endswith(".html"):
+            raise HTTPException(status_code=404, detail="not found")
+        target = (uploads / safe_name).resolve()
+        upload_root = uploads.resolve()
+        if upload_root not in target.parents or not target.is_file():
+            raise HTTPException(status_code=404, detail="not found")
+        return HTMLResponse(target.read_text(encoding="utf-8"))
 
     @app.post("/api/rosters/upload")
     def upload_roster(file: UploadFile = File(...)):
@@ -909,17 +922,23 @@ def create_app(
                 person_name="今日在岗人员",
                 send_at=datetime.fromisoformat(preview["send_at"]),
                 content=preview["content"],
-                send_content_mode=str(preview.get("send_content_mode") or "image"),
+                send_content_mode=str(preview.get("send_content_mode") or "both"),
             )
             target_ids = _notification_target_ids_for_event(repo, notification_client, event)
             if not _is_wecom_app_notify_client(notification_client):
                 target_ids = _daily_duty_target_room_ids(repo)
-            mode = _event_send_content_mode(event, "image")
+            mode = _event_send_content_mode(event, "both")
             mentions = _notification_true_mentions_for_event(repo, notification_client, event)
-            if mode in {"both", "text"}:
-                await _notify_send_text(notification_client, _notification_content_for_event(repo, notification_client, event), mentions, target_ids)
-            if mode in {"both", "image"}:
-                await _notify_send_image(notification_client, render_daily_duty_image(preview), target_ids)
+            content = _notification_content_for_event(repo, notification_client, event)
+            await _send_graphic_or_text_image(
+                notification_client,
+                title=_event_news_title(event, content),
+                text=content,
+                image_bytes=render_daily_duty_image(preview),
+                mentions=mentions,
+                target_ids=target_ids,
+                mode=mode,
+            )
             repo.save_send_record(
                 kind="daily_duty_test",
                 target="今日在岗人员",
@@ -1413,7 +1432,14 @@ def create_app(
         target_ids = _notification_target_ids_for_event(repo, notification_client, event)
         record_target = person_name or "测试消息"
         try:
-            await _notify_send_text(notification_client, content, mentions, target_ids)
+            if not await _notify_send_news(
+                notification_client,
+                title=_event_news_title(event, content),
+                description=content,
+                image_bytes=render_shift_reminder_image(event),
+                target_ids=target_ids,
+            ):
+                await _notify_send_text(notification_client, content, mentions, target_ids)
             repo.save_send_record(
                 kind="notification_test",
                 target=record_target,
@@ -6947,7 +6973,7 @@ def _reminder_events_response(repo: DutyRepository, target: date, *, now: dateti
 
 def _today_reminder_event_media(repo: DutyRepository, event: ReminderEvent, target: date) -> dict[str, str]:
     if event.kind == "daily_duty":
-        if _event_send_content_mode(event, "image") in {"both", "image"}:
+        if _event_send_content_mode(event, "both") in {"both", "image"}:
             return {
                 "image_url": f"/api/daily-duty-image?target_date={target.isoformat()}",
                 "image_alt": "今日在岗提醒图片",
@@ -7305,7 +7331,7 @@ def _build_daily_duty_preview(repo: DutyRepository, target: date) -> dict[str, A
         "details": values,
         "notification_room_id": str(config.get("notification_room_id") or ""),
         "notification_room_name": str(config.get("notification_room_name") or ""),
-        "send_content_mode": _normalize_send_content_mode(str(config.get("send_content_mode") or "image"), "image"),
+        "send_content_mode": _normalize_send_content_mode(str(config.get("send_content_mode") or "both"), "both"),
     }
 
 
@@ -7399,7 +7425,7 @@ def _plan_custom_reminder_events(repo: DutyRepository, assignments: list[ShiftAs
                     key_suffix=str(reminder.get("id") or ""),
                     target_room_id=str(reminder.get("notification_room_id") or "").strip(),
                     target_room_name=str(reminder.get("notification_room_name") or "").strip(),
-                    send_content_mode=_normalize_send_content_mode(str(reminder.get("send_content_mode") or "text"), "text"),
+                    send_content_mode=_normalize_send_content_mode(str(reminder.get("send_content_mode") or "both"), "both"),
                 )
             )
     return events
@@ -7415,7 +7441,7 @@ def _plan_vacation_reminder_events(repo: DutyRepository, target: date) -> list[R
         names = [name for name in names if bound_lookup.get(name)]
     tomorrow = target + timedelta(days=1)
     events: list[ReminderEvent] = []
-    mode = _normalize_send_content_mode(str(config.get("send_content_mode") or "text"), "text")
+    mode = _normalize_send_content_mode(str(config.get("send_content_mode") or "both"), "both")
     for name in names:
         today_rest = _is_rest_code(_roster_code_for_person(repo, name, target))
         tomorrow_rest = _is_rest_code(_roster_code_for_person(repo, name, tomorrow))
@@ -7515,7 +7541,7 @@ def _plan_all_events(repo: DutyRepository, target: date):
                 content=daily_duty["content"],
                 target_room_id=str(daily_duty.get("notification_room_id") or "").strip(),
                 target_room_name=str(daily_duty.get("notification_room_name") or "").strip(),
-                send_content_mode=_normalize_send_content_mode(str(daily_duty.get("send_content_mode") or "image"), "image"),
+                send_content_mode=_normalize_send_content_mode(str(daily_duty.get("send_content_mode") or "both"), "both"),
             )
         )
     events.extend(_plan_custom_reminder_events(repo, assignments, target))
@@ -7751,20 +7777,24 @@ async def _send_patrol_warning_message(
         send_content_mode = _normalize_patrol_send_content_mode(str(patrol_config.get("send_content_mode") or "both"))
         event = ReminderEvent(kind=kind, person_name="", send_at=now or datetime.now(TZ), content=content)
         target_ids = _notification_target_ids_for_event(repo, webhook_client, event) if _is_wecom_app_notify_client(webhook_client) else _patrol_warning_target_room_ids(repo)
-        if send_content_mode in {"both", "text"}:
-            content = _notification_content_for_event(repo, webhook_client, event)
-            await _notify_send_text(webhook_client, content, _notification_true_mentions_for_event(repo, webhook_client, event), target_ids)
+        content = _notification_content_for_event(repo, webhook_client, event)
         if send_content_mode in {"both", "image"} and warning is not None:
-            await _notify_send_image(
+            await _send_graphic_or_text_image(
                 webhook_client,
-                render_patrol_warning_image(
+                title=_event_news_title(event, content),
+                text=content,
+                image_bytes=render_patrol_warning_image(
                     warning,
                     now=now or datetime.now(TZ),
                     window_hours=window_hours,
                     mode=image_mode,
                 ),
-                target_ids,
+                mentions=_notification_true_mentions_for_event(repo, webhook_client, event),
+                target_ids=target_ids,
+                mode=send_content_mode,
             )
+        elif send_content_mode in {"both", "text"}:
+            await _notify_send_text(webhook_client, content, _notification_true_mentions_for_event(repo, webhook_client, event), target_ids)
         repo.save_send_record(
             kind=kind,
             target=target,
@@ -7993,12 +8023,17 @@ async def _send_test_reminder_event(
     target_ids = _notification_target_ids_for_event(repo, notification_client, event)
     sent_content = content
     try:
-        mode = _event_send_content_mode(event, "both" if _is_shift_reminder_kind(event.kind) else "text")
+        mode = _event_send_content_mode(event, "both")
         if event.kind == "daily_duty_test" and hasattr(notification_client, "send_image"):
-            if mode in {"both", "text"}:
-                await _notify_send_text(notification_client, content, mentions, target_ids)
-            if mode in {"both", "image"}:
-                await _notify_send_image(notification_client, render_daily_duty_image(_build_daily_duty_preview(repo, event.send_at.date())), target_ids)
+            await _send_graphic_or_text_image(
+                notification_client,
+                title=_event_news_title(event, content),
+                text=content,
+                image_bytes=render_daily_duty_image(_build_daily_duty_preview(repo, event.send_at.date())),
+                mentions=mentions,
+                target_ids=target_ids,
+                mode=mode,
+            )
         elif _event_can_send_image(event) and mode in {"both", "image"} and hasattr(notification_client, "send_image"):
             intro_event = ReminderEvent(
                 kind=event.kind,
@@ -8007,9 +8042,15 @@ async def _send_test_reminder_event(
                 content=_shift_reminder_intro_content(event, personal_wechat=_is_personal_wechat_notify_client(notification_client)),
             )
             sent_content = _notification_content_for_event(repo, notification_client, intro_event)
-            if mode == "both":
-                await _notify_send_text(notification_client, sent_content, mentions, target_ids)
-            await _notify_send_image(notification_client, render_shift_reminder_image(event), target_ids)
+            await _send_graphic_or_text_image(
+                notification_client,
+                title=_event_news_title(event, sent_content),
+                text=sent_content,
+                image_bytes=render_shift_reminder_image(event),
+                mentions=mentions,
+                target_ids=target_ids,
+                mode=mode,
+            )
         else:
             await _notify_send_text(notification_client, content, mentions, target_ids)
         repo.save_send_record(
@@ -8273,6 +8314,8 @@ def _notification_target_ids_for_event(repo: DutyRepository, client: Any, event:
             person_target = str(event.person_name or "").strip()
         if person_target:
             userid = _wecom_app_userid_lookup(repo).get(person_target, "")
+            if str(event.kind or "").endswith("_test") and not userid:
+                return None
             return [userid] if userid else []
         return None
     return _notification_target_room_ids_for_event(event)
@@ -8315,6 +8358,123 @@ async def _notify_send_image(client: Any, image_bytes: bytes, target_ids: list[s
         return
     await client.send_image(image_bytes)
 
+
+async def _notify_send_news(
+    client: Any,
+    *,
+    title: str,
+    description: str,
+    image_bytes: bytes,
+    target_ids: list[str] | None = None,
+    url: str = "",
+) -> bool:
+    if not hasattr(client, "send_news"):
+        return False
+    if isinstance(client, WeComAppNotifyClient) and not hasattr(client.client, "send_news"):
+        return False
+    await client.send_news(
+        title=_news_text(title, 128),
+        description=_news_text(description, 512),
+        image_bytes=image_bytes,
+        url=url or _notification_news_url(title=title, description=description, image_bytes=image_bytes),
+        target_ids=target_ids,
+    )
+    return True
+
+
+def _news_text(value: str, limit: int) -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    return text[:limit] or "监控提醒"
+
+
+def _notification_news_url(*, title: str = "", description: str = "", image_bytes: bytes | None = None) -> str:
+    detail_path = ""
+    if image_bytes:
+        detail_path = _save_notification_news_detail(title, description, image_bytes)
+    url = _public_app_url(detail_path or "/")
+    return url if url.startswith(("http://", "https://")) else "https://work.weixin.qq.com"
+
+
+def _save_notification_news_detail(title: str, description: str, image_bytes: bytes) -> str:
+    uploads = Path(os.getenv("UPLOAD_DIR", "uploads"))
+    uploads.mkdir(parents=True, exist_ok=True)
+    filename = f"notification-detail-{uuid.uuid4().hex}.html"
+    image_data = base64.b64encode(image_bytes).decode("ascii")
+    safe_title = html_lib.escape(_news_text(title, 128))
+    safe_description = html_lib.escape(str(description or "").strip())
+    html = f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{safe_title}</title>
+<style>
+*{{box-sizing:border-box}}body{{margin:0;background:#f3f4f6;color:#111827;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}}.page{{max-width:760px;margin:0 auto;padding:14px}}.card{{background:#fff;border-radius:18px;box-shadow:0 8px 24px rgba(15,23,42,.08);overflow:hidden}}.header{{padding:18px 18px 10px}}h1{{margin:0;font-size:20px;line-height:1.35}}.desc{{margin:10px 0 0;color:#4b5563;font-size:15px;line-height:1.65;white-space:pre-wrap;word-break:break-word}}img{{display:block;width:100%;height:auto;border-top:1px solid #e5e7eb}}.tip{{padding:10px 18px 16px;color:#9ca3af;font-size:12px}}
+</style>
+</head>
+<body>
+<main class="page">
+  <article class="card">
+    <section class="header">
+      <h1>{safe_title}</h1>
+      <div class="desc">{safe_description}</div>
+    </section>
+    <img src="data:image/png;base64,{image_data}" alt="{safe_title}">
+    <div class="tip">如图片显示不完整，可双指放大查看。</div>
+  </article>
+</main>
+</body>
+</html>
+"""
+    (uploads / filename).write_text(html, encoding="utf-8")
+    _cleanup_old_uploads(uploads)
+    return f"/notification-detail/{filename}"
+
+
+def _event_news_title(event: ReminderEvent, content: str) -> str:
+    first = next((line.strip() for line in str(content or event.content or "").splitlines() if line.strip()), "")
+    labels = {
+        "daily_duty": "今日在岗提醒",
+        "daily_duty_test": "今日在岗测试",
+        "vacation_start": "假期余额提醒",
+        "vacation_end": "假期余额不足提醒",
+        "vacation_test": "假期余额测试",
+        "custom": "自定义提醒",
+        "custom_test": "自定义提醒测试",
+        "rest": "休息提醒",
+    }
+    return first or labels.get(str(event.kind or ""), "监控提醒")
+
+
+async def _send_graphic_or_text_image(
+    client: Any,
+    *,
+    title: str,
+    text: str,
+    image_bytes: bytes,
+    mentions: list[str] | None,
+    target_ids: list[str] | None,
+    mode: str,
+) -> None:
+    if mode == "both" and await _notify_send_news(
+        client,
+        title=title,
+        description=text,
+        image_bytes=image_bytes,
+        target_ids=target_ids,
+    ):
+        return
+    sent = False
+    if mode in {"both", "text"} and hasattr(client, "send_text"):
+        await _notify_send_text(client, text, mentions, target_ids)
+        sent = True
+    if mode in {"both", "image"} and hasattr(client, "send_image"):
+        await _notify_send_image(client, image_bytes, target_ids)
+        sent = True
+    if not sent:
+        raise WeComError("当前通知通道不支持图文发送")
+
+
 def _is_personal_wechat_notify_client(client: Any) -> bool:
     return isinstance(client, (LightAgentNotifyClient, WechatBridgeNotifyClient)) or bool(
         getattr(client, "is_wechat_bridge", False)
@@ -8341,11 +8501,16 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
             preview_date = _date_from_record(record) or _today_in_tz()
             fake_event = ReminderEvent(kind=kind, person_name="今日在岗人员", send_at=datetime.now(TZ), content=content)
             target_ids = _notification_target_ids_for_event(repo, client, fake_event) if _is_wecom_app_notify_client(client) else (record_target_ids or _daily_duty_target_room_ids(repo))
-            mode = _normalize_send_content_mode(str(repo.get_daily_duty_config().get("send_content_mode") or "image"), "image")
-            if mode in {"both", "text"}:
-                await _notify_send_text(client, content, _notification_true_mentions_for_event(repo, client, fake_event), target_ids)
-            if mode in {"both", "image"}:
-                await _notify_send_image(client, render_daily_duty_image(_build_daily_duty_preview(repo, preview_date)), target_ids)
+            mode = _normalize_send_content_mode(str(repo.get_daily_duty_config().get("send_content_mode") or "both"), "both")
+            await _send_graphic_or_text_image(
+                client,
+                title=_event_news_title(fake_event, content),
+                text=content,
+                image_bytes=render_daily_duty_image(_build_daily_duty_preview(repo, preview_date)),
+                mentions=_notification_true_mentions_for_event(repo, client, fake_event),
+                target_ids=target_ids,
+                mode=mode,
+            )
         elif kind.startswith("patrol_warning_"):
             fake_event = ReminderEvent(kind=kind, person_name="", send_at=datetime.now(TZ), content=content)
             content = _notification_content_for_event(repo, client, fake_event)
@@ -8362,17 +8527,23 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
             resend_target_ids = _notification_target_ids_for_event(repo, client, fake_event) if _is_wecom_app_notify_client(client) else (record_target_ids or _configured_person_target_room_ids(repo, target))
             mode = "both" if _is_shift_reminder_kind(kind) else "text"
             if kind.startswith("vacation"):
-                mode = _normalize_send_content_mode(str(repo.get_vacation_reminder_config().get("send_content_mode") or "text"), "text")
+                mode = _normalize_send_content_mode(str(repo.get_vacation_reminder_config().get("send_content_mode") or "both"), "both")
             intro_event = ReminderEvent(
                 kind=kind,
                 person_name=target,
                 send_at=datetime.now(TZ),
                 content=_shift_reminder_intro_content(fake_event, personal_wechat=_is_personal_wechat_notify_client(client)),
             )
-            if mode in {"both", "text"}:
-                await _notify_send_text(client, _notification_content_for_event(repo, client, intro_event), mentions, resend_target_ids)
-            if mode in {"both", "image"}:
-                await _notify_send_image(client, render_shift_reminder_image(fake_event), resend_target_ids)
+            intro_content = _notification_content_for_event(repo, client, intro_event)
+            await _send_graphic_or_text_image(
+                client,
+                title=_event_news_title(fake_event, intro_content),
+                text=intro_content,
+                image_bytes=render_shift_reminder_image(fake_event),
+                mentions=mentions,
+                target_ids=resend_target_ids,
+                mode=mode,
+            )
         else:
             fake_event = ReminderEvent(
                 kind=kind,
@@ -8446,13 +8617,19 @@ async def _send_due_reminders(repo: DutyRepository) -> None:
             continue
         try:
             target_ids = _notification_target_ids_for_event(repo, notification_client, event)
-            mode = _event_send_content_mode(event, "image" if event.kind == "daily_duty" else ("both" if _is_shift_reminder_kind(event.kind) else "text"))
+            mode = _event_send_content_mode(event, "both")
             if event.kind == "daily_duty":
-                if mode in {"both", "text"}:
-                    mentions = _notification_true_mentions_for_event(repo, notification_client, event)
-                    await _notify_send_text(notification_client, _notification_content_for_event(repo, notification_client, event), mentions, target_ids)
-                if mode in {"both", "image"}:
-                    await _notify_send_image(notification_client, render_daily_duty_image(_build_daily_duty_preview(repo, now.date())), target_ids)
+                mentions = _notification_true_mentions_for_event(repo, notification_client, event)
+                content = _notification_content_for_event(repo, notification_client, event)
+                await _send_graphic_or_text_image(
+                    notification_client,
+                    title=_event_news_title(event, content),
+                    text=content,
+                    image_bytes=render_daily_duty_image(_build_daily_duty_preview(repo, now.date())),
+                    mentions=mentions,
+                    target_ids=target_ids,
+                    mode=mode,
+                )
             elif _event_can_send_image(event) and mode in {"both", "image"} and hasattr(notification_client, "send_image"):
                 mentions = _notification_true_mentions_for_event(repo, notification_client, event)
                 intro_event = ReminderEvent(
@@ -8461,14 +8638,16 @@ async def _send_due_reminders(repo: DutyRepository) -> None:
                     send_at=event.send_at,
                     content=_shift_reminder_intro_content(event, personal_wechat=_is_personal_wechat_notify_client(notification_client)),
                 )
-                if mode == "both":
-                    await _notify_send_text(
-                        notification_client,
-                        _notification_content_for_event(repo, notification_client, intro_event),
-                        mentions,
-                        target_ids,
-                    )
-                await _notify_send_image(notification_client, render_shift_reminder_image(event), target_ids)
+                content = _notification_content_for_event(repo, notification_client, intro_event)
+                await _send_graphic_or_text_image(
+                    notification_client,
+                    title=_event_news_title(event, content),
+                    text=content,
+                    image_bytes=render_shift_reminder_image(event),
+                    mentions=mentions,
+                    target_ids=target_ids,
+                    mode=mode,
+                )
             else:
                 mentions = _notification_true_mentions_for_event(repo, notification_client, event)
                 await _notify_send_text(notification_client, _notification_content_for_event(repo, notification_client, event), mentions, target_ids)

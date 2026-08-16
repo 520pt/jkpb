@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import base64
 import hashlib
+from io import BytesIO
 
 import httpx
+from PIL import Image
 
 
 class WeComError(RuntimeError):
@@ -78,6 +80,24 @@ class WeComClient:
             raise WeComError("WeCom media upload failed: media_id missing")
         return media_id
 
+    async def upload_image_url(self, filename: str, content: bytes) -> str:
+        token = await self.get_access_token()
+        try:
+            response = await self.http_client.post(
+                f"{self.base_url}/media/uploadimg",
+                params={"access_token": token},
+                files={"media": (filename, content, "image/png")},
+            )
+        except httpx.HTTPError as exc:
+            raise WeComError(f"WeCom image url upload failed: {exc.__class__.__name__}") from exc
+        data = response.json()
+        if data.get("errcode") != 0:
+            raise WeComError(f"WeCom image url upload failed: {data.get('errmsg', 'unknown error')}")
+        url = str(data.get("url") or "").strip()
+        if not url:
+            raise WeComError("WeCom image url upload failed: url missing")
+        return url
+
     async def send_image(self, touser: str, image_bytes: bytes) -> None:
         media_id = await self.upload_media("image", "query.png", image_bytes)
         token = await self.get_access_token()
@@ -96,6 +116,42 @@ class WeComClient:
         data = response.json()
         if data.get("errcode") != 0:
             raise WeComError(f"WeCom image send failed: {data.get('errmsg', 'unknown error')}")
+
+    async def send_news(
+        self,
+        touser: str,
+        *,
+        title: str,
+        description: str,
+        image_bytes: bytes,
+        url: str,
+    ) -> None:
+        picurl = await self.upload_image_url("news.png", _news_cover_image_bytes(image_bytes))
+        token = await self.get_access_token()
+        payload = {
+            "touser": touser,
+            "msgtype": "news",
+            "agentid": self.agent_id,
+            "news": {
+                "articles": [
+                    {
+                        "title": title[:128],
+                        "description": description[:512],
+                        "url": url,
+                        "picurl": picurl,
+                    }
+                ]
+            },
+            "enable_duplicate_check": 0,
+        }
+        response = await self.http_client.post(
+            f"{self.base_url}/message/send",
+            params={"access_token": token},
+            json=payload,
+        )
+        data = response.json()
+        if data.get("errcode") != 0:
+            raise WeComError(f"WeCom news send failed: {data.get('errmsg', 'unknown error')}")
 
     async def create_menu(self, menu: dict[str, object]) -> None:
         token = await self.get_access_token()
@@ -135,6 +191,23 @@ class WeComAppNotifyClient:
     async def send_image(self, image_bytes: bytes, *, target_ids: list[str] | None = None) -> None:
         await self.client.send_image(self._touser(target_ids), image_bytes)
 
+    async def send_news(
+        self,
+        *,
+        title: str,
+        description: str,
+        image_bytes: bytes,
+        url: str,
+        target_ids: list[str] | None = None,
+    ) -> None:
+        await self.client.send_news(
+            self._touser(target_ids),
+            title=title,
+            description=description,
+            image_bytes=image_bytes,
+            url=url,
+        )
+
     def _touser(self, target_ids: list[str] | None = None) -> str:
         targets = self.default_tousers if target_ids is None else _normalize_wecom_tousers(target_ids)
         if not targets:
@@ -149,6 +222,25 @@ def _normalize_wecom_tousers(values: list[str]) -> list[str]:
         if text and text not in targets:
             targets.append(text)
     return targets
+
+
+def _news_cover_image_bytes(image_bytes: bytes) -> bytes:
+    """Adapt generated long reminder images to WeCom news cover 1068x455."""
+
+    try:
+        source = Image.open(BytesIO(image_bytes)).convert("RGB")
+    except Exception:
+        return image_bytes
+    target_w, target_h = 1068, 455
+    scale = max(target_w / source.width, target_h / source.height)
+    resized = source.resize((max(1, round(source.width * scale)), max(1, round(source.height * scale))), Image.Resampling.LANCZOS)
+    left = max(0, (resized.width - target_w) // 2)
+    # Long reminder cards put the useful title at the top; crop from top instead of center.
+    top = 0
+    cover = resized.crop((left, top, left + target_w, top + target_h))
+    output = BytesIO()
+    cover.save(output, format="PNG", optimize=True)
+    return output.getvalue()
 
 
 class WeComWebhookClient:

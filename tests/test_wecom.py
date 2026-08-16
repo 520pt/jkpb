@@ -2,15 +2,31 @@ import asyncio
 import base64
 import hashlib
 import json
+from io import BytesIO
 
 import httpx
 import pytest
+from PIL import Image
 
-from app.wecom import LightAgentNotifyClient, WeComAppNotifyClient, WeComClient, WeComError, WeComWebhookClient
+from app.wecom import LightAgentNotifyClient, WeComAppNotifyClient, WeComClient, WeComError, WeComWebhookClient, _news_cover_image_bytes
 
 
 def test_send_text_requests_token_and_posts_message_payload():
     asyncio.run(_send_text_requests_token_and_posts_message_payload())
+
+
+def test_send_news_uploads_image_url_and_posts_news_payload():
+    asyncio.run(_send_news_uploads_image_url_and_posts_news_payload())
+
+
+def test_news_cover_image_bytes_uses_wecom_recommended_ratio():
+    source = Image.new("RGB", (600, 1600), "white")
+    buf = BytesIO()
+    source.save(buf, format="PNG")
+
+    cover = Image.open(BytesIO(_news_cover_image_bytes(buf.getvalue())))
+
+    assert cover.size == (1068, 455)
 
 
 async def _send_text_requests_token_and_posts_message_payload():
@@ -48,6 +64,52 @@ async def _send_text_requests_token_and_posts_message_payload():
     await http_client.aclose()
 
     assert len(requests) == 2
+
+
+async def _send_news_uploads_image_url_and_posts_news_payload():
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/gettoken"):
+            return httpx.Response(200, json={"errcode": 0, "access_token": "token-1"})
+        if request.url.path.endswith("/media/uploadimg"):
+            assert request.url.params["access_token"] == "token-1"
+            assert b"fake-png" in request.content
+            return httpx.Response(200, json={"errcode": 0, "url": "https://img.example.test/news.png"})
+        if request.url.path.endswith("/message/send"):
+            body = json.loads(request.content.decode("utf-8"))
+            assert body == {
+                "touser": "sqh",
+                "msgtype": "news",
+                "agentid": 1000001,
+                "news": {
+                    "articles": [
+                        {
+                            "title": "图文测试",
+                            "description": "图文说明",
+                            "url": "https://jk.79c.cc",
+                            "picurl": "https://img.example.test/news.png",
+                        }
+                    ]
+                },
+                "enable_duplicate_check": 0,
+            }
+            return httpx.Response(200, json={"errcode": 0})
+        raise AssertionError(request.url)
+
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = WeComClient(
+        corp_id="corp-id",
+        corp_secret="secret-value",
+        agent_id=1000001,
+        http_client=http_client,
+    )
+
+    await client.send_news("sqh", title="图文测试", description="图文说明", image_bytes=b"fake-png", url="https://jk.79c.cc")
+    await http_client.aclose()
+
+    assert [request.url.path for request in requests] == ["/cgi-bin/gettoken", "/cgi-bin/media/uploadimg", "/cgi-bin/message/send"]
 
 
 def test_token_error_does_not_include_secret():

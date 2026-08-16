@@ -322,7 +322,7 @@ def test_custom_reminder_roundtrip_updates_personnel_contact(tmp_path: Path):
             "message": "需要关闭隧道灯",
             "notification_room_id": "",
             "notification_room_name": "",
-            "send_content_mode": "text",
+            "send_content_mode": "both",
             "enabled": True,
             "created_at": repo.list_custom_reminders()[0]["created_at"],
             "updated_at": repo.list_custom_reminders()[0]["updated_at"],
@@ -365,7 +365,7 @@ def test_daily_duty_config_roundtrip(tmp_path: Path):
         "message_template": "今日 {early} {big_drivers}",
         "notification_room_id": "",
         "notification_room_name": "",
-        "send_content_mode": "image",
+        "send_content_mode": "both",
     }
 
 

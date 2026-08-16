@@ -3402,7 +3402,7 @@
                   <label>班次提前提醒分钟 <input id="beforeMinutes" type="number" min="0" max="1440" value="10" /></label>
                   <label>发送方式
                     <select id="monitorSendContentMode">
-                      <option value="both">图文（文字+图片）</option>
+                      <option value="both">图文</option>
                       <option value="image">仅图片</option>
                       <option value="text">仅文字</option>
                     </select>
@@ -3465,7 +3465,7 @@
                   <div class="patrol-delivery-row">
                     <label>发送内容
                       <select id="patrolSendContentMode">
-                        <option value="both">图文（文字+图片）</option>
+                        <option value="both">图文</option>
                         <option value="text">仅文字</option>
                         <option value="image">仅图片</option>
                       </select>
@@ -3525,9 +3525,9 @@
                   <label>提醒时间 <input id="customReminderTime" type="time" value="21:00" /></label>
                   <label>发送方式
                     <select id="customReminderSendContentMode">
-                      <option value="text">仅文字</option>
-                      <option value="both">图文（文字+图片）</option>
+                      <option value="both">图文</option>
                       <option value="image">仅图片</option>
+                      <option value="text">仅文字</option>
                     </select>
                   </label>
                 </div>
@@ -3558,9 +3558,9 @@
                   <label>最后一天提醒时间 <input id="vacationEndTime" type="time" value="07:50" /></label>
                   <label>发送方式
                     <select id="vacationSendContentMode">
-                      <option value="text">仅文字</option>
-                      <option value="both">图文（文字+图片）</option>
+                      <option value="both">图文</option>
                       <option value="image">仅图片</option>
+                      <option value="text">仅文字</option>
                     </select>
                   </label>
                 </div>
@@ -3638,8 +3638,8 @@
                     <label>提醒时间 <input id="dailyDutyTime" type="time" value="07:50" /></label>
                     <label>发送方式
                       <select id="dailyDutySendContentMode">
+                        <option value="both">图文</option>
                         <option value="image">仅图片</option>
-                        <option value="both">图文（文字+图片）</option>
                         <option value="text">仅文字</option>
                       </select>
                     </label>
@@ -4296,7 +4296,7 @@
           meta: [
             `开始前：${vacation.start_reminder_time || "07:50"}`,
             `最后一天：${vacation.end_reminder_time || "07:50"}`,
-            `发送模式：${contentModeLabel(vacation.send_content_mode || "text")}`,
+            `发送模式：${contentModeLabel(vacation.send_content_mode || "both")}`,
             `通知通道：${notificationText}`,
           ],
           actions: [
@@ -4380,7 +4380,7 @@
         shift_code: reminder.shift_code || "early",
         reminder_time: reminder.reminder_time || "21:00",
         message: reminder.message || "",
-        send_content_mode: reminder.send_content_mode || "text",
+        send_content_mode: reminder.send_content_mode || "both",
         enabled,
       };
     }
@@ -5203,7 +5203,7 @@
       if ($("customReminderNotificationRoom")) $("customReminderNotificationRoom").value = reminder.notification_room_id || "";
       $("customReminderShift").value = reminder.shift_code || "early";
       $("customReminderTime").value = reminder.reminder_time || "21:00";
-      if ($("customReminderSendContentMode")) $("customReminderSendContentMode").value = reminder.send_content_mode || "text";
+      if ($("customReminderSendContentMode")) $("customReminderSendContentMode").value = reminder.send_content_mode || "both";
       applyCustomReminderTimeRule();
       $("customReminderMessage").value = reminder.message || "";
       $("customReminderEnabled").checked = reminder.enabled !== false;
@@ -5229,7 +5229,7 @@
       $("customReminderList").innerHTML = state.customReminders.map((reminder) => `
         <div class="item reminder-config-card">
           <strong>${escapeHtml(reminder.name)} · ${escapeHtml(customReminderShiftLabel(reminder.shift_code))} · ${escapeHtml(reminder.reminder_time)}</strong>
-          <small>${customReminderNotificationText(reminder)} · 发送方式 ${contentModeLabel(reminder.send_content_mode || "text")} · ${reminder.enabled ? "已启用" : "已停用"}</small>
+          <small>${customReminderNotificationText(reminder)} · 发送方式 ${contentModeLabel(reminder.send_content_mode || "both")} · ${reminder.enabled ? "已启用" : "已停用"}</small>
           <div class="reminder-card-message">${escapeHtml(reminder.message || "").replace(/\n/g, "<br>")}</div>
           <div class="settings-actions reminder-card-actions">
             <button type="button" data-edit-custom-reminder="${reminder.id}">编辑</button>
@@ -5249,7 +5249,7 @@
         shift_code: $("customReminderShift").value,
         reminder_time: $("customReminderTime").value || (customReminderTimeRules[$("customReminderShift").value] || customReminderTimeRules.early).fallback,
         message: $("customReminderMessage").value.trim(),
-        send_content_mode: $("customReminderSendContentMode") ? ($("customReminderSendContentMode").value || "text") : "text",
+        send_content_mode: $("customReminderSendContentMode") ? ($("customReminderSendContentMode").value || "both") : "both",
         enabled: $("customReminderEnabled").checked
       };
     }
@@ -6258,7 +6258,7 @@
       state.dailyDutyConfig = config;
       $("dailyDutyEnabled").checked = config.enabled !== false;
       $("dailyDutyTime").value = config.reminder_time || "07:50";
-      if ($("dailyDutySendContentMode")) $("dailyDutySendContentMode").value = config.send_content_mode || "image";
+      if ($("dailyDutySendContentMode")) $("dailyDutySendContentMode").value = config.send_content_mode || "both";
       setNameListValue("bigDriverNames", config.big_driver_names || []);
       setNameListValue("smallDriverNames", config.small_driver_names || []);
       $("dailyDutyTemplate").value = config.message_template || "";
@@ -6277,7 +6277,7 @@
           big_driver_names: parseNameList($("bigDriverNames").value),
           small_driver_names: parseNameList($("smallDriverNames").value),
           message_template: $("dailyDutyTemplate").value.trim(),
-          send_content_mode: $("dailyDutySendContentMode") ? ($("dailyDutySendContentMode").value || "image") : "image",
+          send_content_mode: $("dailyDutySendContentMode") ? ($("dailyDutySendContentMode").value || "both") : "both",
           ...selectedNotificationRoomPayload("dailyDutyNotificationRoom")
         })
       });
@@ -6311,7 +6311,7 @@
         end_message_template: endTemplates[0] || "",
         start_message_templates: startTemplates,
         end_message_templates: endTemplates,
-        send_content_mode: $("vacationSendContentMode").value || "text",
+        send_content_mode: $("vacationSendContentMode").value || "both",
       };
     }
 
@@ -6330,7 +6330,7 @@
       $("vacationEndTime").value = config.end_reminder_time || "07:50";
       $("vacationStartTemplate").value = (config.start_message_templates && config.start_message_templates.length ? config.start_message_templates : [config.start_message_template || "恭喜你今天下午可以开始休息了，加油一天要苦80块的男人，"]).join("\n");
       $("vacationEndTemplate").value = (config.end_message_templates && config.end_message_templates.length ? config.end_message_templates : [config.end_message_template || "假期余额不足，今天下午就该返回站点了，加油天选打工人。"]).join("\n");
-      $("vacationSendContentMode").value = config.send_content_mode || "text";
+      $("vacationSendContentMode").value = config.send_content_mode || "both";
       renderSettingsOverview();
     }
 
