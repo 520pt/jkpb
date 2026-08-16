@@ -334,19 +334,58 @@ def test_create_wecom_app_menu_endpoint_uses_limited_grouped_menu(tmp_path: Path
     assert all(len(button.get("sub_button", [])) <= preview["limits"]["max_sub_buttons"] for button in buttons)
     assert buttons[0]["name"] == "监控在岗"
     assert [item["key"] for item in buttons[0]["sub_button"]] == [
-        "DR_MENU_0_0",
-        "DR_MENU_0_1",
-        "DR_MENU_0_2",
-        "DR_MENU_0_3",
-        "DR_MENU_0_4",
+        "DR_TODAY_DUTY",
+        "DR_TODAY_MONITOR",
+        "DR_TOMORROW_MONITOR",
+        "DR_WEEK_MONITOR",
+        "DR_MY_MONITOR",
     ]
     assert buttons[1]["name"] == "机电预警"
+    assert buttons[1]["sub_button"][0]["name"] == "录入今日机电"
     assert [item["key"] for item in buttons[1]["sub_button"]] == [
-        "DR_MENU_1_0",
-        "DR_MENU_1_1",
-        "DR_MENU_1_2",
-        "DR_MENU_1_3",
+        "DR_TUNNEL_TODAY_SUBMIT",
+        "DR_TUNNEL_TEMPLATE",
+        "DR_TUNNEL_MODIFY_TEMPLATE",
+        "DR_ORANGE_PATROL_RECORD",
     ]
+
+
+def test_wecom_app_menu_moves_tunnel_today_submit_to_top_and_keeps_legacy_key(tmp_path: Path, monkeypatch):
+    repo = main_module.DutyRepository(tmp_path / "duty.db")
+    repo.upsert_personnel_names(["商邱宏", "罗富耀"])
+    repo.upsert_personnel_contacts([{"name": "商邱宏", "wecom_userid": "shangqiuhong"}])
+    repo.set_tunnel_mechanical_partner("商邱宏", "罗富耀")
+    repo.save_wecom_app_menu_config(
+        [
+            {
+                "name": "机电预警",
+                "items": [
+                    {"name": "机电模板", "command": "模板"},
+                    {"name": "修改模板", "command": "修改模板"},
+                    {"name": "橙色预警巡查记录查询", "command": "橙色预警巡查记录查询"},
+                    {"name": "录入今日机电", "command": "录入今日机电"},
+                ],
+            }
+        ]
+    )
+    _save_simple_tunnel_template(repo)
+    fake = FakeWeComAppClient()
+    monkeypatch.setattr(main_module, "_wecom_app_client_from_repo", lambda repo: fake)
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2026, 8, 16))
+    main_module.WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.clear()
+
+    preview = main_module._public_wecom_app_menu_preview(repo)
+    assert preview["groups"][0]["items"][0]["command"] == "录入今日机电"
+    assert preview["groups"][0]["items"][0]["key"] == "DR_TUNNEL_TODAY_SUBMIT"
+
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "",
+        "event_key": "DR_MENU_1_3",
+        "from_user": "shangqiuhong",
+        "msg_type": "event",
+    })()))
+
+    assert any("请确认今日隧道机电录入信息" in content for _, content in fake.texts)
 
 
 def test_wecom_app_menu_can_be_saved_and_dynamic_key_maps_to_command(tmp_path: Path, monkeypatch):
@@ -375,13 +414,13 @@ def test_wecom_app_menu_can_be_saved_and_dynamic_key_maps_to_command(tmp_path: P
     assert save_response.status_code == 200
     assert create_response.status_code == 200
     assert fake.menus[-1]["button"][0]["name"] == "常用"
-    assert fake.menus[-1]["button"][0]["sub_button"][0]["key"] == "DR_MENU_0_0"
+    assert fake.menus[-1]["button"][0]["sub_button"][0]["key"] == "DR_TODAY_DUTY"
 
     plain = (
         "<xml><ToUserName><![CDATA[ww-test-corp]]></ToUserName>"
         "<FromUserName><![CDATA[shangqiuhong]]></FromUserName>"
         "<CreateTime>123</CreateTime><MsgType><![CDATA[event]]></MsgType>"
-        "<Event><![CDATA[click]]></Event><EventKey><![CDATA[DR_MENU_0_0]]></EventKey>"
+        "<Event><![CDATA[click]]></Event><EventKey><![CDATA[DR_TODAY_DUTY]]></EventKey>"
         "<AgentID>1000002</AgentID></xml>"
     )
     encrypted = _encrypt(plain)
@@ -571,6 +610,49 @@ def test_wecom_app_tunnel_today_submit_requires_partner_then_confirms_and_submit
     assert submitted[0].recorder == "商邱宏"
     assert submitted[0].checkTime == date(2026, 8, 16)
     assert any("隧道机电录入完成" in content for _, content in fake.texts)
+
+
+def test_wecom_app_tunnel_today_submit_keeps_pending_after_platform_failure(tmp_path: Path, monkeypatch):
+    repo = main_module.DutyRepository(tmp_path / "duty.db")
+    repo.upsert_personnel_names(["商邱宏", "罗富耀"])
+    repo.upsert_personnel_contacts([{"name": "商邱宏", "wecom_userid": "shangqiuhong"}])
+    repo.set_tunnel_mechanical_partner("商邱宏", "罗富耀")
+    _save_simple_tunnel_template(repo)
+    fake = FakeWeComAppClient()
+    monkeypatch.setattr(main_module, "_wecom_app_client_from_repo", lambda repo: fake)
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2026, 8, 16))
+    main_module.WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.clear()
+
+    async def fake_submit(repo, request, result_upload_dir=None):
+        raise main_module.HTTPException(status_code=400, detail="用户不存在/密码错误")
+
+    monkeypatch.setattr(main_module, "_submit_tunnel_mechanical", fake_submit)
+
+    menu_message = type("M", (), {
+        "content": "",
+        "event_key": "DR_TUNNEL_TODAY_SUBMIT",
+        "from_user": "shangqiuhong",
+        "msg_type": "event",
+    })()
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", menu_message))
+    pending_key = "shangqiuhong"
+    assert pending_key in main_module.WECOM_APP_PENDING_TUNNEL_SUBMISSIONS
+
+    fake.texts.clear()
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "1",
+        "event_key": "",
+        "from_user": "shangqiuhong",
+        "msg_type": "text",
+    })()))
+
+    assert pending_key in main_module.WECOM_APP_PENDING_TUNNEL_SUBMISSIONS
+    assert any("用户不存在/密码错误" in content and "待确认信息仍保留" in content for _, content in fake.texts)
+
+    fake.texts.clear()
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", menu_message))
+
+    assert any("请确认今日隧道机电录入信息" in content for _, content in fake.texts)
 
 
 def test_wecom_app_tunnel_manual_entry_updates_pending_weather(tmp_path: Path, monkeypatch):

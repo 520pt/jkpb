@@ -122,6 +122,25 @@ WECOM_APP_MENU_COMMANDS = {
     "DR_BINDING": "查询我的绑定",
     "DR_HELP": "菜单",
 }
+WECOM_APP_MENU_COMMAND_KEYS = {command: key for key, command in WECOM_APP_MENU_COMMANDS.items()}
+WECOM_APP_LEGACY_INDEX_MENU_COMMANDS = {
+    # Older generated menus used index-based keys. Keep them valid even after
+    # reordering built-in menu items, otherwise already-created WeCom menus can
+    # silently map to the wrong command until the user recreates the menu.
+    "DR_MENU_0_0": "查询今日在岗",
+    "DR_MENU_0_1": "查询今日监控",
+    "DR_MENU_0_2": "查询明日监控",
+    "DR_MENU_0_3": "查询本周监控",
+    "DR_MENU_0_4": "查询我的监控",
+    "DR_MENU_1_0": "模板",
+    "DR_MENU_1_1": "修改模板",
+    "DR_MENU_1_2": "橙色预警巡查记录查询",
+    "DR_MENU_1_3": "录入今日机电",
+    "DR_MENU_2_0": "查询今日机电",
+    "DR_MENU_2_1": "查询未来7天",
+    "DR_MENU_2_2": "查询休息",
+    "DR_MENU_2_3": "查询我的绑定",
+}
 DEFAULT_WECOM_APP_MENU_GROUPS = [
     {
         "name": "监控在岗",
@@ -136,10 +155,10 @@ DEFAULT_WECOM_APP_MENU_GROUPS = [
     {
         "name": "机电预警",
         "items": [
+            {"name": "录入今日机电", "command": "录入今日机电"},
             {"name": "机电模板", "command": "模板"},
             {"name": "修改模板", "command": "修改模板"},
             {"name": "橙色预警巡查记录查询", "command": "橙色预警巡查记录查询"},
-            {"name": "录入今日机电", "command": "录入今日机电"},
         ],
     },
     {
@@ -1419,11 +1438,7 @@ def create_app(
             or _looks_like_duty_wechat_command(_normalize_wechat_query_text(command_text), repo)
         ):
             background_tasks.add_task(_handle_wecom_app_message, repo, uploads, message)
-        elif (
-            message.msg_type == "event"
-            and str(message.event or "").strip().lower() == "click"
-            and _looks_like_duty_wechat_command(_normalize_wechat_query_text(command_text), repo)
-        ):
+        elif message.msg_type == "event" and str(message.event or "").strip().lower() == "click" and command_text:
             background_tasks.add_task(_handle_wecom_app_message, repo, uploads, message)
         return Response("success", media_type="text/plain")
 
@@ -2341,7 +2356,7 @@ def _wecom_app_menu_payload(repo: DutyRepository | None = None) -> dict[str, Any
         button = {"name": group["name"], "sub_button": []}
         for item_index, item in enumerate(group["items"]):
             button["sub_button"].append(
-                _wecom_app_menu_click_button(item["name"], _wecom_app_menu_key(group_index, item_index))
+                _wecom_app_menu_click_button(item["name"], _wecom_app_menu_key(group_index, item_index, item))
             )
         menu["button"].append(button)
     _validate_wecom_app_menu_payload(menu)
@@ -2352,33 +2367,63 @@ def _wecom_app_menu_click_button(name: str, key: str) -> dict[str, str]:
     return {"type": "click", "name": name, "key": key}
 
 
-def _wecom_app_menu_key(group_index: int, item_index: int) -> str:
-    return f"DR_MENU_{group_index}_{item_index}"
+def _wecom_app_menu_key(group_index: int, item_index: int, item: dict[str, Any] | None = None) -> str:
+    command = str((item or {}).get("command") or "").strip()
+    return WECOM_APP_MENU_COMMAND_KEYS.get(command) or f"DR_CUSTOM_{group_index}_{item_index}"
 
 
 def _wecom_app_menu_command(value: str, repo: DutyRepository | None = None) -> str:
     text = str(value or "").strip()
     if text in WECOM_APP_MENU_COMMANDS:
         return WECOM_APP_MENU_COMMANDS[text]
-    match = re.fullmatch(r"DR_MENU_(\d+)_(\d+)", text)
-    if match and repo is not None:
+    custom_match = re.fullmatch(r"DR_CUSTOM_(\d+)_(\d+)", text)
+    if custom_match and repo is not None:
         groups = _wecom_app_menu_groups(repo)
-        group_index = int(match.group(1))
-        item_index = int(match.group(2))
+        group_index = int(custom_match.group(1))
+        item_index = int(custom_match.group(2))
         if 0 <= group_index < len(groups):
             items = groups[group_index]["items"]
             if 0 <= item_index < len(items):
                 return str(items[item_index].get("command") or "").strip()
+    legacy_match = re.fullmatch(r"DR_MENU_(\d+)_(\d+)", text)
+    if legacy_match and repo is not None:
+        raw_command = _wecom_app_raw_menu_command(repo, int(legacy_match.group(1)), int(legacy_match.group(2)))
+        if raw_command:
+            return raw_command
+    if text in WECOM_APP_LEGACY_INDEX_MENU_COMMANDS:
+        return WECOM_APP_LEGACY_INDEX_MENU_COMMANDS[text]
     return text
+
+
+def _wecom_app_raw_menu_command(repo: DutyRepository, group_index: int, item_index: int) -> str:
+    try:
+        raw_groups = repo.get_wecom_app_menu_config()
+    except Exception:
+        return ""
+    if not isinstance(raw_groups, list) or not (0 <= group_index < len(raw_groups)):
+        return ""
+    raw_group = raw_groups[group_index]
+    if not isinstance(raw_group, dict):
+        return ""
+    raw_items = raw_group.get("items")
+    if not isinstance(raw_items, list) or not (0 <= item_index < len(raw_items)):
+        return ""
+    raw_item = raw_items[item_index]
+    if not isinstance(raw_item, dict):
+        return ""
+    return str(raw_item.get("command") or "").strip()
 
 
 def _wecom_app_menu_groups(repo: DutyRepository | None = None) -> list[dict[str, Any]]:
     raw = repo.get_wecom_app_menu_config() if repo is not None else []
     groups = _normalize_wecom_app_menu_groups(raw or DEFAULT_WECOM_APP_MENU_GROUPS, allow_empty=False)
     for group in groups:
-        if group.get("name") == "机电预警" and not any(item.get("command") == "录入今日机电" for item in group.get("items", [])):
-            if len(group.get("items", [])) < WECOM_APP_MENU_LIMITS["max_sub_buttons"]:
-                group["items"].append({"name": "录入今日机电", "command": "录入今日机电"})
+        if group.get("name") != "机电预警":
+            continue
+        items = [item for item in group.get("items", []) if str(item.get("command") or "").strip() != "录入今日机电"]
+        group["items"] = [{"name": "录入今日机电", "command": "录入今日机电"}, *items][
+            : WECOM_APP_MENU_LIMITS["max_sub_buttons"]
+        ]
     return groups
 
 
@@ -2526,7 +2571,7 @@ def _public_wecom_app_menu_preview(repo: DutyRepository | None = None) -> dict[s
                 "items": [
                     {
                         "name": item["name"],
-                        "key": _wecom_app_menu_key(group_index, item_index),
+                        "key": _wecom_app_menu_key(group_index, item_index, item),
                         "command": item["command"],
                     }
                     for item_index, item in enumerate(group.get("items", []))
@@ -3998,8 +4043,20 @@ async def _build_wecom_app_pending_tunnel_response(
         WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.pop(key, None)
         return {"success": False, "query_type": "tunnel_mechanical_confirm", "reply": "待确认信息已过期，请重新点击“录入今日机电”。"}
     request = _rebuild_tunnel_mechanical_request(dict(pending.get("payload") or {}))
-    WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.pop(key, None)
-    return await _submit_tunnel_mechanical_wechat_request(repo, query, request, uploads=uploads)
+    result = await _submit_tunnel_mechanical_wechat_request(repo, query, request, uploads=uploads)
+    if result.get("success"):
+        WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.pop(key, None)
+    else:
+        pending["expires_at"] = time.time() + WECOM_APP_PENDING_TUNNEL_TTL_SECONDS
+        reply = str(result.get("reply") or "").strip()
+        if reply:
+            result["reply"] = (
+                f"{reply}\n\n"
+                "这次待确认信息仍保留，可在修正智慧养护平台账号/登录状态后继续回复“确认”或“1”重试；"
+                "也可以重新点击“录入今日机电”生成新的确认信息。"
+            )
+            result["replies"] = [result["reply"]]
+    return result
 
 
 def _build_wecom_app_tunnel_partner_response(repo: DutyRepository, query: WechatQueryRequest, text: str) -> dict[str, Any] | None:
