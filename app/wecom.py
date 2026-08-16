@@ -225,19 +225,19 @@ def _normalize_wecom_tousers(values: list[str]) -> list[str]:
 
 
 def _news_cover_image_bytes(image_bytes: bytes) -> bytes:
-    """Adapt generated long reminder images to WeCom news cover 1068x455."""
+    """Fit generated reminder images into WeCom news cover 1068x455 without cropping."""
 
     try:
         source = Image.open(BytesIO(image_bytes)).convert("RGB")
     except Exception:
         return image_bytes
     target_w, target_h = 1068, 455
-    scale = max(target_w / source.width, target_h / source.height)
+    scale = min(target_w / source.width, target_h / source.height)
     resized = source.resize((max(1, round(source.width * scale)), max(1, round(source.height * scale))), Image.Resampling.LANCZOS)
-    left = max(0, (resized.width - target_w) // 2)
-    # Long reminder cards put the useful title at the top; crop from top instead of center.
-    top = 0
-    cover = resized.crop((left, top, left + target_w, top + target_h))
+    cover = Image.new("RGB", (target_w, target_h), (248, 250, 252))
+    left = (target_w - resized.width) // 2
+    top = (target_h - resized.height) // 2
+    cover.paste(resized, (left, top))
     output = BytesIO()
     cover.save(output, format="PNG", optimize=True)
     return output.getvalue()

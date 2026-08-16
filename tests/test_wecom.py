@@ -29,6 +29,24 @@ def test_news_cover_image_bytes_uses_wecom_recommended_ratio():
     assert cover.size == (1068, 455)
 
 
+def test_news_cover_image_bytes_keeps_full_long_image_visible():
+    source = Image.new("RGB", (100, 300), "white")
+    for y in range(0, 20):
+        for x in range(0, 100):
+            source.putpixel((x, y), (255, 0, 0))
+    for y in range(280, 300):
+        for x in range(0, 100):
+            source.putpixel((x, y), (0, 0, 255))
+    buf = BytesIO()
+    source.save(buf, format="PNG")
+
+    cover = Image.open(BytesIO(_news_cover_image_bytes(buf.getvalue()))).convert("RGB")
+    colors = cover.getcolors(maxcolors=1_000_000) or []
+
+    assert any(r > 200 and g < 80 and b < 80 for _, (r, g, b) in colors)
+    assert any(b > 200 and r < 80 and g < 80 for _, (r, g, b) in colors)
+
+
 async def _send_text_requests_token_and_posts_message_payload():
     requests: list[httpx.Request] = []
 
