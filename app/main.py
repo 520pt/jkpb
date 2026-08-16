@@ -247,6 +247,8 @@ class NotificationConfigRequest(BaseModel):
     wecom_app_secret: str = ""
     wecom_app_token: str = ""
     wecom_app_encoding_aes_key: str = ""
+    wecom_app_target_names: list[str] = Field(default_factory=list)
+    wecom_app_function_target_names: dict[str, list[str]] = Field(default_factory=dict)
     lightagent_url: str = ""
     lightagent_token: str = ""
     lightagent_target: str = ""
@@ -663,6 +665,25 @@ def create_app(
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
+    @app.get("/api/config/backups")
+    def list_config_backups():
+        return {"backups": _list_database_backups(repo)}
+
+    @app.post("/api/config/backups")
+    def create_config_backup():
+        return {"success": True, "backup": repo.create_database_backup(prefix="manual-backup")}
+
+    @app.get("/api/config/backups/{filename}")
+    def download_config_backup(filename: str):
+        safe_name = Path(filename).name
+        if safe_name != filename or not safe_name.endswith(".db"):
+            raise HTTPException(status_code=404, detail="备份文件不存在")
+        backup_root = (repo.db_path.parent / "backups").resolve()
+        target = (backup_root / safe_name).resolve()
+        if backup_root not in target.parents or not target.is_file():
+            raise HTTPException(status_code=404, detail="备份文件不存在")
+        return FileResponse(target, filename=safe_name, media_type="application/octet-stream")
+
     @app.post("/api/config/import")
     async def import_config(file: UploadFile = File(...)):
         if not (file.filename or "").lower().endswith(".json"):
@@ -670,8 +691,10 @@ def create_app(
         raw = await file.read()
         if len(raw) > 10 * 1024 * 1024:
             raise HTTPException(status_code=400, detail="配置文件不能超过 10MB")
+        backup: dict[str, Any] | None = None
         try:
             data = json.loads(raw.decode("utf-8-sig"))
+            backup = repo.create_database_backup(prefix="before-config-import")
             result = repo.import_config_snapshot(data)
             if app.state.wechat_bridge:
                 app.state.wechat_bridge.import_identity_snapshot(data.get("wechat_bridge_identity") or {})
@@ -680,7 +703,7 @@ def create_app(
             raise HTTPException(status_code=400, detail="配置 JSON 格式不正确") from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"success": True, "result": result}
+        return {"success": True, "result": result, "backup": backup}
 
     @app.get("/api/uploads/{filename}")
     def get_uploaded_image(filename: str):
@@ -1276,6 +1299,8 @@ def create_app(
             request.wecom_app_encoding_aes_key.strip()
             or str(existing.get("wecom_app_encoding_aes_key", "")).strip()
         )
+        wecom_app_target_names = request.wecom_app_target_names
+        wecom_app_function_target_names = request.wecom_app_function_target_names
         lightagent_url = request.lightagent_url.strip() or str(existing.get("lightagent_url", "")).strip()
         lightagent_token = request.lightagent_token.strip() or str(existing.get("lightagent_token", "")).strip()
         request_targets = _normalize_feature_channel_rooms(
@@ -1306,6 +1331,8 @@ def create_app(
             wecom_app_secret=wecom_app_secret,
             wecom_app_token=wecom_app_token,
             wecom_app_encoding_aes_key=wecom_app_encoding_aes_key,
+            wecom_app_target_names=wecom_app_target_names,
+            wecom_app_function_target_names=wecom_app_function_target_names,
             lightagent_url=lightagent_url,
             lightagent_token=lightagent_token,
             lightagent_target=lightagent_target,
@@ -1370,7 +1397,7 @@ def create_app(
             raise HTTPException(status_code=400, detail="请先启用并保存企业微信自建应用 CorpID / AgentId / Secret / Token / EncodingAESKey")
         # 同时校验 Token / EncodingAESKey 格式，避免只测发送成功但回调配置明显不可用。
         _wecom_app_crypto_from_repo(repo)
-        targets = _wecom_app_default_tousers(repo)
+        targets = _wecom_app_default_tousers(repo) or ["@all"]
         target_text = "|".join(targets)
         display_target = "已绑定企业微信成员" if targets and targets != ["@all"] else "@all（应用可见范围）"
         content = (
@@ -1468,6 +1495,7 @@ def create_app(
             },
         )
         event = ReminderEvent(kind="notification_test", person_name=person_name, send_at=datetime.now(TZ), content=content)
+        _raise_if_wecom_app_unbound_person(repo, notification_client, event)
         mentions = _notification_true_mentions_for_event(repo, notification_client, event)
         content = _notification_content_for_event(repo, notification_client, event)
         target_ids = _notification_target_ids_for_event(repo, notification_client, event)
@@ -1779,8 +1807,23 @@ def create_app(
         )
 
     @app.get("/api/send-records")
-    def list_send_records(limit: int = 100):
-        return {"records": _public_send_records(repo, repo.list_send_records(limit))}
+    def list_send_records(
+        limit: int = 100,
+        status: str = "",
+        kind: str = "",
+        target: str = "",
+        today_failed: bool = False,
+    ):
+        raw_records = repo.list_send_records(max(limit, 500) if (status or kind or target or today_failed) else limit)
+        public_records = _public_send_records(repo, raw_records)
+        records = _filter_send_records(
+            public_records,
+            status=status,
+            kind=kind,
+            target=target,
+            today_failed=today_failed,
+        )[: max(1, min(int(limit), 500))]
+        return {"records": records}
 
     @app.post("/api/send-records/{record_id}/resend")
     async def resend_send_record(record_id: int):
@@ -1791,12 +1834,30 @@ def create_app(
 
     @app.get("/api/system-status")
     def system_status():
-        return _build_system_status(repo, bool(app.state.scheduler_enabled), bool(app.state.cjk_font_ready))
+        return _build_system_status(repo, bool(app.state.scheduler_enabled), bool(app.state.cjk_font_ready), upload_dir=uploads)
+
+    @app.post("/api/uploads/cleanup")
+    def cleanup_uploads():
+        result = _cleanup_old_uploads(uploads)
+        return {"success": True, "result": result, "storage": _upload_storage_status(uploads)}
+
+    @app.get("/api/people-center")
+    def people_center():
+        return {"people": _build_people_center(repo)}
+
+    @app.get("/api/interaction-commands")
+    def interaction_commands():
+        return {"commands": _interaction_command_catalog(repo)}
 
     @app.get("/api/reminders/today")
     def today_reminders():
         today = _today_in_tz()
         return _reminder_events_response(repo, today, now=datetime.now(TZ))
+
+    @app.get("/api/reminders/diagnostics")
+    def reminder_diagnostics(target_date: date | None = None):
+        target = target_date or _today_in_tz()
+        return _reminder_diagnostics_response(repo, target, now=datetime.now(TZ))
 
     @app.post("/api/reminders/preview")
     def preview_reminders(request: PreviewRequest):
@@ -1946,20 +2007,29 @@ def _save_roster_upload(file: UploadFile, uploads: Path) -> Path:
     return target
 
 
-def _cleanup_old_uploads(uploads: Path) -> None:
+def _cleanup_old_uploads(uploads: Path) -> dict[str, int]:
+    uploads.mkdir(parents=True, exist_ok=True)
     now_ts = datetime.now(TZ).timestamp()
+    scanned = 0
+    deleted = 0
+    deleted_bytes = 0
     for path in uploads.iterdir():
         if not path.is_file():
             continue
+        scanned += 1
         keep_days = GENERATED_UPLOAD_KEEP_DAYS if _is_generated_upload(path.name) else UPLOAD_KEEP_DAYS
         if keep_days <= 0:
             continue
         try:
-            expired = path.stat().st_mtime < now_ts - keep_days * 86400
+            stat = path.stat()
+            expired = stat.st_mtime < now_ts - keep_days * 86400
         except FileNotFoundError:
             continue
         if expired:
             path.unlink(missing_ok=True)
+            deleted += 1
+            deleted_bytes += stat.st_size
+    return {"scanned": scanned, "deleted": deleted, "deleted_bytes": deleted_bytes}
 
 
 def _is_generated_upload(filename: str) -> bool:
@@ -1972,6 +2042,72 @@ def _is_generated_upload(filename: str) -> bool:
             "notification-detail-",
         )
     )
+
+
+def _upload_storage_status(uploads: Path) -> dict[str, Any]:
+    uploads.mkdir(parents=True, exist_ok=True)
+    now_ts = datetime.now(TZ).timestamp()
+    total_count = 0
+    total_size = 0
+    generated_count = 0
+    generated_size = 0
+    expired_generated = 0
+    expired_regular = 0
+    for path in uploads.iterdir():
+        if not path.is_file():
+            continue
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            continue
+        total_count += 1
+        total_size += stat.st_size
+        is_generated = _is_generated_upload(path.name)
+        keep_days = GENERATED_UPLOAD_KEEP_DAYS if is_generated else UPLOAD_KEEP_DAYS
+        if is_generated:
+            generated_count += 1
+            generated_size += stat.st_size
+        if keep_days > 0 and stat.st_mtime < now_ts - keep_days * 86400:
+            if is_generated:
+                expired_generated += 1
+            else:
+                expired_regular += 1
+    return {
+        "path": str(uploads),
+        "total_count": total_count,
+        "total_size": total_size,
+        "generated_count": generated_count,
+        "generated_size": generated_size,
+        "regular_count": total_count - generated_count,
+        "regular_size": total_size - generated_size,
+        "expired_generated_count": expired_generated,
+        "expired_regular_count": expired_regular,
+        "generated_keep_days": GENERATED_UPLOAD_KEEP_DAYS,
+        "upload_keep_days": UPLOAD_KEEP_DAYS,
+    }
+
+
+def _list_database_backups(repo: DutyRepository, limit: int = 30) -> list[dict[str, Any]]:
+    backup_dir = repo.db_path.parent / "backups"
+    if not backup_dir.exists():
+        return []
+    items: list[dict[str, Any]] = []
+    for path in backup_dir.iterdir():
+        if not path.is_file() or path.suffix.lower() != ".db":
+            continue
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            continue
+        items.append(
+            {
+                "filename": path.name,
+                "size": stat.st_size,
+                "created_at": datetime.fromtimestamp(stat.st_mtime, TZ).isoformat(),
+                "download_url": f"/api/config/backups/{path.name}",
+            }
+        )
+    return sorted(items, key=lambda item: str(item["created_at"]), reverse=True)[:limit]
 
 
 def _cleanup_uploads_job(uploads: Path) -> None:
@@ -2689,13 +2825,19 @@ def _wechat_query_image_reply_title(result: dict[str, Any]) -> str:
         "daily_duty_query": "今日在岗查询",
         "monitor": "监控查询",
         "monitor_all": "监控查询",
+        "monitor_range": "监控查询",
         "monitor_all_range": "监控查询",
         "reminder": "提醒查询",
         "reminder_all": "提醒查询",
+        "reminder_range": "提醒查询",
         "reminder_all_range": "提醒查询",
         "next_reminder": "下次提醒查询",
         "next_reminder_all": "下次提醒查询",
         "rest_query": "休息查询",
+        "patrol_record": "巡查记录查询",
+        "tunnel_mechanical": "隧道机电录入结果",
+        "tunnel_mechanical_modify": "隧道机电修改结果",
+        "tunnel_mechanical_result": "隧道机电查询结果",
     }.get(query_type, "查询")
 
 
@@ -3468,8 +3610,39 @@ def _wecom_app_userid_lookup(repo: DutyRepository) -> dict[str, str]:
 
 
 def _wecom_app_default_tousers(repo: DutyRepository) -> list[str]:
-    userids = list(dict.fromkeys(_wecom_app_userid_lookup(repo).values()))
-    return userids or ["@all"]
+    config = _notification_config_with_env_defaults(repo.get_notification_config())
+    target_names = [str(name or "").strip() for name in config.get("wecom_app_target_names", []) if str(name or "").strip()]
+    lookup = _wecom_app_userid_lookup(repo)
+    if target_names:
+        userids = [lookup.get(name, "") for name in target_names if lookup.get(name, "")]
+        return list(dict.fromkeys(userids))
+    userids = list(dict.fromkeys(lookup.values()))
+    return userids
+
+
+def _wecom_app_tousers_for_function(repo: DutyRepository, function_key: str) -> list[str]:
+    config = _notification_config_with_env_defaults(repo.get_notification_config())
+    function_targets = config.get("wecom_app_function_target_names") if isinstance(config.get("wecom_app_function_target_names"), dict) else {}
+    target_names = [
+        str(name or "").strip()
+        for name in list(function_targets.get(function_key) or [])
+        if str(name or "").strip()
+    ]
+    if not target_names:
+        return _wecom_app_default_tousers(repo)
+    lookup = _wecom_app_userid_lookup(repo)
+    return list(dict.fromkeys([lookup[name] for name in target_names if lookup.get(name)]))
+
+
+def _wecom_app_function_key_for_event_kind(kind: str) -> str:
+    base = _base_reminder_kind(kind)
+    if base in {"daily_duty", "daily_duty_test"}:
+        return "daily_duty"
+    if base in {"patrol_warning_start", "patrol_warning_end", "patrol_warning_test"}:
+        return "patrol_warning"
+    if base in {"notification_test", "wecom_app_test"}:
+        return "system"
+    return ""
 
 
 def _wecom_app_notify_client_from_config(config: dict[str, Any], repo: DutyRepository | None = None) -> WeComAppNotifyClient | None:
@@ -3524,14 +3697,15 @@ async def _handle_wecom_app_message(repo: DutyRepository, uploads: Path, message
         if image_path and _wecom_app_query_result_should_send_news(result):
             image_bytes = image_path.read_bytes()
             title = _wechat_query_image_reply_title(result)
+            description = _wecom_app_query_news_description(result, content)
             await client.send_news(
                 userid,
                 title=title,
-                description=content,
+                description=description,
                 image_bytes=image_bytes,
                 url=_notification_news_url(
                     title=title,
-                    description=content,
+                    description=description,
                     image_bytes=image_bytes,
                 ),
             )
@@ -3584,8 +3758,50 @@ def _wecom_app_query_result_should_send_news(result: dict[str, Any]) -> bool:
         "next_reminder_all",
         "rest_query",
         "patrol_record",
+        "tunnel_mechanical",
+        "tunnel_mechanical_modify",
         "tunnel_mechanical_result",
     }
+
+
+def _compact_wecom_news_text(value: Any, limit: int = 72) -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    return text if len(text) <= limit else text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def _wecom_app_query_news_description(result: dict[str, Any], fallback: str = "") -> str:
+    query_type = str(result.get("query_type") or "").strip()
+    details = result.get("details") if isinstance(result.get("details"), dict) else {}
+    if query_type == "rest_query":
+        total = int(details.get("total_days") or 0)
+        rested = int(details.get("rested_days") or 0)
+        remaining = int(details.get("remaining_days") or 0)
+        return f"本月休息{total}天｜已休{rested}天｜剩余{remaining}天" if total else "本月暂无休息排班"
+    if query_type == "daily_duty_query":
+        parts = [
+            f"{label}：{details.get(key)}"
+            for label, key in (("早班", "early"), ("中班", "middle"), ("晚班", "night"), ("明日早班", "tomorrow_early"))
+            if details.get(key)
+        ]
+        return _compact_wecom_news_text("｜".join(parts) or f"{result.get('target_date') or '今日'} 在岗信息")
+    if query_type == "patrol_record":
+        return _compact_wecom_news_text(
+            f"{result.get('name') or ''} {result.get('start_date') or ''}至{result.get('end_date') or ''}，"
+            f"{int(result.get('count') or 0)}条，{_patrol_record_group_count(result.get('records') or [])}次"
+        )
+    if query_type in {"tunnel_mechanical", "tunnel_mechanical_modify", "tunnel_mechanical_result"}:
+        date_text = str(result.get("finalCheckTime") or result.get("checkTime") or "").strip()
+        count = int(result.get("count") or 0)
+        labels = {"tunnel_mechanical": "录入", "tunnel_mechanical_modify": "修改", "tunnel_mechanical_result": "查询"}
+        return _compact_wecom_news_text(f"{date_text} 隧道机电{labels.get(query_type, '结果')}，共{count}条")
+    title = _wechat_query_image_reply_title(result)
+    source_text = "\n".join(dict.fromkeys([str(fallback or ""), str(result.get("reply") or "")]))
+    for line in source_text.splitlines():
+        text = line.strip(" -\t")
+        if not text or "图片已生成" in text or "正在发送" in text or text in {title, f"{title}结果如下："} or text.endswith("结果如下："):
+            continue
+        return _compact_wecom_news_text(text)
+    return "点击查看完整结果"
 
 
 def _handle_wecom_aibot_message(
@@ -5826,6 +6042,12 @@ def _public_notification_config(config: dict[str, Any]) -> dict[str, Any]:
         "wecom_app_token_configured": bool(wecom_app_token),
         "wecom_app_encoding_aes_key": "",
         "wecom_app_encoding_aes_key_configured": bool(wecom_app_encoding_aes_key),
+        "wecom_app_target_names": list(config.get("wecom_app_target_names") or []),
+        "wecom_app_target_names_text": "\n".join(list(config.get("wecom_app_target_names") or [])),
+        "wecom_app_function_target_names": dict(config.get("wecom_app_function_target_names") or {}),
+        "wecom_app_daily_duty_target_names_text": "\n".join(list((config.get("wecom_app_function_target_names") or {}).get("daily_duty") or [])),
+        "wecom_app_patrol_warning_target_names_text": "\n".join(list((config.get("wecom_app_function_target_names") or {}).get("patrol_warning") or [])),
+        "wecom_app_system_target_names_text": "\n".join(list((config.get("wecom_app_function_target_names") or {}).get("system") or [])),
         "wecom_app_callback_url": _public_app_url("/api/wecom-app/callback"),
         "lightagent_url": lightagent_url,
         "lightagent_configured": bool(lightagent_targets and (lightagent_url or wechat_bridge_enabled())),
@@ -7402,12 +7624,14 @@ def _tunnel_mechanical_result_row_matches_request(
 
 
 def _reminder_events_response(repo: DutyRepository, target: date, *, now: datetime) -> dict[str, Any]:
+    skipped_events = _skipped_reminder_events(repo, target)
     events = [*_plan_all_events(repo, target), *_plan_patrol_warning_display_events(repo, target, now=now)]
     events = sorted(events, key=lambda event: event.send_at)
     return {
         "target_date": target.isoformat(),
         "now_beijing": now.isoformat(),
-        "group_statuses": _today_reminder_group_statuses(repo, target, events),
+        "group_statuses": _today_reminder_group_statuses(repo, target, events, skipped_events=skipped_events),
+        "skipped_events": skipped_events,
         "events": [
             {
                 "kind": event.kind,
@@ -7422,6 +7646,199 @@ def _reminder_events_response(repo: DutyRepository, target: date, *, now: dateti
             for event in events
         ],
     }
+
+
+def _filter_send_records(
+    records: list[dict[str, Any]],
+    *,
+    status: str = "",
+    kind: str = "",
+    target: str = "",
+    today_failed: bool = False,
+) -> list[dict[str, Any]]:
+    clean_status = str(status or "").strip()
+    clean_kind = str(kind or "").strip()
+    clean_target = str(target or "").strip()
+    if today_failed:
+        clean_status = "failed"
+        today_start = datetime.combine(_today_in_tz(), datetime.min.time(), tzinfo=TZ).astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        today_start = ""
+    filtered: list[dict[str, Any]] = []
+    for record in records:
+        if clean_status and str(record.get("status") or "") != clean_status:
+            continue
+        if clean_kind and str(record.get("kind") or "") != clean_kind:
+            continue
+        if clean_target and clean_target not in str(record.get("target") or ""):
+            continue
+        if today_start and str(record.get("created_at") or "") < today_start:
+            continue
+        filtered.append(record)
+    return filtered
+
+
+def _build_people_center(repo: DutyRepository) -> list[dict[str, Any]]:
+    names = set(repo.list_personnel_names())
+    personnel_by_name = {str(person.get("name") or "").strip(): person for person in repo.list_personnel()}
+    monitored_by_name = {str(person.get("name") or "").strip(): person for person in repo.list_monitored_people()}
+    custom_by_name: dict[str, list[dict[str, Any]]] = {}
+    for reminder in repo.list_custom_reminders():
+        name = str(reminder.get("name") or "").strip()
+        if name:
+            custom_by_name.setdefault(name, []).append(reminder)
+            names.add(name)
+    for name in monitored_by_name:
+        if name:
+            names.add(name)
+    for roster in repo.list_roster_months():
+        for row in roster.get("grid") or []:
+            name = str(row.get("name") or "").strip()
+            if name:
+                names.add(name)
+    rows: list[dict[str, Any]] = []
+    for name in sorted(names, key=lambda value: value):
+        personnel = personnel_by_name.get(name, {})
+        monitored = monitored_by_name.get(name, {})
+        custom = custom_by_name.get(name, [])
+        wecom_userid = str(personnel.get("wecom_userid") or monitored.get("wecom_userid") or "").strip()
+        wechat_member = str(
+            personnel.get("wechat_group_member_name")
+            or personnel.get("wechat_group_runtime_sender_id")
+            or personnel.get("wechat_group_member_id")
+            or ""
+        ).strip()
+        rows.append(
+            {
+                "name": name,
+                "wecom_userid": wecom_userid,
+                "wecom_bound": bool(wecom_userid),
+                "wechat_group_member": wechat_member,
+                "wechat_group_bound": bool(wechat_member),
+                "mention_mobile": str(personnel.get("mention_mobile") or monitored.get("mention_mobile") or "").strip(),
+                "monitor_enabled": bool(monitored.get("enabled")) if monitored else False,
+                "monitor_configured": bool(monitored),
+                "daily_time": str(monitored.get("daily_time") or ""),
+                "before_shift_minutes": int(monitored.get("before_shift_minutes") or 0) if monitored else 0,
+                "rest_reminder_enabled": bool(monitored.get("rest_reminder_enabled")) if monitored else False,
+                "custom_reminder_count": len(custom),
+                "custom_enabled_count": len([item for item in custom if item.get("enabled") is not False]),
+                "tunnel_mechanical_partner": str(personnel.get("tunnel_mechanical_partner") or "").strip(),
+            }
+        )
+    return rows
+
+
+def _interaction_command_catalog(repo: DutyRepository) -> list[dict[str, Any]]:
+    menu_commands = {
+        str(item.get("command") or "").strip()
+        for group in _wecom_app_menu_groups(repo)
+        for item in group.get("items", [])
+        if str(item.get("command") or "").strip()
+    }
+
+    def item(command: str, feature: str, bind_required: bool, response_type: str, menu: bool, note: str = "") -> dict[str, Any]:
+        return {
+            "command": command,
+            "feature": feature,
+            "bind_required": bind_required,
+            "response_type": response_type,
+            "menu_available": menu,
+            "in_current_menu": command in menu_commands,
+            "note": note,
+        }
+
+    return [
+        item("菜单", "查询菜单", False, "文字", False, "发送后 5 分钟内可用数字选择菜单项"),
+        item("绑定商邱宏", "绑定企业微信/微信成员", False, "文字", False, "把当前发送者绑定到系统人员"),
+        item("查询我的绑定", "绑定查询", False, "文字", False),
+        item("查询今日在岗", "今日在岗", False, "图文", True),
+        item("查询今日监控", "监控班查询", False, "图文", True),
+        item("查询明日监控", "监控班查询", False, "图文", True),
+        item("查询本周监控", "监控班查询", False, "图文", True),
+        item("查询我的监控", "个人监控班查询", True, "图文", True),
+        item("查询休息", "休息统计", True, "图文", True, "可写 查询商邱宏休息"),
+        item("机电模板", "隧道机电模板", True, "文字", True),
+        item("修改模板", "隧道机电修改模板", True, "文字", True),
+        item("录入今日机电", "隧道机电录入", True, "文字确认/图文结果", True),
+        item("橙色预警巡查记录查询", "橙色预警巡查记录", True, "文字模板/图文结果", True),
+        item("查询商邱宏巡查记录 2026-08-01至2026-08-16", "巡查记录查询", False, "图文", False),
+    ]
+
+
+def _reminder_diagnostics_response(repo: DutyRepository, target: date, *, now: datetime) -> dict[str, Any]:
+    all_events = _plan_all_events(repo, target, include_wecom_unbound=True)
+    active_events = _plan_all_events(repo, target)
+    skipped = _skipped_reminder_events(repo, target)
+    skipped_keys = {(item["kind"], item["person_name"], item["send_at"]) for item in skipped}
+    active_keys = {(event.kind, event.person_name, event.send_at.isoformat()) for event in active_events}
+    rows: list[dict[str, str]] = []
+    for event in sorted(all_events, key=lambda item: item.send_at):
+        key = (event.kind, event.person_name, event.send_at.isoformat())
+        skipped_item = next((item for item in skipped if (item["kind"], item["person_name"], item["send_at"]) == key), None)
+        if skipped_item:
+            status = "skipped"
+            reason = skipped_item["reason"]
+        elif key in active_keys:
+            status = "due" if event.send_at <= now else "pending"
+            reason = "已到提醒时间，等待发送记录确认" if event.send_at <= now else "已生成，等待提醒时间"
+        else:
+            status = "filtered"
+            reason = "被当前通知渠道规则过滤"
+        rows.append(
+            {
+                "kind": event.kind,
+                "person_name": event.person_name,
+                "send_at": event.send_at.isoformat(),
+                "status": status,
+                "reason": reason,
+                "content": event.content,
+            }
+        )
+    generated_custom_keys = {
+        (event.person_name, event.key_suffix)
+        for event in all_events
+        if event.kind == "custom" and event.key_suffix
+    }
+    rows.extend(_missing_custom_reminder_diagnostics(repo, target, generated_custom_keys))
+    if not rows:
+        rows.append({"kind": "none", "person_name": "", "send_at": "", "status": "empty", "reason": "当天没有任何提醒计划", "content": ""})
+    return {"target_date": target.isoformat(), "now_beijing": now.isoformat(), "items": rows}
+
+
+def _missing_custom_reminder_diagnostics(repo: DutyRepository, target: date, generated_custom_keys: set[tuple[str, str]]) -> list[dict[str, str]]:
+    assignments = [assignment for roster in repo.list_roster_months() for assignment in _assignments_from_grid(roster)]
+    rows: list[dict[str, str]] = []
+    for reminder in repo.list_custom_reminders(enabled_only=True):
+        name = str(reminder.get("name") or "").strip()
+        shift_code = str(reminder.get("shift_code") or "").strip()
+        reminder_key = (name, str(reminder.get("id") or ""))
+        if not name or (reminder_key[1] and reminder_key in generated_custom_keys):
+            continue
+        try:
+            shift = Shift(shift_code)
+        except ValueError:
+            reason = "自定义提醒班次配置无效"
+        else:
+            person_assignments = [item for item in assignments if item.work_date == target and item.person_name == name]
+            if not person_assignments:
+                reason = f"{name} 当天没有排班"
+            elif not any(item.shift is shift for item in person_assignments):
+                expected_label = "晚班" if shift is Shift.NIGHT else shift.label
+                reason = f"{name} 当天不是{expected_label}"
+            else:
+                reason = "自定义提醒未生成，请检查文案或配置"
+        rows.append(
+            {
+                "kind": "custom",
+                "person_name": name,
+                "send_at": "",
+                "status": "not_generated",
+                "reason": reason,
+                "content": str(reminder.get("message") or ""),
+            }
+        )
+    return rows
 
 
 def _today_reminder_event_media(repo: DutyRepository, event: ReminderEvent, target: date) -> dict[str, str]:
@@ -7441,6 +7858,26 @@ def _today_reminder_event_media(repo: DutyRepository, event: ReminderEvent, targ
                 "image_alt": "公路巡查预警图片",
             }
     return {}
+
+
+def _skipped_reminder_events(repo: DutyRepository, target: date) -> list[dict[str, str]]:
+    if not bool(_notification_config_with_env_defaults(repo.get_notification_config()).get("wecom_app_enabled")):
+        return []
+    bound_lookup = _wecom_app_userid_lookup(repo)
+    planned = _plan_all_events(repo, target, include_wecom_unbound=True)
+    skipped: list[dict[str, str]] = []
+    for event in planned:
+        missing = _wecom_app_unbound_person_target(bound_lookup, event)
+        if missing:
+            skipped.append(
+                {
+                    "kind": event.kind,
+                    "person_name": missing,
+                    "send_at": event.send_at.isoformat(),
+                    "reason": _wecom_app_unbound_detail(missing),
+                }
+            )
+    return skipped
 
 
 def _plan_patrol_warning_display_events(repo: DutyRepository, target: date, *, now: datetime) -> list[ReminderEvent]:
@@ -7539,16 +7976,28 @@ def _patrol_warning_due_end_slot(warning: Any, config: dict[str, Any], *, now: d
     )
 
 
-def _today_reminder_group_statuses(repo: DutyRepository, target: date, events: list[ReminderEvent]) -> list[dict[str, str]]:
+def _today_reminder_group_statuses(
+    repo: DutyRepository,
+    target: date,
+    events: list[ReminderEvent],
+    *,
+    skipped_events: list[dict[str, str]] | None = None,
+) -> list[dict[str, str]]:
     statuses: list[dict[str, str]] = []
     event_kinds = {event.kind for event in events}
+    skipped_events = skipped_events or []
 
     monitored_count = len(repo.list_monitored_people(enabled_only=True))
     has_monitor_events = bool(event_kinds & {"daily", "before_shift", "rest"})
     if monitored_count == 0:
         statuses.append({"key": "monitor", "message": "未配置监控班提醒人员"})
     elif not has_monitor_events:
-        statuses.append({"key": "monitor", "message": "今日没有匹配到监控班提醒"})
+        skipped_monitor = [item for item in skipped_events if item.get("kind") in {"daily", "before_shift", "rest"}]
+        if skipped_monitor:
+            names = "、".join(list(dict.fromkeys(item["person_name"] for item in skipped_monitor))[:6])
+            statuses.append({"key": "monitor", "message": f"今日监控班提醒已生成但未发送：{names} 未绑定企业微信"})
+        else:
+            statuses.append({"key": "monitor", "message": "今日没有匹配到监控班提醒"})
 
     patrol_config = repo.get_patrol_warning_config()
     has_patrol_events = bool(event_kinds & {"patrol_warning_start", "patrol_warning_end"})
@@ -7566,13 +8015,23 @@ def _today_reminder_group_statuses(repo: DutyRepository, target: date, events: l
     if not repo.list_custom_reminders(enabled_only=True):
         statuses.append({"key": "custom", "message": "未配置自定义提醒"})
     elif "custom" not in event_kinds:
-        statuses.append({"key": "custom", "message": "今日没有匹配到自定义提醒"})
+        skipped_custom = [item for item in skipped_events if item.get("kind") == "custom"]
+        if skipped_custom:
+            names = "、".join(list(dict.fromkeys(item["person_name"] for item in skipped_custom))[:6])
+            statuses.append({"key": "custom", "message": f"今日自定义提醒已生成但未发送：{names} 未绑定企业微信"})
+        else:
+            statuses.append({"key": "custom", "message": "今日没有匹配到自定义提醒"})
 
     vacation_config = repo.get_vacation_reminder_config()
     if not vacation_config.get("enabled"):
         statuses.append({"key": "vacation", "message": "假期余额提醒未启用"})
     elif not (event_kinds & {"vacation_start", "vacation_end"}):
-        statuses.append({"key": "vacation", "message": "今日没有假期余额提醒"})
+        skipped_vacation = [item for item in skipped_events if item.get("kind") in {"vacation_start", "vacation_end"}]
+        if skipped_vacation:
+            names = "、".join(list(dict.fromkeys(item["person_name"] for item in skipped_vacation))[:6])
+            statuses.append({"key": "vacation", "message": f"今日假期提醒已生成但未发送：{names} 未绑定企业微信"})
+        else:
+            statuses.append({"key": "vacation", "message": "今日没有假期余额提醒"})
 
     return statuses
 
@@ -7896,12 +8355,12 @@ def _plan_custom_reminder_events(repo: DutyRepository, assignments: list[ShiftAs
     return events
 
 
-def _plan_vacation_reminder_events(repo: DutyRepository, target: date) -> list[ReminderEvent]:
+def _plan_vacation_reminder_events(repo: DutyRepository, target: date, *, include_wecom_unbound: bool = False) -> list[ReminderEvent]:
     config = repo.get_vacation_reminder_config()
     if not bool(config.get("enabled")):
         return []
     names = _wechat_query_all_person_names_for_date(repo, target)
-    if bool(_notification_config_with_env_defaults(repo.get_notification_config()).get("wecom_app_enabled")):
+    if not include_wecom_unbound and bool(_notification_config_with_env_defaults(repo.get_notification_config()).get("wecom_app_enabled")):
         bound_lookup = _wecom_app_userid_lookup(repo)
         names = [name for name in names if bound_lookup.get(name)]
     tomorrow = target + timedelta(days=1)
@@ -7956,7 +8415,7 @@ def _choose_template(values: Any, fallback: str) -> str:
     return secrets.choice(choices)
 
 
-def _plan_all_events(repo: DutyRepository, target: date):
+def _plan_all_events(repo: DutyRepository, target: date, *, include_wecom_unbound: bool = False):
     assignments: list[ShiftAssignment] = []
     for roster_month in repo.list_roster_months():
         assignments.extend(_assignments_from_grid(roster_month))
@@ -8013,11 +8472,14 @@ def _plan_all_events(repo: DutyRepository, target: date):
             )
         )
     events.extend(_plan_custom_reminder_events(repo, assignments, target))
-    events.extend(_plan_vacation_reminder_events(repo, target))
+    events.extend(_plan_vacation_reminder_events(repo, target, include_wecom_unbound=include_wecom_unbound))
+    if not include_wecom_unbound and bool(_notification_config_with_env_defaults(repo.get_notification_config()).get("wecom_app_enabled")):
+        bound_lookup = _wecom_app_userid_lookup(repo)
+        events = [event for event in events if not _wecom_app_unbound_person_target(bound_lookup, event)]
     return sorted(events, key=lambda event: event.send_at)
 
 
-def _build_system_status(repo: DutyRepository, scheduler_enabled: bool, cjk_font_ready: bool) -> dict[str, Any]:
+def _build_system_status(repo: DutyRepository, scheduler_enabled: bool, cjk_font_ready: bool, upload_dir: Path | None = None) -> dict[str, Any]:
     now = datetime.now(TZ)
     today_start = datetime.combine(now.date(), datetime.min.time(), tzinfo=TZ).astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%d %H:%M:%S")
     records_today = _public_send_records(repo, repo.list_send_records_since(today_start))
@@ -8025,9 +8487,14 @@ def _build_system_status(repo: DutyRepository, scheduler_enabled: bool, cjk_font
     patrol_config = repo.get_patrol_warning_config()
     patrol_state = repo.get_patrol_warning_state()
     notification_config = _public_notification_config(repo.get_notification_config())
+    checks = _build_system_checks(repo, scheduler_enabled=scheduler_enabled, cjk_font_ready=cjk_font_ready, notification_config=notification_config)
+    severity_order = {"error": 3, "warning": 2, "ok": 1}
+    overall = max(checks, key=lambda item: severity_order.get(str(item.get("status") or ""), 0))["status"] if checks else "ok"
     return {
         "now_beijing": now.isoformat(),
         "timezone": str(TZ),
+        "overall_status": overall,
+        "checks": checks,
         "scheduler_enabled": scheduler_enabled,
         "webhook_configured": bool(notification_config.get("webhook_configured")),
         "notification_configured": bool(notification_config.get("notification_configured")),
@@ -8040,6 +8507,8 @@ def _build_system_status(repo: DutyRepository, scheduler_enabled: bool, cjk_font
         "today_failed_count": len(failed_records),
         "last_error": failed_records[0]["error"] if failed_records else "",
         "next_events": _next_events(repo, now),
+        "backup_count": len(_list_database_backups(repo)),
+        "upload_storage": _upload_storage_status(upload_dir) if upload_dir is not None else {},
         "patrol_warning_monitor": {
             "enabled": bool(patrol_config.get("enabled")),
             "route_code": str(patrol_config.get("route_code") or ""),
@@ -8053,6 +8522,104 @@ def _build_system_status(repo: DutyRepository, scheduler_enabled: bool, cjk_font
             "last_warning_key": str(patrol_state.get("warning_key") or ""),
         },
     }
+
+
+def _build_system_checks(
+    repo: DutyRepository,
+    *,
+    scheduler_enabled: bool,
+    cjk_font_ready: bool,
+    notification_config: dict[str, Any],
+) -> list[dict[str, str]]:
+    checks: list[dict[str, str]] = []
+
+    def add(key: str, title: str, status: str, message: str, action: str = "") -> None:
+        checks.append({"key": key, "title": title, "status": status, "message": message, "action": action})
+
+    db_status = "ok"
+    db_message = "数据库可读写"
+    try:
+        with repo._connect() as conn:
+            conn.execute("CREATE TEMP TABLE IF NOT EXISTS duty_reminder_health_check (id INTEGER)")
+            conn.execute("INSERT INTO duty_reminder_health_check (id) VALUES (1)")
+            conn.execute("DELETE FROM duty_reminder_health_check")
+            journal = conn.execute("PRAGMA journal_mode").fetchone()
+            busy = conn.execute("PRAGMA busy_timeout").fetchone()
+            db_message = f"可读写，journal={journal[0] if journal else '-'}，busy_timeout={busy[0] if busy else '-'}ms"
+    except Exception as exc:
+        db_status = "error"
+        db_message = f"数据库读写异常：{exc}"
+    add("database", "数据库", db_status, db_message, "检查 data 目录挂载和磁盘权限")
+
+    add(
+        "scheduler",
+        "后台调度",
+        "ok" if scheduler_enabled else "warning",
+        "已启动" if scheduler_enabled else "未启动，定时提醒不会自动发送",
+        "检查服务启动日志和 APScheduler 依赖",
+    )
+    add(
+        "notification",
+        "通知通道",
+        "ok" if notification_config.get("notification_configured") else "error",
+        "已配置" if notification_config.get("notification_configured") else "未配置通知通道，提醒只会生成不会发送",
+        "到配置中心设置企业微信自建应用/群机器人/个人微信群",
+    )
+    add(
+        "font",
+        "中文字体",
+        "ok" if cjk_font_ready else "warning",
+        "图片中文字体可用" if cjk_font_ready else "缺少中文字体，生成图片可能乱码或方块",
+        "Docker 镜像内安装中文字体",
+    )
+
+    rosters = repo.list_roster_months()
+    add(
+        "roster",
+        "排班数据",
+        "ok" if rosters else "warning",
+        f"已导入 {len(rosters)} 个月排班" if rosters else "尚未导入排班，监控/休息/今日在岗无法按真实数据生成",
+        "先导入并确认最新排班",
+    )
+
+    monitored = repo.list_monitored_people(enabled_only=True)
+    add(
+        "monitor_people",
+        "监控班提醒",
+        "ok" if monitored else "warning",
+        f"已启用 {len(monitored)} 人" if monitored else "未启用任何监控班提醒人员",
+        "到监控班提醒配置人员",
+    )
+
+    if bool(notification_config.get("wecom_app_enabled")):
+        bound = _wecom_app_userid_lookup(repo)
+        monitored_missing = [str(person.get("name") or "").strip() for person in monitored if not bound.get(str(person.get("name") or "").strip())]
+        custom_names = sorted({str(item.get("name") or "").strip() for item in repo.list_custom_reminders(enabled_only=True) if str(item.get("name") or "").strip()})
+        custom_missing = [name for name in custom_names if not bound.get(name)]
+        public_targets = list(notification_config.get("wecom_app_target_names") or [])
+        public_missing = [name for name in public_targets if not bound.get(str(name or "").strip())]
+        missing = list(dict.fromkeys([*monitored_missing, *custom_missing, *public_missing]))
+        add(
+            "wecom_binding",
+            "企业微信绑定",
+            "ok" if not missing else "warning",
+            "所有已配置人员均已绑定" if not missing else f"未绑定 {len(missing)} 人：{'、'.join(missing[:8])}{'等' if len(missing) > 8 else ''}",
+            "让对应人员在企业微信自建应用发送“绑定姓名”",
+        )
+
+    patrol_config = repo.get_patrol_warning_config()
+    patrol_state = repo.get_patrol_warning_state()
+    patrol_error = str(patrol_state.get("last_error") or "").strip()
+    add(
+        "patrol_warning",
+        "公路巡查预警",
+        "warning" if patrol_config.get("enabled") and patrol_error else ("ok" if patrol_config.get("enabled") else "warning"),
+        (f"已启用，最近错误：{_sanitize_wechat_ids_for_display(repo, patrol_error)}" if patrol_error else "已启用")
+        if patrol_config.get("enabled")
+        else "未启用",
+        "检查账号、验证码、代理和轮询状态",
+    )
+    return checks
 
 
 def _next_events(repo: DutyRepository, now: datetime, *, days: int = 7, limit: int = 5) -> list[dict[str, str]]:
@@ -8333,8 +8900,25 @@ def _split_mention_targets(value: Any) -> list[str]:
     return targets
 
 
+def _base_reminder_kind(kind: str) -> str:
+    value = str(kind or "").strip()
+    while value.endswith("_resend"):
+        value = value[: -len("_resend")]
+    return value
+
+
 def _person_target_for_event(event: ReminderEvent) -> str:
-    if event.kind in {"daily", "before_shift", "rest", "custom", "monitor_test", "custom_test", "vacation_start", "vacation_end", "vacation_test"}:
+    if _base_reminder_kind(event.kind) in {"daily", "before_shift", "rest", "custom", "monitor_test", "custom_test", "vacation_start", "vacation_end", "vacation_test"}:
+        name = str(event.person_name or "").strip()
+        return name if name and name != "测试消息" else ""
+    return ""
+
+
+def _wecom_app_person_target_for_event(event: ReminderEvent) -> str:
+    person_target = _person_target_for_event(event)
+    if person_target:
+        return person_target
+    if _base_reminder_kind(event.kind) == "notification_test":
         name = str(event.person_name or "").strip()
         return name if name and name != "测试消息" else ""
     return ""
@@ -8456,10 +9040,7 @@ def _shift_reminder_intro_content(event: ReminderEvent, *, personal_wechat: bool
 
 
 def _is_shift_reminder_kind(kind: str) -> bool:
-    value = str(kind or "").strip()
-    while value.endswith("_resend"):
-        value = value[: -len("_resend")]
-    return value in {"daily", "before_shift", "monitor_test"}
+    return _base_reminder_kind(kind) in {"daily", "before_shift", "monitor_test"}
 
 
 def _person_mobile_lookup(repo: DutyRepository) -> dict[str, str]:
@@ -8485,6 +9066,7 @@ async def _send_test_reminder_event(
     event: ReminderEvent,
     record_kind: str,
 ) -> dict[str, Any]:
+    _raise_if_wecom_app_unbound_person(repo, notification_client, event)
     mentions = _notification_true_mentions_for_event(repo, notification_client, event)
     content = _notification_content_for_event(repo, notification_client, event)
     target = event.person_name or "测试消息"
@@ -8777,16 +9359,32 @@ def _notification_target_room_ids_for_event(event: ReminderEvent) -> list[str] |
 
 def _notification_target_ids_for_event(repo: DutyRepository, client: Any, event: ReminderEvent) -> list[str] | None:
     if _is_wecom_app_notify_client(client):
-        person_target = _person_target_for_event(event)
-        if not person_target and event.kind == "notification_test":
-            person_target = str(event.person_name or "").strip()
+        person_target = _wecom_app_person_target_for_event(event)
         if person_target:
             userid = _wecom_app_userid_lookup(repo).get(person_target, "")
-            if str(event.kind or "").endswith("_test") and not userid:
-                return None
             return [userid] if userid else []
+        function_key = _wecom_app_function_key_for_event_kind(event.kind)
+        if function_key:
+            return _wecom_app_tousers_for_function(repo, function_key)
         return None
     return _notification_target_room_ids_for_event(event)
+
+
+def _wecom_app_unbound_person_target(bound_lookup: dict[str, str], event: ReminderEvent) -> str:
+    person_target = _wecom_app_person_target_for_event(event)
+    return person_target if person_target and not bound_lookup.get(person_target) else ""
+
+
+def _wecom_app_unbound_detail(name: str) -> str:
+    return f"{name} 还没有绑定企业微信成员，请先让他在企业微信自建应用发送“绑定{name}”。"
+
+
+def _raise_if_wecom_app_unbound_person(repo: DutyRepository, client: Any, event: ReminderEvent) -> None:
+    if not _is_wecom_app_notify_client(client):
+        return
+    missing_target = _wecom_app_unbound_person_target(_wecom_app_userid_lookup(repo), event)
+    if missing_target:
+        raise HTTPException(status_code=400, detail=_wecom_app_unbound_detail(missing_target))
 
 
 def _daily_duty_target_room_ids(repo: DutyRepository) -> list[str] | None:
@@ -8968,6 +9566,7 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
         if kind in {"daily_duty", "daily_duty_test", "daily_duty_resend"}:
             preview_date = _date_from_record(record) or _today_in_tz()
             fake_event = ReminderEvent(kind=kind, person_name="今日在岗人员", send_at=datetime.now(TZ), content=content)
+            _raise_if_wecom_app_unbound_person(repo, client, fake_event)
             target_ids = _notification_target_ids_for_event(repo, client, fake_event) if _is_wecom_app_notify_client(client) else (record_target_ids or _daily_duty_target_room_ids(repo))
             mode = _normalize_send_content_mode(str(repo.get_daily_duty_config().get("send_content_mode") or "both"), "both")
             await _send_graphic_or_text_image(
@@ -8981,6 +9580,7 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
             )
         elif kind.startswith("patrol_warning_"):
             fake_event = ReminderEvent(kind=kind, person_name="", send_at=datetime.now(TZ), content=content)
+            _raise_if_wecom_app_unbound_person(repo, client, fake_event)
             content = _notification_content_for_event(repo, client, fake_event)
             target_ids = _notification_target_ids_for_event(repo, client, fake_event) if _is_wecom_app_notify_client(client) else (record_target_ids or _patrol_warning_target_room_ids(repo))
             await _notify_send_text(client, content, _notification_true_mentions_for_event(repo, client, fake_event), target_ids)
@@ -8991,6 +9591,7 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
                 send_at=datetime.now(TZ),
                 content=content,
             )
+            _raise_if_wecom_app_unbound_person(repo, client, fake_event)
             mentions = _notification_true_mentions_for_event(repo, client, fake_event)
             resend_target_ids = _notification_target_ids_for_event(repo, client, fake_event) if _is_wecom_app_notify_client(client) else (record_target_ids or _configured_person_target_room_ids(repo, target))
             mode = "both" if _is_shift_reminder_kind(kind) else "text"
@@ -9019,6 +9620,7 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
                 send_at=datetime.now(TZ),
                 content=content,
             )
+            _raise_if_wecom_app_unbound_person(repo, client, fake_event)
             content = _notification_content_for_event(repo, client, fake_event)
             target_ids = _notification_target_ids_for_event(repo, client, fake_event) if _is_wecom_app_notify_client(client) else (record_target_ids or _configured_person_target_room_ids(repo, target))
             await _notify_send_text(client, content, _notification_true_mentions_for_event(repo, client, fake_event), target_ids)
@@ -9031,6 +9633,8 @@ async def _resend_send_record(repo: DutyRepository, record: dict[str, Any]) -> d
             notification_room_id=str(record.get("notification_room_id") or ""),
             notification_room_name=str(record.get("notification_room_name") or ""),
         )
+    except HTTPException:
+        raise
     except WeComError as exc:
         repo.save_send_record(
             kind=resend_kind,
@@ -9076,8 +9680,14 @@ async def _send_due_reminders(repo: DutyRepository) -> None:
     if notification_client is None:
         return
 
+    is_wecom_app_client = _is_wecom_app_notify_client(notification_client)
+    wecom_app_bound_lookup = _wecom_app_userid_lookup(repo) if is_wecom_app_client else {}
     for event in events:
         if not (now - REMINDER_SEND_GRACE <= event.send_at <= now):
+            continue
+        missing_target = _wecom_app_unbound_person_target(wecom_app_bound_lookup, event) if is_wecom_app_client else ""
+        if missing_target:
+            LOGGER.info("跳过未绑定企业微信成员的提醒：%s %s", event.kind, missing_target)
             continue
         content_hash = hashlib.sha256(event.content.encode("utf-8")).hexdigest()[:12]
         reminder_key = f"{event.person_name}:{event.kind}:{event.send_at.isoformat()}:{event.key_suffix}:{event.target_room_id}:{content_hash}"

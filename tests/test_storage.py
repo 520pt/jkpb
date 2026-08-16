@@ -52,6 +52,7 @@ def test_notification_config_persists_wecom_app_fields(tmp_path: Path):
         wecom_app_secret="secret",
         wecom_app_token="token",
         wecom_app_encoding_aes_key="aes-key",
+        wecom_app_target_names=["商邱宏", "罗熙云", "商邱宏"],
     )
 
     config = repo.get_notification_config()
@@ -61,6 +62,22 @@ def test_notification_config_persists_wecom_app_fields(tmp_path: Path):
     assert config["wecom_app_secret"] == "secret"
     assert config["wecom_app_token"] == "token"
     assert config["wecom_app_encoding_aes_key"] == "aes-key"
+    assert config["wecom_app_target_names"] == ["商邱宏", "罗熙云"]
+
+
+def test_monitored_and_custom_reminders_include_enterprise_wecom_binding_from_personnel(tmp_path: Path):
+    repo = DutyRepository(tmp_path / "duty.db")
+    repo.upsert_personnel_contacts([{"name": "罗熙云", "wecom_userid": "luoxiyun"}])
+    repo.save_monitored_person(name="罗熙云", daily_time="07:50", before_shift_minutes=10)
+    repo.save_custom_reminder(
+        name="罗熙云",
+        shift_code="early",
+        reminder_time="07:50",
+        message="开启隧道灯",
+    )
+
+    assert repo.list_monitored_people()[0]["wecom_userid"] == "luoxiyun"
+    assert repo.list_custom_reminders()[0]["wecom_userid"] == "luoxiyun"
 
 
 def test_saving_roster_replaces_same_month(tmp_path: Path):
@@ -502,6 +519,8 @@ def test_saving_notification_config_replaces_existing_value(tmp_path: Path):
         "wecom_app_secret": "",
         "wecom_app_token": "",
         "wecom_app_encoding_aes_key": "",
+        "wecom_app_target_names": [],
+        "wecom_app_function_target_names": {},
         "lightagent_url": "",
         "lightagent_token": "",
         "lightagent_target": "",

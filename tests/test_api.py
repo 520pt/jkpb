@@ -125,6 +125,14 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'id="settingsOverview"' in html
     assert 'id="exportConfigBtn"' in html
     assert 'id="importConfigBtn"' in html
+    assert 'id="createDbBackupBtn"' in html
+    assert 'id="databaseBackupsList"' in html
+    assert 'id="cleanupUploadsBtn"' in html
+    assert 'data-settings-target="personCenterSettings"' in html
+    assert 'data-settings-target="interactionCommandSettings"' in html
+    assert 'data-settings-target="reminderDiagnosticSettings"' in html
+    assert 'id="recordStatusFilter"' in html
+    assert 'id="recordKindFilter"' in html
     assert 'id="importConfigFile"' in html
     assert 'id="configBackupStatus"' in html
     assert 'function exportConfig' in html
@@ -403,6 +411,9 @@ def test_config_import_route_restores_configuration_and_overwrites_existing_data
 
     assert response.status_code == 200
     assert response.json()["success"] is True
+    backup = response.json()["backup"]
+    assert backup["filename"].startswith("before-config-import-")
+    assert (tmp_path / "target" / "data" / "backups" / backup["filename"]).is_file()
     assert target_repo.get_notification_config()["lightagent_token"] == "push-token"
     assert target_repo.get_notification_config()["lightagent_target"] == "wgr_notice"
     assert target_repo.get_daily_duty_config()["reminder_time"] == "07:20"
@@ -412,6 +423,55 @@ def test_config_import_route_restores_configuration_and_overwrites_existing_data
     assert target_repo.list_custom_reminders()[0]["reminder_time"] == "07:50"
     assert target_repo.get_roster_month(2026, 8)["grid"][0]["days"]["1"] == "早"
     assert all(person["name"] != "旧姓名" for person in target_repo.list_personnel())
+
+
+def test_database_backup_list_create_and_download_routes(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_personnel_names(["示例甲"])
+
+    create_response = client.post("/api/config/backups")
+
+    assert create_response.status_code == 200
+    backup = create_response.json()["backup"]
+    assert backup["filename"].startswith("manual-backup-")
+
+    list_response = client.get("/api/config/backups")
+    backups = list_response.json()["backups"]
+    assert backups[0]["filename"] == backup["filename"]
+    assert backups[0]["download_url"] == f"/api/config/backups/{backup['filename']}"
+
+    download = client.get(backups[0]["download_url"])
+    assert download.status_code == 200
+    assert len(download.content) > 0
+
+
+def test_upload_cleanup_status_and_manual_cleanup_route(tmp_path):
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    old_generated = upload_dir / "wechat-query-old.png"
+    old_generated.write_bytes(b"old")
+    old_regular = upload_dir / "regular.png"
+    old_regular.write_bytes(b"old-regular")
+    fresh = upload_dir / "wechat-query-fresh.png"
+    fresh.write_bytes(b"fresh")
+    old_ts = (datetime.now(TZ) - timedelta(days=3)).timestamp()
+    os.utime(old_generated, (old_ts, old_ts))
+    os.utime(old_regular, (old_ts, old_ts))
+
+    app = create_app(data_dir=tmp_path / "data", upload_dir=upload_dir, start_scheduler=False)
+    client = TestClient(app)
+
+    status = client.get("/api/system-status").json()["upload_storage"]
+    assert status["expired_generated_count"] == 1
+    assert status["expired_regular_count"] == 0
+
+    cleanup = client.post("/api/uploads/cleanup").json()
+    assert cleanup["result"]["deleted"] == 1
+    assert not old_generated.exists()
+    assert old_regular.exists()
+    assert fresh.exists()
 
 
 def test_config_import_route_restores_wechat_bridge_identity(tmp_path):
@@ -488,6 +548,22 @@ def test_send_record_kind_labels_cover_backend_record_kinds():
     frontend_labels = set(re.findall(r"\n\s*([A-Za-z0-9_]+):\s*\"", match.group(1)))
 
     assert sorted(expected_kinds - frontend_labels) == []
+
+
+def test_notification_channel_ui_uses_current_selected_channel():
+    root = Path(__file__).resolve().parents[1]
+    html = (root / "app" / "static" / "index.html").read_text(encoding="utf-8")
+
+    assert "function selectedNotificationSenderType()" in html
+    assert 'return selectedNotificationSenderType() === "lightagent";' in html
+    assert 'return selectedNotificationSenderType() === "wecom_app";' in html
+    assert '$("notificationSenderType").value = senderType;' in html
+    assert '$("wecomAppEnabled").checked = senderType === "wecom_app";' in html
+    assert 'wecom_app_enabled: useWecomApp' in html
+    assert 'wecom_aibot_enabled: !useWecomApp && senderType === "wecom_webhook"' in html
+    assert 'if (!isLightAgentNotificationSelected()) return { notification_room_id: "", notification_room_name: "" };' in html
+    assert '$("wecomAppEnabled").addEventListener("change"' in html
+    assert '企业微信自建应用：使用自建应用菜单/私聊命令' in html
 
 
 def test_tunnel_mechanical_templates_are_empty_until_imported(tmp_path):
@@ -4987,6 +5063,288 @@ def test_vacation_reminder_plans_start_and_end_events(tmp_path):
     assert any(event.kind == "vacation_end" and event.person_name == "罗富耀" and event.send_at.strftime("%H:%M") == "07:55" for event in end_events)
 
 
+def test_wecom_app_vacation_test_rejects_unbound_person_without_record(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    repo: DutyRepository = app.state.repo
+    repo.upsert_personnel_names(["刘显坤"])
+    repo.save_notification_config(
+        webhook_url="",
+        wecom_app_enabled=True,
+        wecom_app_corp_id="ww-test",
+        wecom_app_agent_id="1000002",
+        wecom_app_secret="secret",
+        wecom_app_token="token",
+        wecom_app_encoding_aes_key="abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
+    )
+
+    response = client.post("/api/vacation-reminder-config/test", json={"enabled": True})
+
+    assert response.status_code == 400
+    assert "刘显坤 还没有绑定企业微信成员" in response.json()["detail"]
+    assert client.get("/api/send-records").json()["records"] == []
+
+
+def test_wecom_app_person_tests_reject_unbound_people_without_record(tmp_path, monkeypatch):
+    class FakeWeComAppClient:
+        is_wecom_app_notify = True
+
+        async def send_text(self, *args, **kwargs):
+            raise AssertionError("未绑定人员不应该发送文字")
+
+        async def send_image(self, *args, **kwargs):
+            raise AssertionError("未绑定人员不应该发送图片")
+
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    fake_client = FakeWeComAppClient()
+    monkeypatch.setattr(main_module, "_notification_client_from_config", lambda config: fake_client)
+    monkeypatch.setattr(main_module, "_notification_client_from_repo", lambda repo: fake_client)
+
+    monitor_response = client.post(
+        "/api/people/test",
+        json={
+            "name": "未绑定监控",
+            "daily_time": "07:50",
+            "before_shift_minutes": 10,
+            "enabled": True,
+        },
+    )
+    custom_response = client.post(
+        "/api/custom-reminders/test",
+        json={
+            "name": "未绑定自定义",
+            "shift_code": "night",
+            "reminder_time": "21:00",
+            "message": "关闭隧道灯",
+            "enabled": True,
+        },
+    )
+    notification_response = client.post("/api/notification-config/test", json={"person_name": "未绑定测试"})
+
+    assert monitor_response.status_code == 400
+    assert "未绑定监控 还没有绑定企业微信成员" in monitor_response.json()["detail"]
+    assert custom_response.status_code == 400
+    assert "未绑定自定义 还没有绑定企业微信成员" in custom_response.json()["detail"]
+    assert notification_response.status_code == 400
+    assert "未绑定测试 还没有绑定企业微信成员" in notification_response.json()["detail"]
+    assert client.get("/api/send-records").json()["records"] == []
+
+
+def test_wecom_app_planned_person_reminders_skip_unbound_people(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    repo: DutyRepository = app.state.repo
+    repo.save_notification_config(webhook_url="", wecom_app_enabled=True)
+    repo.upsert_personnel_names(["已绑定", "未绑定"])
+    repo.upsert_personnel_contacts([{"name": "已绑定", "wecom_userid": "bound-user"}])
+    repo.save_daily_duty_config(enabled=True, reminder_time="07:50")
+    for name in ["已绑定", "未绑定"]:
+        repo.save_monitored_person(
+            name=name,
+            daily_time="07:40",
+            before_shift_minutes=5,
+            rest_reminder_enabled=True,
+            rest_reminder_time="08:30",
+            enabled=True,
+        )
+        repo.save_custom_reminder(
+            name=name,
+            shift_code="middle",
+            reminder_time="08:00",
+            message="自定义提醒",
+            enabled=True,
+        )
+    repo.save_vacation_reminder_config(enabled=True, start_reminder_time="07:50", end_reminder_time="07:55")
+    repo.save_roster_month(
+        2026,
+        8,
+        [
+            {"name": "已绑定", "days": {"16": "中", "17": "休", "18": "中"}},
+            {"name": "未绑定", "days": {"16": "中", "17": "休", "18": "中"}},
+        ],
+        "",
+    )
+
+    events = main_module._plan_all_events(repo, date(2026, 8, 16))
+    rest_day_events = main_module._plan_all_events(repo, date(2026, 8, 17))
+
+    person_events = [event for event in events if event.person_name in {"已绑定", "未绑定"}]
+    assert {event.kind for event in person_events if event.person_name == "已绑定"} >= {"daily", "before_shift", "custom", "vacation_start"}
+    assert not any(event.person_name == "未绑定" for event in person_events)
+    assert any(event.kind == "daily_duty" for event in events)
+    rest_person_events = [event for event in rest_day_events if event.person_name in {"已绑定", "未绑定"}]
+    assert {event.kind for event in rest_person_events if event.person_name == "已绑定"} >= {"rest", "vacation_end"}
+    assert not any(event.person_name == "未绑定" for event in rest_person_events)
+
+
+def test_wecom_app_public_notification_targets_can_be_limited_to_selected_bound_people(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    repo: DutyRepository = app.state.repo
+    repo.upsert_personnel_contacts([
+        {"name": "罗熙云", "wecom_userid": "luoxiyun"},
+        {"name": "罗富耀", "wecom_userid": "luofuyao"},
+        {"name": "未绑定"},
+    ])
+    repo.save_notification_config(
+        webhook_url="",
+        wecom_app_enabled=True,
+        wecom_app_corp_id="ww-test",
+        wecom_app_agent_id="1000002",
+        wecom_app_secret="secret",
+        wecom_app_token="token",
+        wecom_app_encoding_aes_key="abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
+        wecom_app_target_names=["罗熙云", "未绑定"],
+    )
+
+    config = client.get("/api/notification-config").json()["config"]
+
+    assert config["wecom_app_target_names"] == ["罗熙云", "未绑定"]
+    assert main_module._wecom_app_default_tousers(repo) == ["luoxiyun"]
+
+
+def test_wecom_app_public_notification_targets_can_be_split_by_function(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    repo: DutyRepository = app.state.repo
+    repo.upsert_personnel_contacts([
+        {"name": "罗熙云", "wecom_userid": "luoxiyun"},
+        {"name": "罗富耀", "wecom_userid": "luofuyao"},
+        {"name": "商邱宏", "wecom_userid": "shangqiuhong"},
+    ])
+    repo.save_notification_config(
+        webhook_url="",
+        wecom_app_enabled=True,
+        wecom_app_corp_id="ww-test",
+        wecom_app_agent_id="1000002",
+        wecom_app_secret="secret",
+        wecom_app_token="token",
+        wecom_app_encoding_aes_key="abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
+        wecom_app_target_names=["罗熙云"],
+        wecom_app_function_target_names={
+            "daily_duty": ["罗富耀"],
+            "patrol_warning": ["商邱宏", "未绑定"],
+        },
+    )
+
+    daily_event = main_module.ReminderEvent(kind="daily_duty", person_name="今日在岗人员", send_at=datetime.now(), content="")
+    patrol_event = main_module.ReminderEvent(kind="patrol_warning_start", person_name="", send_at=datetime.now(), content="")
+    custom_event = main_module.ReminderEvent(kind="other_public", person_name="", send_at=datetime.now(), content="")
+
+    assert main_module._notification_target_ids_for_event(repo, main_module.WeComAppNotifyClient.__new__(main_module.WeComAppNotifyClient), daily_event) == ["luofuyao"]
+    assert main_module._notification_target_ids_for_event(repo, main_module.WeComAppNotifyClient.__new__(main_module.WeComAppNotifyClient), patrol_event) == ["shangqiuhong"]
+    assert main_module._notification_target_ids_for_event(repo, main_module.WeComAppNotifyClient.__new__(main_module.WeComAppNotifyClient), custom_event) is None
+
+
+def test_people_center_summarizes_bindings_and_reminders(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    repo: DutyRepository = app.state.repo
+    repo.upsert_personnel_contacts([
+        {
+            "name": "商邱宏",
+            "wecom_userid": "shangqiuhong",
+            "wechat_group_member_name": "商邱宏微信",
+            "mention_mobile": "10000000000",
+            "tunnel_mechanical_partner": "罗富耀",
+        }
+    ])
+    repo.save_monitored_person(name="商邱宏", daily_time="07:50", before_shift_minutes=10, rest_reminder_enabled=True)
+    repo.save_custom_reminder(name="商邱宏", shift_code="middle", reminder_time="07:50", message="消毒")
+
+    body = client.get("/api/people-center").json()
+    person = next(item for item in body["people"] if item["name"] == "商邱宏")
+
+    assert person["wecom_bound"] is True
+    assert person["wechat_group_bound"] is True
+    assert person["monitor_enabled"] is True
+    assert person["custom_reminder_count"] == 1
+    assert person["tunnel_mechanical_partner"] == "罗富耀"
+
+
+def test_interaction_commands_catalog_marks_current_menu_items(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    repo: DutyRepository = app.state.repo
+    repo.save_wecom_app_menu_config([
+        {"name": "监控在岗", "items": [{"name": "今日在岗", "command": "查询今日在岗"}]},
+    ])
+
+    commands = client.get("/api/interaction-commands").json()["commands"]
+    today = next(item for item in commands if item["command"] == "查询今日在岗")
+
+    assert today["menu_available"] is True
+    assert today["in_current_menu"] is True
+    assert any(item["bind_required"] for item in commands)
+
+
+def test_reminder_diagnostics_explains_generated_skipped_and_not_generated(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    repo: DutyRepository = app.state.repo
+    repo.save_notification_config(
+        webhook_url="",
+        wecom_app_enabled=True,
+        wecom_app_corp_id="ww-test",
+        wecom_app_agent_id="1000002",
+        wecom_app_secret="secret",
+        wecom_app_token="token",
+        wecom_app_encoding_aes_key="abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
+    )
+    repo.upsert_personnel_contacts([{"name": "已绑定", "wecom_userid": "bound-user"}, {"name": "未绑定"}])
+    repo.save_monitored_person(name="已绑定", daily_time="07:50", before_shift_minutes=10, enabled=True)
+    repo.save_monitored_person(name="未绑定", daily_time="07:50", before_shift_minutes=10, enabled=True)
+    repo.save_custom_reminder(name="未绑定", shift_code="middle", reminder_time="07:50", message="中班事项")
+    repo.save_custom_reminder(name="已绑定", shift_code="night", reminder_time="21:00", message="晚班事项")
+    repo.save_roster_month(
+        2026,
+        8,
+        [
+            {"name": "已绑定", "days": {"16": "中"}},
+            {"name": "未绑定", "days": {"16": "中"}},
+        ],
+        "uploads/month.png",
+    )
+
+    body = client.get("/api/reminders/diagnostics?target_date=2026-08-16").json()
+    items = body["items"]
+
+    assert any(item["person_name"] == "已绑定" and item["status"] in {"pending", "due"} for item in items)
+    assert any(item["person_name"] == "未绑定" and item["status"] == "skipped" for item in items)
+    assert any(item["person_name"] == "已绑定" and item["status"] == "not_generated" and "不是晚班" in item["reason"] for item in items)
+
+
+def test_wecom_app_resend_rejects_unbound_person_without_new_record(tmp_path, monkeypatch):
+    class FakeWeComAppClient:
+        is_wecom_app_notify = True
+
+        async def send_text(self, *args, **kwargs):
+            raise AssertionError("未绑定补发不应该发送文字")
+
+        async def send_image(self, *args, **kwargs):
+            raise AssertionError("未绑定补发不应该发送图片")
+
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    repo: DutyRepository = app.state.repo
+    repo.save_send_record(
+        kind="daily",
+        target="未绑定",
+        scheduled_at="2026-08-16T07:50:00+08:00",
+        status="failed",
+        content="补发内容",
+    )
+    monkeypatch.setattr(main_module, "_notification_client_from_repo", lambda repo: FakeWeComAppClient())
+    record_id = client.get("/api/send-records").json()["records"][0]["id"]
+
+    response = client.post(f"/api/send-records/{record_id}/resend")
+
+    assert response.status_code == 400
+    assert "未绑定 还没有绑定企业微信成员" in response.json()["detail"]
+    records = client.get("/api/send-records").json()["records"]
+    assert len(records) == 1
+    assert records[0]["kind"] == "daily"
+
+
 def test_monitored_person_can_be_updated_and_deleted(tmp_path):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
@@ -6962,6 +7320,8 @@ def test_system_status_reports_runtime_and_next_events(tmp_path, monkeypatch):
     assert body["roster_month_count"] == 1
     assert body["monitored_people_count"] == 1
     assert body["next_events"][0]["send_at"] == "2026-07-20T07:50:00+08:00"
+    assert body["checks"]
+    assert any(check["key"] == "database" for check in body["checks"])
 
 
 def test_system_status_counts_sqlite_utc_records_for_beijing_today(tmp_path, monkeypatch):
@@ -7032,6 +7392,46 @@ def test_system_status_sanitizes_wechat_ids_in_errors(tmp_path, monkeypatch):
     assert "wgr_" not in body["last_error"]
     assert "@member-runtime" not in body["last_error"]
     assert body["patrol_warning_monitor"]["last_error"] == "通知群 patrol error"
+
+
+def test_send_records_can_be_filtered_by_status_kind_target_and_today_failed(tmp_path, monkeypatch):
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 8, 16, 9, 0, tzinfo=tz)
+
+    monkeypatch.setattr(main_module, "datetime", FrozenDateTime)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    repo: DutyRepository = app.state.repo
+    repo.save_send_record(kind="custom", target="商邱宏", status="failed", error="失败")
+    repo.save_send_record(kind="daily", target="罗富耀", status="success")
+
+    failed = client.get("/api/send-records?status=failed").json()["records"]
+    custom = client.get("/api/send-records?kind=custom").json()["records"]
+    target = client.get("/api/send-records?target=商邱宏").json()["records"]
+    today_failed = client.get("/api/send-records?today_failed=true").json()["records"]
+
+    assert [item["target"] for item in failed] == ["商邱宏"]
+    assert [item["kind"] for item in custom] == ["custom"]
+    assert [item["target"] for item in target] == ["商邱宏"]
+    assert [item["target"] for item in today_failed] == ["商邱宏"]
+
+
+def test_send_records_target_filter_uses_display_names(tmp_path):
+    data_dir = tmp_path / "data"
+    app = create_app(data_dir=data_dir, upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/notification-config",
+        json={"sender_type": "lightagent", "lightagent_targets": [{"id": "wgr_notice", "name": "通知群"}]},
+    )
+    repo: DutyRepository = app.state.repo
+    repo.save_send_record(kind="daily_duty", target="wgr_notice", status="success")
+
+    records = client.get("/api/send-records?target=通知群").json()["records"]
+
+    assert [item["target"] for item in records] == ["通知群"]
 
 
 def test_resend_failed_text_record_sends_again_and_records_result(tmp_path, monkeypatch):

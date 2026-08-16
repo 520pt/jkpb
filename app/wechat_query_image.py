@@ -368,6 +368,10 @@ def _title_for_result(result: dict[str, Any]) -> str:
         "next_reminder_all": "查询下次提醒",
         "next_reminder": "查询下次提醒",
         "rest_query": "查询休息",
+        "patrol_record": "巡查记录查询",
+        "tunnel_mechanical": "隧道机电录入结果",
+        "tunnel_mechanical_modify": "隧道机电修改结果",
+        "tunnel_mechanical_result": "隧道机电查询结果",
     }
     return mapping.get(query_type, "查询结果")
 

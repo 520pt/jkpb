@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
@@ -138,6 +139,27 @@ def _normalize_template_list(values: Any, fallback: list[str]) -> list[str]:
     return normalized or list(fallback)
 
 
+def _normalize_name_list(values: Any) -> list[str]:
+    items = values if isinstance(values, list) else []
+    normalized: list[str] = []
+    for value in items:
+        text = str(value or "").strip()
+        if text and text not in normalized:
+            normalized.append(text)
+    return normalized
+
+
+def _normalize_function_target_names(values: Any) -> dict[str, list[str]]:
+    if not isinstance(values, dict):
+        return {}
+    normalized: dict[str, list[str]] = {}
+    for key, raw_names in values.items():
+        clean_key = str(key or "").strip()
+        if clean_key:
+            normalized[clean_key] = _normalize_name_list(raw_names)
+    return normalized
+
+
 def _normalize_patrol_end_template(value: str) -> str:
     text = str(value or "").strip()
     if not text or text == LEGACY_PATROL_WARNING_END_TEMPLATE:
@@ -188,7 +210,30 @@ class DutyRepository:
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA foreign_keys=ON")
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.DatabaseError:
+            # Some read-only or special SQLite targets cannot switch journal
+            # mode. Keep the connection usable instead of failing startup.
+            pass
         return conn
+
+    def create_database_backup(self, backup_dir: str | Path | None = None, *, prefix: str = "duty-reminder") -> dict[str, Any]:
+        target_dir = Path(backup_dir) if backup_dir is not None else self.db_path.parent / "backups"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"{prefix}-{time.strftime('%Y%m%d-%H%M%S')}.db"
+        target = target_dir / filename
+        with self._connect() as source:
+            with sqlite3.connect(target) as dest:
+                source.backup(dest)
+        return {
+            "path": str(target),
+            "filename": filename,
+            "size": target.stat().st_size if target.exists() else 0,
+            "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
 
     def _init_schema(self) -> None:
         with self._connect() as conn:
@@ -241,6 +286,8 @@ class DutyRepository:
                     wecom_app_secret TEXT NOT NULL DEFAULT '',
                     wecom_app_token TEXT NOT NULL DEFAULT '',
                     wecom_app_encoding_aes_key TEXT NOT NULL DEFAULT '',
+                    wecom_app_target_names_json TEXT NOT NULL DEFAULT '[]',
+                    wecom_app_function_target_names_json TEXT NOT NULL DEFAULT '{}',
                     lightagent_url TEXT NOT NULL DEFAULT '',
                     lightagent_token TEXT NOT NULL DEFAULT '',
                     lightagent_target TEXT NOT NULL DEFAULT '',
@@ -473,6 +520,10 @@ class DutyRepository:
                 conn.execute("ALTER TABLE notification_config ADD COLUMN wecom_app_token TEXT NOT NULL DEFAULT ''")
             if "wecom_app_encoding_aes_key" not in config_columns:
                 conn.execute("ALTER TABLE notification_config ADD COLUMN wecom_app_encoding_aes_key TEXT NOT NULL DEFAULT ''")
+            if "wecom_app_target_names_json" not in config_columns:
+                conn.execute("ALTER TABLE notification_config ADD COLUMN wecom_app_target_names_json TEXT NOT NULL DEFAULT '[]'")
+            if "wecom_app_function_target_names_json" not in config_columns:
+                conn.execute("ALTER TABLE notification_config ADD COLUMN wecom_app_function_target_names_json TEXT NOT NULL DEFAULT '{}'")
             if "lightagent_url" not in config_columns:
                 conn.execute("ALTER TABLE notification_config ADD COLUMN lightagent_url TEXT NOT NULL DEFAULT ''")
             if "lightagent_token" not in config_columns:
@@ -1094,6 +1145,7 @@ class DutyRepository:
                 {
                     "name": clean_name,
                     "mention_mobile": mention_mobile,
+                    "wecom_userid": wecom_userid,
                     "wechat_group_room_id": wechat_group_room_id,
                     "wechat_group_room_name": wechat_group_room_name,
                     "wechat_group_member_id": wechat_group_member_id,
@@ -1115,6 +1167,7 @@ class DutyRepository:
         query = """
             SELECT
                 monitored_people.*,
+                personnel_names.wecom_userid AS contact_wecom_userid,
                 personnel_names.wechat_group_room_id AS contact_wechat_group_room_id,
                 personnel_names.wechat_group_room_name AS contact_wechat_group_room_name,
                 personnel_names.wechat_group_member_id AS contact_wechat_group_member_id,
@@ -1132,7 +1185,7 @@ class DutyRepository:
         for row in rows:
             item = {
                 "name": row["name"],
-                "wecom_userid": row["wecom_userid"],
+                "wecom_userid": str(row["wecom_userid"] or "").strip() or str(row["contact_wecom_userid"] or "").strip(),
                 "mention_text": row["mention_text"],
                 "mention_mobile": row["mention_mobile"],
                 "daily_time": row["daily_time"],
@@ -1243,6 +1296,7 @@ class DutyRepository:
         query = """
             SELECT
                 custom_reminders.*,
+                personnel_names.wecom_userid,
                 personnel_names.wechat_group_room_id,
                 personnel_names.wechat_group_room_name,
                 personnel_names.wechat_group_member_id,
@@ -1272,6 +1326,9 @@ class DutyRepository:
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
             }
+            wecom_userid = str(row["wecom_userid"] or "").strip()
+            if wecom_userid:
+                item["wecom_userid"] = wecom_userid
             wechat_fields = {
                 "wechat_group_room_id": row["wechat_group_room_id"],
                 "wechat_group_room_name": row["wechat_group_room_name"],
@@ -1297,6 +1354,8 @@ class DutyRepository:
         wecom_app_secret: str = "",
         wecom_app_token: str = "",
         wecom_app_encoding_aes_key: str = "",
+        wecom_app_target_names: list[str] | None = None,
+        wecom_app_function_target_names: dict[str, Any] | None = None,
         message_template: str = DEFAULT_MESSAGE_TEMPLATE,
         sender_type: str = "wecom_webhook",
         lightagent_url: str = "",
@@ -1314,8 +1373,8 @@ class DutyRepository:
             conn.execute(
                 """
                 INSERT INTO notification_config
-                    (id, sender_type, webhook_url, wecom_aibot_enabled, wecom_aibot_id, wecom_aibot_secret, wecom_app_enabled, wecom_app_corp_id, wecom_app_agent_id, wecom_app_secret, wecom_app_token, wecom_app_encoding_aes_key, lightagent_url, lightagent_token, lightagent_target, lightagent_targets_json, mention_mode, mention_targets, message_template)
-                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, sender_type, webhook_url, wecom_aibot_enabled, wecom_aibot_id, wecom_aibot_secret, wecom_app_enabled, wecom_app_corp_id, wecom_app_agent_id, wecom_app_secret, wecom_app_token, wecom_app_encoding_aes_key, wecom_app_target_names_json, wecom_app_function_target_names_json, lightagent_url, lightagent_token, lightagent_target, lightagent_targets_json, mention_mode, mention_targets, message_template)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     sender_type = excluded.sender_type,
                     webhook_url = excluded.webhook_url,
@@ -1328,6 +1387,8 @@ class DutyRepository:
                     wecom_app_secret = excluded.wecom_app_secret,
                     wecom_app_token = excluded.wecom_app_token,
                     wecom_app_encoding_aes_key = excluded.wecom_app_encoding_aes_key,
+                    wecom_app_target_names_json = excluded.wecom_app_target_names_json,
+                    wecom_app_function_target_names_json = excluded.wecom_app_function_target_names_json,
                     lightagent_url = excluded.lightagent_url,
                     lightagent_token = excluded.lightagent_token,
                     lightagent_target = excluded.lightagent_target,
@@ -1349,6 +1410,8 @@ class DutyRepository:
                     str(wecom_app_secret or "").strip(),
                     str(wecom_app_token or "").strip(),
                     str(wecom_app_encoding_aes_key or "").strip(),
+                    json.dumps(_normalize_name_list(wecom_app_target_names or []), ensure_ascii=False),
+                    json.dumps(_normalize_function_target_names(wecom_app_function_target_names or {}), ensure_ascii=False),
                     lightagent_url,
                     lightagent_token,
                     primary_target,
@@ -1363,7 +1426,7 @@ class DutyRepository:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT sender_type, webhook_url, wecom_aibot_enabled, wecom_aibot_id, wecom_aibot_secret, wecom_app_enabled, wecom_app_corp_id, wecom_app_agent_id, wecom_app_secret, wecom_app_token, wecom_app_encoding_aes_key, lightagent_url, lightagent_token, lightagent_target, lightagent_targets_json, mention_mode, mention_targets, message_template
+                SELECT sender_type, webhook_url, wecom_aibot_enabled, wecom_aibot_id, wecom_aibot_secret, wecom_app_enabled, wecom_app_corp_id, wecom_app_agent_id, wecom_app_secret, wecom_app_token, wecom_app_encoding_aes_key, wecom_app_target_names_json, wecom_app_function_target_names_json, lightagent_url, lightagent_token, lightagent_target, lightagent_targets_json, mention_mode, mention_targets, message_template
                 FROM notification_config
                 WHERE id = 1
                 """
@@ -1381,6 +1444,8 @@ class DutyRepository:
                 "wecom_app_secret": "",
                 "wecom_app_token": "",
                 "wecom_app_encoding_aes_key": "",
+                "wecom_app_target_names": [],
+                "wecom_app_function_target_names": {},
                 "lightagent_url": "",
                 "lightagent_token": "",
                 "lightagent_target": "",
@@ -1404,6 +1469,8 @@ class DutyRepository:
             "wecom_app_secret": row["wecom_app_secret"],
             "wecom_app_token": row["wecom_app_token"],
             "wecom_app_encoding_aes_key": row["wecom_app_encoding_aes_key"],
+            "wecom_app_target_names": _normalize_name_list(_loads_json(row["wecom_app_target_names_json"], [])),
+            "wecom_app_function_target_names": _normalize_function_target_names(_loads_json(row["wecom_app_function_target_names_json"], {})),
             "lightagent_url": row["lightagent_url"],
             "lightagent_token": row["lightagent_token"],
             "lightagent_target": row["lightagent_target"],

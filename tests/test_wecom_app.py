@@ -565,10 +565,13 @@ def test_wecom_app_tunnel_today_submit_requires_partner_then_confirms_and_submit
     monkeypatch.setattr(main_module, "_wecom_app_client_from_repo", lambda repo: fake)
     monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2026, 8, 16))
     submitted = []
+    uploads = tmp_path / "uploads"
+    uploads.mkdir()
+    (uploads / "tunnel-result.png").write_bytes(b"png-bytes")
 
     async def fake_submit(repo, request, result_upload_dir=None):
         submitted.append(request)
-        return {"success": True, "result_image_url": ""}
+        return {"success": True, "result_image_url": "/api/uploads/tunnel-result.png"}
 
     monkeypatch.setattr(main_module, "_submit_tunnel_mechanical", fake_submit)
     main_module.WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.clear()
@@ -579,13 +582,13 @@ def test_wecom_app_tunnel_today_submit_requires_partner_then_confirms_and_submit
         "from_user": "shangqiuhong",
         "msg_type": "text",
     })()
-    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", message))
+    asyncio.run(main_module._handle_wecom_app_message(repo, uploads, message))
 
     assert any("第一次使用“录入今日机电”前" in content for _, content in fake.texts)
     assert not submitted
 
     fake.texts.clear()
-    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+    asyncio.run(main_module._handle_wecom_app_message(repo, uploads, type("M", (), {
         "content": "设置机电负责人罗富耀",
         "event_key": "",
         "from_user": "shangqiuhong",
@@ -594,12 +597,12 @@ def test_wecom_app_tunnel_today_submit_requires_partner_then_confirms_and_submit
     assert any("已设置你的机电负责人/搭档：罗富耀" in content for _, content in fake.texts)
 
     fake.texts.clear()
-    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", message))
+    asyncio.run(main_module._handle_wecom_app_message(repo, uploads, message))
     assert any("请确认今日隧道机电录入信息" in content and "负责人：罗富耀" in content and "记录人：商邱宏" in content for _, content in fake.texts)
     assert not submitted
 
     fake.texts.clear()
-    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+    asyncio.run(main_module._handle_wecom_app_message(repo, uploads, type("M", (), {
         "content": "1",
         "event_key": "",
         "from_user": "shangqiuhong",
@@ -609,7 +612,11 @@ def test_wecom_app_tunnel_today_submit_requires_partner_then_confirms_and_submit
     assert submitted[0].checker == "罗富耀"
     assert submitted[0].recorder == "商邱宏"
     assert submitted[0].checkTime == date(2026, 8, 16)
-    assert any("隧道机电录入完成" in content for _, content in fake.texts)
+    assert fake.news
+    assert fake.news[-1][0] == "shangqiuhong"
+    assert fake.news[-1][1]["title"] == "隧道机电录入结果"
+    assert fake.news[-1][1]["description"] == "2026-08-16 隧道机电录入，共1条"
+    assert all("隧道机电录入完成" not in content for _, content in fake.texts)
 
 
 def test_wecom_app_tunnel_today_submit_keeps_pending_after_platform_failure(tmp_path: Path, monkeypatch):
@@ -697,6 +704,33 @@ def test_wecom_app_tunnel_today_submit_keeps_pending_after_platform_failure(tmp_
     asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", menu_message))
 
     assert any("请确认今日隧道机电录入信息" in content for _, content in fake.texts)
+
+
+def test_wecom_app_sends_news_for_all_tunnel_image_results():
+    assert main_module._wecom_app_query_result_should_send_news({"success": True, "query_type": "tunnel_mechanical"})
+    assert main_module._wecom_app_query_result_should_send_news({"success": True, "query_type": "tunnel_mechanical_modify"})
+    assert main_module._wecom_app_query_result_should_send_news({"success": True, "query_type": "tunnel_mechanical_result"})
+
+
+def test_wecom_app_news_description_is_short_and_useful():
+    assert main_module._wecom_app_query_news_description(
+        {
+            "query_type": "rest_query",
+            "details": {"total_days": 10, "rested_days": 5, "remaining_days": 5},
+        },
+        "休息查询结果如下：",
+    ) == "本月休息10天｜已休5天｜剩余5天"
+    assert main_module._wecom_app_query_news_description(
+        {"query_type": "monitor_all", "reply": "监控查询结果如下：\n2026-08-16 周日 监控排班"},
+        "监控查询结果如下：",
+    ) == "2026-08-16 周日 监控排班"
+    assert main_module._wecom_app_query_news_description(
+        {
+            "query_type": "daily_duty_query",
+            "details": {"early": "罗熙云", "middle": "商邱宏", "night": "罗富耀", "tomorrow_early": "沐春宇"},
+        },
+        "",
+    ) == "早班：罗熙云｜中班：商邱宏｜晚班：罗富耀｜明日早班：沐春宇"
 
 
 def test_wecom_app_tunnel_manual_entry_updates_pending_weather(tmp_path: Path, monkeypatch):
