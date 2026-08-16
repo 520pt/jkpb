@@ -1328,6 +1328,50 @@
       max-height: 376px;
       overflow: auto;
     }
+    .wecom-menu-editor {
+      display: grid;
+      gap: 10px;
+    }
+    .wecom-menu-tabs {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+      -webkit-overflow-scrolling: touch;
+    }
+    .wecom-menu-tabs button {
+      flex: 0 0 auto;
+      border-color: #cbd5e1;
+      background: #f8fafc;
+      color: var(--ink);
+      white-space: nowrap;
+    }
+    .wecom-menu-tabs button.active {
+      border-color: var(--primary);
+      background: var(--primary);
+      color: #ffffff;
+      box-shadow: 0 6px 16px rgba(37, 99, 235, 0.18);
+    }
+    .wecom-menu-panel {
+      display: grid;
+      gap: 10px;
+      min-width: 0;
+    }
+    .wecom-menu-item-row {
+      display: grid;
+      grid-template-columns: minmax(140px, 0.38fr) minmax(260px, 0.62fr) auto;
+      gap: 8px;
+      align-items: end;
+    }
+    .wecom-menu-item-row label {
+      min-width: 0;
+    }
+    .wecom-menu-command-input {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    }
+    .wecom-menu-panel-actions {
+      justify-content: space-between;
+    }
     .wechat-member-card,
     .wechat-binding-card {
       display: grid;
@@ -2582,6 +2626,7 @@
       .tunnel-asset-grid,
       .driver-tag-grid,
       .tag-input-row,
+      .wecom-menu-item-row,
       .record-item {
         grid-template-columns: 1fr;
       }
@@ -3241,7 +3286,7 @@
                     <div class="item">
                       <strong>自定义菜单</strong>
                       <small id="wecomAppMenuLimits">一级菜单最多 3 个；每个一级菜单最多 5 个二级菜单。二级菜单命令就是点击后自动发送的文字，例如：查询今日在岗。</small>
-                      <div id="wecomAppMenuPreview" class="wechat-card-grid"></div>
+                      <div id="wecomAppMenuPreview" class="wecom-menu-editor"></div>
                       <div class="settings-actions">
                         <button id="addWecomAppMenuGroupBtn" type="button">添加一级菜单</button>
                         <button id="restoreWecomAppMenuBtn" type="button">恢复默认菜单</button>
@@ -3746,6 +3791,7 @@
       wecomAppMenuGroups: [],
       wecomAppMenuDefaults: [],
       wecomAppMenuLimits: {},
+      wecomAppMenuActiveGroup: 0,
       featureChannelConfig: null,
       featureChannelDefaults: null,
       featureChannelRooms: [],
@@ -6715,34 +6761,47 @@
         $("wecomAppMenuLimits").textContent = `一级菜单最多 ${limits.max_top_buttons || 3} 个；每个一级菜单最多 ${limits.max_sub_buttons || 5} 个二级菜单；一级菜单名最多 ${limits.max_top_name_bytes || 16} 字节，二级菜单名最多 ${limits.max_sub_name_bytes || 40} 字节。`;
       }
       const groups = state.wecomAppMenuGroups || [];
-      target.innerHTML = groups.length ? groups.map((group, groupIndex) => `
-        <div class="item" data-wecom-menu-group="${groupIndex}">
-          <div class="notification-title-row">
-            <strong>一级菜单 ${groupIndex + 1}</strong>
-            <button type="button" data-wecom-menu-remove-group="${groupIndex}">删除一级菜单</button>
+      if (state.wecomAppMenuActiveGroup >= groups.length) state.wecomAppMenuActiveGroup = Math.max(0, groups.length - 1);
+      const activeGroup = Math.max(0, Number(state.wecomAppMenuActiveGroup || 0));
+      const tabs = groups.map((group, groupIndex) => `
+        <button type="button" class="${groupIndex === activeGroup ? "active" : ""}" data-wecom-menu-tab="${groupIndex}">
+          ${escapeHtml(group.name || `一级菜单 ${groupIndex + 1}`)}
+        </button>
+      `).join("");
+      const panels = groups.map((group, groupIndex) => `
+        <div class="wecom-menu-panel ${groupIndex === activeGroup ? "" : "hidden"}" data-wecom-menu-group="${groupIndex}">
+          <div class="item">
+            <div class="notification-title-row">
+              <strong>一级菜单 ${groupIndex + 1}</strong>
+              <button type="button" data-wecom-menu-remove-group="${groupIndex}">删除一级菜单</button>
+            </div>
+            <label>一级菜单名称
+              <input data-wecom-menu-group-name="${groupIndex}" value="${escapeHtml(group.name || "")}" placeholder="例如 监控在岗" />
+            </label>
           </div>
-          <label>一级菜单名称
-            <input data-wecom-menu-group-name="${groupIndex}" value="${escapeHtml(group.name || "")}" placeholder="例如 监控在岗" />
-          </label>
           <div class="stack">
             ${(group.items || []).map((item, itemIndex) => `
               <div class="item" data-wecom-menu-item="${groupIndex}-${itemIndex}">
                 <div class="notification-title-row">
                   <strong>二级菜单 ${itemIndex + 1}</strong>
-                  <button type="button" data-wecom-menu-remove-item="${groupIndex}-${itemIndex}">删除</button>
                 </div>
-                <div class="field-grid">
+                <div class="wecom-menu-item-row">
                   <label>显示名称 <input data-wecom-menu-item-name="${groupIndex}-${itemIndex}" value="${escapeHtml(item.name || "")}" placeholder="例如 今日在岗" /></label>
-                  <label>点击后发送命令 <input data-wecom-menu-item-command="${groupIndex}-${itemIndex}" value="${escapeHtml(item.command || "")}" placeholder="例如 查询今日在岗" /></label>
+                  <label>点击后发送命令 <input class="wecom-menu-command-input" data-wecom-menu-item-command="${groupIndex}-${itemIndex}" value="${escapeHtml(item.command || "")}" placeholder="例如 查询今日在岗" title="${escapeHtml(item.command || "")}" /></label>
+                  <button type="button" data-wecom-menu-remove-item="${groupIndex}-${itemIndex}">删除</button>
                 </div>
               </div>
             `).join("")}
           </div>
-          <div class="settings-actions">
+          <div class="settings-actions wecom-menu-panel-actions">
             <button type="button" data-wecom-menu-add-item="${groupIndex}">添加二级菜单</button>
+            <small>当前只显示这个一级菜单下的二级菜单，切换上方标签维护其它菜单。</small>
           </div>
         </div>
-      `).join("") : `<div class="item"><small>暂无菜单预览</small></div>`;
+      `).join("");
+      target.innerHTML = groups.length
+        ? `<div class="wecom-menu-tabs">${tabs}</div>${panels}`
+        : `<div class="item"><small>暂无菜单预览</small></div>`;
     }
 
     function currentWecomAppMenuGroupsFromEditor() {
@@ -6924,18 +6983,30 @@
         return;
       }
       groups.push({ name: "新菜单", items: [{ name: "新功能", command: "菜单" }] });
+      state.wecomAppMenuActiveGroup = groups.length - 1;
       rerenderWecomAppMenuEditor(groups);
     });
     $("restoreWecomAppMenuBtn").addEventListener("click", () => {
+      state.wecomAppMenuActiveGroup = 0;
       rerenderWecomAppMenuEditor(JSON.parse(JSON.stringify(state.wecomAppMenuDefaults || [])));
       $("notificationStatus").textContent = "已恢复默认菜单预览，点击“保存菜单配置”后生效。";
       $("notificationStatus").className = "status";
     });
     $("wecomAppMenuPreview").addEventListener("click", (event) => {
+      const tab = event.target.closest("[data-wecom-menu-tab]");
+      if (tab) {
+        state.wecomAppMenuGroups = currentWecomAppMenuGroupsFromEditor();
+        state.wecomAppMenuActiveGroup = Number(tab.dataset.wecomMenuTab || 0);
+        rerenderWecomAppMenuEditor(state.wecomAppMenuGroups);
+        return;
+      }
       const removeGroup = event.target.closest("[data-wecom-menu-remove-group]");
       if (removeGroup) {
         const groups = currentWecomAppMenuGroupsFromEditor();
-        groups.splice(Number(removeGroup.dataset.wecomMenuRemoveGroup), 1);
+        const groupIndex = Number(removeGroup.dataset.wecomMenuRemoveGroup);
+        if (!window.confirm(`确认删除一级菜单“${groups[groupIndex]?.name || ""}”？`)) return;
+        groups.splice(groupIndex, 1);
+        state.wecomAppMenuActiveGroup = Math.max(0, Math.min(groupIndex, groups.length - 1));
         rerenderWecomAppMenuEditor(groups);
         return;
       }
@@ -6944,6 +7015,7 @@
         const [groupIndex, itemIndex] = String(removeItem.dataset.wecomMenuRemoveItem || "").split("-").map(Number);
         const groups = currentWecomAppMenuGroupsFromEditor();
         if (groups[groupIndex]) groups[groupIndex].items.splice(itemIndex, 1);
+        state.wecomAppMenuActiveGroup = Math.max(0, groupIndex);
         rerenderWecomAppMenuEditor(groups);
         return;
       }
@@ -6960,6 +7032,7 @@
           return;
         }
         group.items.push({ name: "新功能", command: "菜单" });
+        state.wecomAppMenuActiveGroup = groupIndex;
         rerenderWecomAppMenuEditor(groups);
       }
     });

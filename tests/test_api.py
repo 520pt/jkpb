@@ -99,6 +99,10 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert "monitorWechatBindingText" in html
     assert "同步${wechatGatewayLabel()}群失败" in html
     assert "微信交互配置已保存" in html
+    assert 'class="wecom-menu-editor"' in html
+    assert "wecom-menu-tabs" in html
+    assert "data-wecom-menu-tab" in html
+    assert "wecom-menu-command-input" in html
     assert 'tunnel_mechanical_wechat: "隧道机电录入"' in html
     assert 'tunnel_mechanical_wechat_modify: "隧道机电修改"' in html
     assert 'tunnel_mechanical_query_wechat: "隧道机电查询"' in html

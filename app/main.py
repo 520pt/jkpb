@@ -1427,13 +1427,18 @@ def create_app(
         if not crypto.verify_signature(msg_signature, timestamp, nonce, encrypted):
             raise HTTPException(status_code=403, detail="企业微信自建应用消息签名不正确")
         message = parse_wecom_app_message(crypto.decrypt(encrypted))
-        command_text = _wecom_app_menu_command(str(message.event_key or message.content or "").strip(), repo)
+        command_text = _wecom_app_message_command_text(message, repo)
         is_pending_confirm = (
             str(message.from_user or "").strip() in WECOM_APP_PENDING_TUNNEL_SUBMISSIONS
             and _is_wecom_app_pending_confirm_text(command_text)
         )
+        is_pending_account_help = (
+            str(message.from_user or "").strip() in WECOM_APP_PENDING_TUNNEL_SUBMISSIONS
+            and _is_wecom_app_pending_account_help_text(command_text)
+        )
         if message.msg_type in {"text", "voice"} and (
             is_pending_confirm
+            or is_pending_account_help
             or _is_tunnel_mechanical_partner_command(command_text)
             or _looks_like_duty_wechat_command(_normalize_wechat_query_text(command_text), repo)
         ):
@@ -3245,6 +3250,12 @@ async def _build_wechat_query_response(
     pending_response = await _build_wecom_app_pending_tunnel_response(repo, query, raw_text, uploads=uploads)
     if pending_response is not None:
         return pending_response
+    if _is_wecom_app_query(query) and _is_wecom_app_pending_account_help_text(raw_text) and _wecom_app_pending_key(query) in WECOM_APP_PENDING_TUNNEL_SUBMISSIONS:
+        return {
+            "success": True,
+            "query_type": "tunnel_mechanical_account_help",
+            "reply": _wecom_app_tunnel_account_help_reply(),
+        }
     text = _wechat_query_menu_selection_command(raw_text)
     if (
         _is_wecom_app_query(query)
@@ -3482,7 +3493,7 @@ def _wecom_app_notify_client_from_config(config: dict[str, Any], repo: DutyRepos
 
 
 async def _handle_wecom_app_message(repo: DutyRepository, uploads: Path, message) -> None:
-    text = _wecom_app_menu_command(str(getattr(message, "event_key", "") or getattr(message, "content", "") or "").strip(), repo)
+    text = _wecom_app_message_command_text(message, repo)
     userid = str(message.from_user or "").strip()
     if not text or not userid:
         return
@@ -3498,6 +3509,9 @@ async def _handle_wecom_app_message(repo: DutyRepository, uploads: Path, message
         sender_name=userid,
     )
     client = _wecom_app_client_from_repo(repo)
+    if _is_wecom_app_pending_account_help_text(text) and _wecom_app_pending_key(query) in WECOM_APP_PENDING_TUNNEL_SUBMISSIONS:
+        await client.send_text(userid, _wecom_app_tunnel_account_help_reply())
+        return
     try:
         await client.send_text(userid, "正在查询，请稍候…")
         result = await _build_wechat_query_response_with_log(repo, query, uploads=uploads)
@@ -3529,6 +3543,13 @@ async def _handle_wecom_app_message(repo: DutyRepository, uploads: Path, message
             await client.send_text(userid, "查询失败，请稍后再试或联系管理员查看后台日志。")
         except Exception:
             LOGGER.exception("企业微信自建应用发送失败提示失败")
+
+
+def _wecom_app_message_command_text(message: Any, repo: DutyRepository) -> str:
+    event_key = str(getattr(message, "event_key", "") or "").strip()
+    if event_key:
+        return _wecom_app_menu_command(event_key, repo)
+    return str(getattr(message, "content", "") or "").strip()
 
 
 def _wecom_app_query_result_should_send_news(result: dict[str, Any]) -> bool:
@@ -3858,7 +3879,19 @@ def _wecom_app_pending_key(query: WechatQueryRequest) -> str:
 
 
 def _is_wecom_app_pending_confirm_text(text: str) -> bool:
-    return _normalize_wechat_query_text(text) in {"确认", "1"}
+    return _normalize_wechat_query_text(text) in {"确认", "1", "重试", "1.重试", "1重试", "重新提交"}
+
+
+def _is_wecom_app_pending_account_help_text(text: str) -> bool:
+    return _normalize_wechat_query_text(text) in {"2", "修改账号密码", "2.修改账号密码", "2修改账号密码", "修改密码", "修改账号"}
+
+
+def _wecom_app_tunnel_account_help_reply() -> str:
+    return (
+        "请到网页端修改智慧养护平台账号密码：\n"
+        "配置中心 → 隧道机电 → 智慧养护平台账号\n\n"
+        "修改并保存后，建议先点“登录测试”。登录测试成功后，回到企业微信自建应用继续回复：1 或 重试。"
+    )
 
 
 def _is_tunnel_mechanical_partner_command(text: str) -> bool:
@@ -4033,12 +4066,22 @@ async def _build_wecom_app_pending_tunnel_response(
     *,
     uploads: Path | None = None,
 ) -> dict[str, Any] | None:
-    if not _is_wecom_app_query(query) or not _is_wecom_app_pending_confirm_text(text):
+    if not _is_wecom_app_query(query):
         return None
     key = _wecom_app_pending_key(query)
     pending = WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.get(key)
     if not pending:
-        return {"success": False, "query_type": "tunnel_mechanical_confirm", "reply": "没有待确认的机电录入，请先点击“录入今日机电”。"}
+        if _is_wecom_app_pending_confirm_text(text) or _is_wecom_app_pending_account_help_text(text):
+            return {"success": False, "query_type": "tunnel_mechanical_confirm", "reply": "没有待确认的机电录入，请先点击“录入今日机电”。"}
+        return None
+    if _is_wecom_app_pending_account_help_text(text):
+        return {
+            "success": True,
+            "query_type": "tunnel_mechanical_account_help",
+            "reply": _wecom_app_tunnel_account_help_reply(),
+        }
+    if not _is_wecom_app_pending_confirm_text(text):
+        return None
     if float(pending.get("expires_at") or 0) < time.time():
         WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.pop(key, None)
         return {"success": False, "query_type": "tunnel_mechanical_confirm", "reply": "待确认信息已过期，请重新点击“录入今日机电”。"}
@@ -4052,7 +4095,9 @@ async def _build_wecom_app_pending_tunnel_response(
         if reply:
             result["reply"] = (
                 f"{reply}\n\n"
-                "这次待确认信息仍保留，可在修正智慧养护平台账号/登录状态后继续回复“确认”或“1”重试；"
+                "这次待确认信息仍保留，请选择：\n"
+                "1. 重试\n"
+                "2. 修改账号密码\n\n"
                 "也可以重新点击“录入今日机电”生成新的确认信息。"
             )
             result["replies"] = [result["reply"]]
