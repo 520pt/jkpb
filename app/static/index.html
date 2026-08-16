@@ -1689,6 +1689,60 @@
     .hidden-field {
       display: none;
     }
+    .people-center-fields {
+      display: grid;
+      gap: 7px;
+      margin-top: 2px;
+    }
+    .people-center-field {
+      display: grid;
+      grid-template-columns: 88px 1fr;
+      gap: 8px;
+      align-items: center;
+      min-width: 0;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .people-center-field b {
+      color: #64748b;
+      font-weight: 650;
+    }
+    .people-status-pill {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      max-width: 100%;
+      min-height: 26px;
+      padding: 3px 9px;
+      border: 1px solid #cbd5e1;
+      border-radius: 999px;
+      background: #f8fafc;
+      color: #475569;
+      font-weight: 700;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+    .people-status-pill.ok {
+      border-color: #86efac;
+      background: #dcfce7;
+      color: #166534;
+    }
+    .people-status-pill.warn {
+      border-color: #fcd34d;
+      background: #fef3c7;
+      color: #92400e;
+    }
+    .people-status-pill.bad {
+      border-color: #fca5a5;
+      background: #fee2e2;
+      color: #991b1b;
+    }
+    .status-card .people-status-pill,
+    .reminder-config-card .people-status-pill,
+    .wechat-binding-card .people-status-pill {
+      margin-right: 4px;
+      margin-bottom: 2px;
+    }
     .people-list, .events, .records-list, .version-list {
       display: grid;
       gap: 8px;
@@ -5368,19 +5422,45 @@
       return `${roomId ? `发送群：${notificationRoomLabelById(roomId, person.notification_room_name)}` : "发送群：默认全部通知群"} · @ 使用消息通知渠道统一配置`;
     }
 
+    function statusLevelForText(text, fallback = "ok") {
+      const value = String(text || "");
+      if (/失败|异常|缺失|未配置|未绑定|未设置|不可发送|错误/.test(value)) return "bad";
+      if (/未启用|停用|需注意|等待|读取中|默认/.test(value)) return "warn";
+      return fallback;
+    }
+
+    function statusPill(text, level = "") {
+      const status = level || statusLevelForText(text);
+      return `<span class="people-status-pill ${escapeHtml(status)}">${escapeHtml(text || "-")}</span>`;
+    }
+
+    function statusField(label, text, level = "") {
+      return `<small><b>${escapeHtml(label)}：</b>${statusPill(text, level)}</small>`;
+    }
+
     function renderMonitoredPeopleList() {
       if (!$("peopleList")) return;
-      $("peopleList").innerHTML = state.monitoredPeople.map((person) => `
-        <div class="item reminder-config-card">
-          <strong>${escapeHtml(person.name)}</strong>
-          <small>${person.enabled === false ? "已停用" : "已启用"} · ${monitorNotificationText(person)} · 发送方式 ${contentModeLabel(person.send_content_mode || "both")} · 每日提醒时间 ${escapeHtml(person.daily_time)} · 班次提前提醒 ${person.before_shift_minutes} 分钟 · 休息提醒 ${person.rest_reminder_enabled ? escapeHtml(person.rest_reminder_time) : "未启用"}</small>
-          ${person.rest_reminder_enabled ? `<small>休息文案 ${escapeHtml(person.rest_message_template || "{name} {rest_status}")}</small>` : ""}
-          <div class="settings-actions reminder-card-actions">
-            <button type="button" data-edit-person="${escapeHtml(person.name)}">编辑</button>
-            <button class="danger" type="button" data-delete-person="${escapeHtml(person.name)}">删除</button>
+      $("peopleList").innerHTML = state.monitoredPeople.map((person) => {
+        const notification = monitorNotificationText(person);
+        return `
+          <div class="item reminder-config-card">
+            <strong>${escapeHtml(person.name)}</strong>
+            <div class="people-center-fields">
+              ${peopleCenterField("启用状态", person.enabled === false ? "已停用" : "已启用", person.enabled === false ? "warn" : "ok")}
+              ${peopleCenterField("通知目标", notification, statusLevelForText(notification))}
+              ${peopleCenterField("发送方式", contentModeLabel(person.send_content_mode || "both"), "ok")}
+              ${peopleCenterField("每日提醒", person.daily_time || "未配置", person.daily_time ? "ok" : "bad")}
+              ${peopleCenterField("班前提醒", `${person.before_shift_minutes || 0} 分钟`, "ok")}
+              ${peopleCenterField("休息提醒", person.rest_reminder_enabled ? (person.rest_reminder_time || "已启用") : "未启用", person.rest_reminder_enabled ? "ok" : "warn")}
+            </div>
+            ${person.rest_reminder_enabled ? `<small>休息文案 ${escapeHtml(person.rest_message_template || "{name} {rest_status}")}</small>` : ""}
+            <div class="settings-actions reminder-card-actions">
+              <button type="button" data-edit-person="${escapeHtml(person.name)}">编辑</button>
+              <button class="danger" type="button" data-delete-person="${escapeHtml(person.name)}">删除</button>
+            </div>
           </div>
-        </div>
-      `).join("") || `<div class="item empty"><small>暂无人员</small></div>`;
+        `;
+      }).join("") || `<div class="item empty"><small>暂无人员</small></div>`;
     }
 
     $("peopleList").addEventListener("click", async (event) => {
@@ -5479,17 +5559,24 @@
 
     function renderCustomRemindersList() {
       if (!$("customReminderList")) return;
-      $("customReminderList").innerHTML = state.customReminders.map((reminder) => `
-        <div class="item reminder-config-card">
-          <strong>${escapeHtml(reminder.name)} · ${escapeHtml(customReminderShiftLabel(reminder.shift_code))} · ${escapeHtml(reminder.reminder_time)}</strong>
-          <small>${customReminderNotificationText(reminder)} · 发送方式 ${contentModeLabel(reminder.send_content_mode || "both")} · ${reminder.enabled ? "已启用" : "已停用"}</small>
-          <div class="reminder-card-message">${escapeHtml(reminder.message || "").replace(/\n/g, "<br>")}</div>
-          <div class="settings-actions reminder-card-actions">
-            <button type="button" data-edit-custom-reminder="${reminder.id}">编辑</button>
-            <button class="danger" type="button" data-delete-custom-reminder="${reminder.id}">删除</button>
+      $("customReminderList").innerHTML = state.customReminders.map((reminder) => {
+        const notification = customReminderNotificationText(reminder);
+        return `
+          <div class="item reminder-config-card">
+            <strong>${escapeHtml(reminder.name)} · ${escapeHtml(customReminderShiftLabel(reminder.shift_code))} · ${escapeHtml(reminder.reminder_time)}</strong>
+            <div class="people-center-fields">
+              ${peopleCenterField("启用状态", reminder.enabled ? "已启用" : "已停用", reminder.enabled ? "ok" : "warn")}
+              ${peopleCenterField("通知目标", notification, statusLevelForText(notification))}
+              ${peopleCenterField("发送方式", contentModeLabel(reminder.send_content_mode || "both"), "ok")}
+            </div>
+            <div class="reminder-card-message">${escapeHtml(reminder.message || "").replace(/\n/g, "<br>")}</div>
+            <div class="settings-actions reminder-card-actions">
+              <button type="button" data-edit-custom-reminder="${reminder.id}">编辑</button>
+              <button class="danger" type="button" data-delete-custom-reminder="${reminder.id}">删除</button>
+            </div>
           </div>
-        </div>
-      `).join("") || `<div class="item empty"><small>暂无自定义提醒</small></div>`;
+        `;
+      }).join("") || `<div class="item empty"><small>暂无自定义提醒</small></div>`;
     }
 
     function customReminderFormPayload() {
@@ -5766,13 +5853,12 @@
           functionTargets.patrol_warning.has(name) ? "公路预警" : "",
           functionTargets.system.has(name) ? "系统测试" : "",
         ].filter(Boolean).join("、");
-        const cls = userid ? "ok" : "error";
         return `
           <div class="item reminder-config-card">
             <strong>${escapeHtml(name)}</strong>
-            <small class="${cls}">${escapeHtml(wecomBindingLabel(name))}</small>
-            <small>${escapeHtml(publicTag)}${configuredTargets.length && targetSet.has(name) && !userid ? " · 已选但未绑定，公共通知不会发给他" : ""}</small>
-            ${functionTags ? `<small>功能接收：${escapeHtml(functionTags)}</small>` : ""}
+            ${statusField("绑定状态", wecomBindingLabel(name), userid ? "ok" : "bad")}
+            ${statusField("公共通知", `${publicTag}${configuredTargets.length && targetSet.has(name) && !userid ? " · 已选但未绑定，公共通知不会发给他" : ""}`, userid ? (publicNames.includes(name) ? "ok" : "warn") : "bad")}
+            ${functionTags ? statusField("功能接收", functionTags, userid ? "ok" : "bad") : ""}
           </div>
         `;
       });
@@ -6446,10 +6532,9 @@
           return `<option value="${escapeHtml(id)}" data-stable-member-id="${escapeHtml(stableId)}" data-member-name="${escapeHtml(memberName)}" ${id && id === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
         }).join("");
         const savedName = cleanWechatVisibleName(saved.wechat_group_member_name || "", selected);
-        const savedText = savedName ? `当前：${escapeHtml(savedName)}` : "当前未绑定";
         return `<div class="wechat-binding-card">
           <strong>${escapeHtml(name)}</strong>
-          <small>${savedText}</small>
+          ${statusField("绑定状态", savedName ? `当前：${savedName}` : "当前未绑定", savedName ? "ok" : "bad")}
           <select data-wechat-binding-name="${escapeHtml(name)}">${options}</select>
         </div>`;
       }).join("") || `<div class="wechat-binding-card"><small>先在人员名单或监控班提醒里添加姓名</small></div>`;
@@ -9318,6 +9403,40 @@
       `;
     }
 
+    function peopleCenterField(label, text, status = "warn") {
+      return `
+        <div class="people-center-field">
+          <b>${escapeHtml(label)}</b>
+          <span class="people-status-pill ${escapeHtml(status)}">${escapeHtml(text || "-")}</span>
+        </div>
+      `;
+    }
+
+    function renderPeopleCenterPerson(person) {
+      const customTotal = person.custom_reminder_count || 0;
+      const customEnabled = person.custom_enabled_count || 0;
+      const customStatus = customTotal ? (customEnabled ? "ok" : "warn") : "bad";
+      const fields = [
+        peopleCenterField("企业微信", person.wecom_bound ? `已绑定 ${person.wecom_userid || ""}` : "未绑定", person.wecom_bound ? "ok" : "bad"),
+        peopleCenterField("个人微信群", person.wechat_group_bound ? (person.wechat_group_member || "已绑定") : "未绑定", person.wechat_group_bound ? "ok" : "bad"),
+        peopleCenterField("手机号", person.mention_mobile || "未配置", person.mention_mobile ? "ok" : "bad"),
+        peopleCenterField(
+          "监控班",
+          person.monitor_configured ? (person.monitor_enabled ? `已启用 ${person.daily_time || ""} / 班前 ${person.before_shift_minutes || 0} 分钟` : "已配置但停用") : "未配置",
+          person.monitor_configured ? (person.monitor_enabled ? "ok" : "warn") : "bad"
+        ),
+        peopleCenterField("自定义提醒", customTotal ? `${customEnabled}/${customTotal} 条启用` : "未配置", customStatus),
+        peopleCenterField("休息提醒", person.rest_reminder_enabled ? "已启用" : "未启用", person.rest_reminder_enabled ? "ok" : "warn"),
+        peopleCenterField("机电搭档", person.tunnel_mechanical_partner || "未设置", person.tunnel_mechanical_partner ? "ok" : "bad"),
+      ].join("");
+      return `
+        <div class="item reminder-config-card">
+          <strong>${escapeHtml(person.name || "-")}</strong>
+          <div class="people-center-fields">${fields}</div>
+        </div>
+      `;
+    }
+
     async function loadPeopleCenter() {
       if (!$("peopleCenterList")) return;
       $("peopleCenterStatus").textContent = "正在加载人员中心...";
@@ -9329,17 +9448,7 @@
         const people = body.people || [];
         $("peopleCenterStatus").textContent = people.length ? `共 ${people.length} 人` : "暂无人员";
         $("peopleCenterStatus").className = `status ${people.length ? "ok" : ""}`;
-        $("peopleCenterList").innerHTML = people.length ? people.map((person) => `
-          <div class="item reminder-config-card">
-            <strong>${escapeHtml(person.name || "-")}</strong>
-            <small class="${person.wecom_bound ? "ok" : "error"}">企业微信：${person.wecom_bound ? `已绑定 ${person.wecom_userid}` : "未绑定"}</small>
-            <small>个人微信群：${person.wechat_group_bound ? escapeHtml(person.wechat_group_member || "已绑定") : "未绑定"}</small>
-            <small>手机号：${escapeHtml(person.mention_mobile || "未配置")}</small>
-            <small>监控班：${person.monitor_configured ? (person.monitor_enabled ? `已启用 ${person.daily_time || ""} / 班前 ${person.before_shift_minutes || 0} 分钟` : "已配置但停用") : "未配置"}</small>
-            <small>自定义提醒：${person.custom_enabled_count || 0}/${person.custom_reminder_count || 0} 条启用</small>
-            <small>休息提醒：${person.rest_reminder_enabled ? "已启用" : "未启用"} · 机电搭档：${escapeHtml(person.tunnel_mechanical_partner || "未设置")}</small>
-          </div>
-        `).join("") : "<div class='item'>暂无人员；请先导入排班或维护人员名单。</div>";
+        $("peopleCenterList").innerHTML = people.length ? people.map(renderPeopleCenterPerson).join("") : "<div class='item'>暂无人员；请先导入排班或维护人员名单。</div>";
       } catch (error) {
         $("peopleCenterStatus").textContent = `加载失败：${error.message || error}`;
         $("peopleCenterStatus").className = "status error";
@@ -9609,21 +9718,21 @@
           : (patrol.next_check_at ? `下次检查 ${formatIsoMinute(patrol.next_check_at)}` : "尚未安排检查");
         const notificationLabel = body.notification_sender_type === "wecom_app" ? "企业微信自建应用" : (body.notification_sender_type === "lightagent" ? wechatGatewayLabel() : "企业微信群机器人");
         const cards = [
-          ["北京时间", formatIsoMinute(body.now_beijing), body.timezone || ""],
-          ["后台调度", yesNo(body.scheduler_enabled), body.scheduler_enabled ? "已启动，提醒是否发送看各项启用开关" : "仅测试模式关闭"],
-          ["通知通道", body.notification_configured ? "已配置" : "未配置", body.notification_configured ? notificationLabel : "请先配置通知发送通道"],
-          ["中文字体", body.cjk_font_ready ? "正常" : "缺失", body.cjk_font_ready ? "今日在岗图片中文可渲染" : "Docker 需安装中文字体"],
-          ["排班表", `${body.roster_month_count || 0} 个月`, "已确认导入"],
-          ["监控班提醒人员", `${body.monitored_people_count || 0} 人`, "已配置人员"],
-          ["数据库备份", `${body.backup_count || 0} 个`, "配置导入前自动备份，也可手动备份"],
-          ["公路巡查预警", patrol.enabled ? "已启用" : "未启用", `${patrol.route_code || "-"} · ${patrolScheduleText} · 连续失败 ${patrol.failure_count || 0} 次`],
-          ["今日发送成功", `${body.today_success_count || 0} 条`, "以发送记录为准"],
-          ["今日发送失败", `${body.today_failed_count || 0} 条`, body.last_error || "无"],
+          ["北京时间", formatIsoMinute(body.now_beijing), body.timezone || "", "ok"],
+          ["后台调度", yesNo(body.scheduler_enabled), body.scheduler_enabled ? "已启动，提醒是否发送看各项启用开关" : "仅测试模式关闭", body.scheduler_enabled ? "ok" : "warn"],
+          ["通知通道", body.notification_configured ? "已配置" : "未配置", body.notification_configured ? notificationLabel : "请先配置通知发送通道", body.notification_configured ? "ok" : "bad"],
+          ["中文字体", body.cjk_font_ready ? "正常" : "缺失", body.cjk_font_ready ? "今日在岗图片中文可渲染" : "Docker 需安装中文字体", body.cjk_font_ready ? "ok" : "bad"],
+          ["排班表", `${body.roster_month_count || 0} 个月`, "已确认导入", body.roster_month_count ? "ok" : "warn"],
+          ["监控班提醒人员", `${body.monitored_people_count || 0} 人`, "已配置人员", body.monitored_people_count ? "ok" : "warn"],
+          ["数据库备份", `${body.backup_count || 0} 个`, "配置导入前自动备份，也可手动备份", body.backup_count ? "ok" : "warn"],
+          ["公路巡查预警", patrol.enabled ? "已启用" : "未启用", `${patrol.route_code || "-"} · ${patrolScheduleText} · 连续失败 ${patrol.failure_count || 0} 次`, patrol.enabled ? "ok" : "warn"],
+          ["今日发送成功", `${body.today_success_count || 0} 条`, "以发送记录为准", "ok"],
+          ["今日发送失败", `${body.today_failed_count || 0} 条`, body.last_error || "无", body.today_failed_count ? "bad" : "ok"],
         ];
-        $("systemStatusGrid").innerHTML = cards.map(([title, value, note]) => `
+        $("systemStatusGrid").innerHTML = cards.map(([title, value, note, level]) => `
           <div class="status-card">
             <strong>${escapeHtml(title)}</strong>
-            <div>${escapeHtml(value)}</div>
+            <div>${statusPill(value, level)}</div>
             <small>${escapeHtml(note)}</small>
           </div>
         `).join("");
@@ -9631,7 +9740,7 @@
         $("systemChecksList").innerHTML = checks.length ? checks.map((check) => `
           <div class="record-item ${check.status === "ok" ? "success" : "failed"}">
             <div><strong>${escapeHtml(check.title || check.key || "-")}</strong><small>检查项</small></div>
-            <div><strong>${escapeHtml(check.status === "ok" ? "正常" : (check.status === "warning" ? "需注意" : "异常"))}</strong><small>状态</small></div>
+            <div>${statusPill(check.status === "ok" ? "正常" : (check.status === "warning" ? "需注意" : "异常"), check.status === "ok" ? "ok" : (check.status === "warning" ? "warn" : "bad"))}<small>状态</small></div>
             <div><strong>${escapeHtml(check.message || "")}</strong><small>${escapeHtml(check.action || "")}</small></div>
           </div>
         `).join("") : "<div class='item'>暂无自检结果</div>";
