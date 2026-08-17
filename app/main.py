@@ -19,7 +19,7 @@ from datetime import date, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -2098,6 +2098,8 @@ def _is_generated_upload(filename: str) -> bool:
             "construction-doc-",
             "notification-detail-",
         )
+    ) or bool(
+        re.match(r"^\d{4}年\d{1,2}月\d{1,2}日.+\.docx$", filename)
     )
 
 
@@ -3883,11 +3885,25 @@ def _construction_template_path() -> Path:
     return Path(__file__).resolve().parent / "templates" / "construction_images.docx"
 
 
+def _construction_docx_filename(uploads: Path, location: str) -> str:
+    target_date = _today_in_tz()
+    date_text = f"{target_date.year}年{target_date.month}月{target_date.day}日"
+    safe_location = re.sub(r'[\\/:*?"<>|\r\n\t]+', "", str(location or "").strip()).strip(" .")
+    safe_location = safe_location or "施工图片"
+    base = f"{date_text}{safe_location}"[:140].rstrip(" .")
+    candidate = f"{base}.docx"
+    counter = 2
+    while (uploads / candidate).exists():
+        candidate = f"{base}-{counter}.docx"
+        counter += 1
+    return candidate
+
+
 def _build_wecom_app_construction_docx(repo: DutyRepository, uploads: Path, location: str, image_paths: list[Path]) -> dict[str, Any]:
     del repo
     clean_location = str(location or "").strip() or DEFAULT_CONSTRUCTION_LOCATION
     uploads.mkdir(parents=True, exist_ok=True)
-    filename = f"construction-doc-{uuid.uuid4().hex}.docx"
+    filename = _construction_docx_filename(uploads, clean_location)
     output_path = uploads / filename
     build_construction_image_docx(
         template_path=_construction_template_path(),
@@ -3902,8 +3918,8 @@ def _build_wecom_app_construction_docx(repo: DutyRepository, uploads: Path, loca
         "success": True,
         "location": clean_location,
         "file_path": str(output_path),
-        "file_url": f"/api/uploads/{filename}",
-        "file_full_url": _public_app_url(f"/api/uploads/{filename}"),
+        "file_url": f"/api/uploads/{quote(filename)}",
+        "file_full_url": _public_app_url(f"/api/uploads/{quote(filename)}"),
     }
 
 

@@ -356,6 +356,7 @@ def test_wecom_app_construction_image_flow_generates_docx(tmp_path: Path, monkey
     _make_construction_template(template_path)
     monkeypatch.setattr(main_module, "_wecom_app_client_from_repo", lambda repo: fake)
     monkeypatch.setattr(main_module, "_construction_template_path", lambda: template_path)
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2026, 8, 17))
     main_module.WECOM_APP_PENDING_CONSTRUCTION_IMAGES.clear()
     main_module.WECOM_APP_PENDING_ROSTER_IMAGE_REQUESTS.clear()
 
@@ -390,11 +391,28 @@ def test_wecom_app_construction_image_flow_generates_docx(tmp_path: Path, monkey
 
     assert any("请发送第 1 张施工图片" in content for _, content in fake.texts)
     assert fake.files and fake.files[-1][1].endswith(".docx")
-    output = next((tmp_path / "uploads").glob("construction-doc-*.docx"))
+    expected_name = f"2026年8月17日{main_module.DEFAULT_CONSTRUCTION_LOCATION}.docx"
+    assert fake.files[-1][1] == expected_name
+    output = tmp_path / "uploads" / expected_name
+    assert output.is_file()
     with zipfile.ZipFile(output) as z:
         assert main_module.DEFAULT_CONSTRUCTION_LOCATION in z.read("word/document.xml").decode("utf-8")
         assert z.read("word/media/image1.jpeg").startswith(b"\xff\xd8")
         assert z.read("word/media/image2.jpeg").startswith(b"\xff\xd8")
+
+
+def test_wecom_app_construction_docx_filename_sanitizes_and_dedupes(tmp_path: Path, monkeypatch):
+    uploads = tmp_path / "uploads"
+    uploads.mkdir()
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2026, 8, 17))
+
+    first = main_module._construction_docx_filename(uploads, '南涧/景东:K88?安全检查')
+    (uploads / first).write_bytes(b"exists")
+    second = main_module._construction_docx_filename(uploads, '南涧/景东:K88?安全检查')
+
+    assert first == "2026年8月17日南涧景东K88安全检查.docx"
+    assert second == "2026年8月17日南涧景东K88安全检查-2.docx"
+    assert main_module._is_generated_upload(first)
 
 
 def test_wecom_app_construction_sites_are_pending_scoped(tmp_path: Path, monkeypatch):
