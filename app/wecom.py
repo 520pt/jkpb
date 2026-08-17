@@ -134,6 +134,25 @@ class WeComClient:
         if data.get("errcode") != 0:
             raise WeComError(f"WeCom image send failed: {data.get('errmsg', 'unknown error')}")
 
+    async def send_file(self, touser: str, filename: str, content: bytes) -> None:
+        media_id = await self.upload_media("file", filename or "document.docx", content)
+        token = await self.get_access_token()
+        payload = {
+            "touser": touser,
+            "msgtype": "file",
+            "agentid": self.agent_id,
+            "file": {"media_id": media_id},
+            "enable_duplicate_check": 0,
+        }
+        response = await self.http_client.post(
+            f"{self.base_url}/message/send",
+            params={"access_token": token},
+            json=payload,
+        )
+        data = response.json()
+        if data.get("errcode") != 0:
+            raise WeComError(f"WeCom file send failed: {data.get('errmsg', 'unknown error')}")
+
     async def send_news(
         self,
         touser: str,

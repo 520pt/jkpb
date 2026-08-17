@@ -29,6 +29,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.custom_reminders import custom_reminder_time_window_text, is_custom_reminder_time_allowed
+from app.construction_docx import (
+    DEFAULT_CONSTRUCTION_LOCATION,
+    build_construction_image_docx,
+    construction_docx_contains_location,
+)
 from app.daily_duty_image import has_cjk_font, render_daily_duty_image
 from app.http_client import tunnel_async_httpx_client
 from app.ocr import extract_roster_image, extract_template_roster_image, recheck_template_roster_cells
@@ -119,7 +124,10 @@ WECOM_APP_MENU_COMMANDS = {
     "DR_TUNNEL_MODIFY_TEMPLATE": "修改模板",
     "DR_ORANGE_PATROL_RECORD": "橙色预警巡查记录查询",
     "DR_TUNNEL_TODAY_SUBMIT": "录入今日机电",
+    "DR_TUNNEL_TODAY_QUERY": "查询今日机电",
     "DR_ROSTER_IMPORT": "导入排班",
+    "DR_CONSTRUCTION_IMAGE": "施工图片",
+    "DR_CONSTRUCTION_SITE_MANAGE": "施工点维护",
     "DR_NEXT_7_DAYS": "查询未来7天",
     "DR_BINDING": "查询我的绑定",
     "DR_HELP": "菜单",
@@ -159,6 +167,7 @@ DEFAULT_WECOM_APP_MENU_GROUPS = [
         "name": "机电预警",
         "items": [
             {"name": "录入今日机电", "command": "录入今日机电"},
+            {"name": "今日机电", "command": "查询今日机电"},
             {"name": "机电模板", "command": "模板"},
             {"name": "修改模板", "command": "修改模板"},
             {"name": "橙色预警巡查记录查询", "command": "橙色预警巡查记录查询"},
@@ -167,10 +176,10 @@ DEFAULT_WECOM_APP_MENU_GROUPS = [
     {
         "name": "更多查询",
         "items": [
-            {"name": "今日机电", "command": "查询今日机电"},
+            {"name": "施工图片", "command": "施工图片"},
+            {"name": "施工点维护", "command": "施工点维护"},
             {"name": "未来7天", "command": "查询未来7天"},
             {"name": "查询休息", "command": "查询休息"},
-            {"name": "我的绑定", "command": "查询我的绑定"},
             {"name": "导入排班", "command": "导入排班"},
         ],
     },
@@ -183,6 +192,9 @@ WECOM_APP_PENDING_TUNNEL_TTL_SECONDS = 30 * 60
 WECOM_APP_PENDING_ROSTER_IMPORTS: dict[str, dict[str, Any]] = {}
 WECOM_APP_PENDING_ROSTER_IMAGE_REQUESTS: dict[str, dict[str, Any]] = {}
 WECOM_APP_PENDING_ROSTER_TTL_SECONDS = 5 * 60
+WECOM_APP_PENDING_CONSTRUCTION_IMAGES: dict[str, dict[str, Any]] = {}
+WECOM_APP_PENDING_CONSTRUCTION_SITES: dict[str, dict[str, Any]] = {}
+WECOM_APP_PENDING_CONSTRUCTION_TTL_SECONDS = 30 * 60
 WECHAT_QUERY_PENDING_MENUS: dict[str, float] = {}
 WECHAT_QUERY_MENU_TTL_SECONDS = 5 * 60
 
@@ -1467,6 +1479,8 @@ def create_app(
         callback_query = _wecom_app_query_from_message(message, command_text)
         callback_pending = WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.get(_wecom_app_pending_key(callback_query))
         roster_pending = WECOM_APP_PENDING_ROSTER_IMPORTS.get(_wecom_app_pending_key(callback_query))
+        construction_image_pending = WECOM_APP_PENDING_CONSTRUCTION_IMAGES.get(_wecom_app_pending_key(callback_query))
+        construction_site_pending = WECOM_APP_PENDING_CONSTRUCTION_SITES.get(_wecom_app_pending_key(callback_query))
         is_pending_confirm = (
             _wecom_app_pending_allows_confirm(callback_pending)
             and _is_wecom_app_pending_confirm_text(command_text)
@@ -1476,13 +1490,17 @@ def create_app(
             and _is_wecom_app_pending_account_help_text(command_text)
         )
         is_pending_roster = bool(roster_pending) and _is_wecom_app_roster_pending_text(command_text)
+        is_pending_construction = bool(construction_image_pending or construction_site_pending)
         if message.msg_type == "image" and str(message.media_id or "").strip():
             background_tasks.add_task(_handle_wecom_app_message, repo, uploads, message)
         elif message.msg_type in {"text", "voice"} and (
             _is_wecom_app_roster_import_request(command_text)
+            or _is_wecom_app_construction_image_request(command_text)
+            or _is_wecom_app_construction_site_request(command_text)
             or is_pending_confirm
             or is_pending_account_help
             or is_pending_roster
+            or is_pending_construction
             or _is_tunnel_mechanical_partner_command(command_text)
             or _looks_like_duty_wechat_command(_normalize_wechat_query_text(command_text), repo, query=callback_query)
         ):
@@ -2077,6 +2095,7 @@ def _is_generated_upload(filename: str) -> bool:
             "daily-duty-query-",
             "patrol-record-",
             "tunnel-mechanical-result-",
+            "construction-doc-",
             "notification-detail-",
         )
     )
@@ -2602,15 +2621,25 @@ def _wecom_app_menu_groups(repo: DutyRepository | None = None) -> list[dict[str,
     groups = _normalize_wecom_app_menu_groups(raw or DEFAULT_WECOM_APP_MENU_GROUPS, allow_empty=False)
     for group in groups:
         if group.get("name") == "机电预警":
-            items = [item for item in group.get("items", []) if str(item.get("command") or "").strip() != "录入今日机电"]
-            group["items"] = [{"name": "录入今日机电", "command": "录入今日机电"}, *items][
-                : WECOM_APP_MENU_LIMITS["max_sub_buttons"]
+            forced = [
+                {"name": "录入今日机电", "command": "录入今日机电"},
+                {"name": "今日机电", "command": "查询今日机电"},
             ]
+            forced_commands = {item["command"] for item in forced}
+            items = [item for item in group.get("items", []) if str(item.get("command") or "").strip() not in forced_commands]
+            group["items"] = [*forced, *items][: WECOM_APP_MENU_LIMITS["max_sub_buttons"]]
         if group.get("name") == "更多查询":
-            items = [item for item in group.get("items", []) if str(item.get("command") or "").strip() != "导入排班"]
-            if len(items) < WECOM_APP_MENU_LIMITS["max_sub_buttons"]:
-                items.append({"name": "导入排班", "command": "导入排班"})
-            group["items"] = items[: WECOM_APP_MENU_LIMITS["max_sub_buttons"]]
+            removed_commands = {"查询今日机电", "查询我的绑定", "导入排班", "施工图片", "施工点维护"}
+            forced = [
+                {"name": "施工图片", "command": "施工图片"},
+                {"name": "施工点维护", "command": "施工点维护"},
+            ]
+            items = [item for item in group.get("items", []) if str(item.get("command") or "").strip() not in removed_commands]
+            group["items"] = [
+                *forced,
+                *items[: max(0, WECOM_APP_MENU_LIMITS["max_sub_buttons"] - len(forced) - 1)],
+                {"name": "导入排班", "command": "导入排班"},
+            ]
     return groups
 
 
@@ -3596,6 +3625,301 @@ async def _handle_wecom_app_roster_image(repo: DutyRepository, uploads: Path, cl
             LOGGER.exception("企业微信自建应用发送排班导入失败提示失败")
 
 
+def _is_wecom_app_construction_image_request(text: str) -> bool:
+    return _normalize_wechat_query_text(text) in {"施工图片", "施工照片", "施工影像", "安全影像", "使用图片"}
+
+
+def _is_wecom_app_construction_site_request(text: str) -> bool:
+    return _normalize_wechat_query_text(text) in {"施工点维护", "施工地点维护", "施工点", "施工地点"}
+
+
+def _construction_pending_valid(pending: dict[str, Any] | None) -> bool:
+    return bool(pending) and float((pending or {}).get("expires_at") or 0) >= time.time()
+
+
+def _construction_site_lines(sites: list[dict[str, Any]]) -> str:
+    return "\n".join(f"{index}. {site.get('name')}" for index, site in enumerate(sites, 1))
+
+
+def _remember_wecom_app_construction_image_request(repo: DutyRepository, query: WechatQueryRequest) -> dict[str, Any]:
+    sites = repo.list_construction_sites()
+    pending = {
+        "expires_at": time.time() + WECOM_APP_PENDING_CONSTRUCTION_TTL_SECONDS,
+        "stage": "location",
+        "sites": sites,
+        "location": "",
+        "image_paths": [],
+    }
+    WECOM_APP_PENDING_CONSTRUCTION_IMAGES[_wecom_app_pending_key(query)] = pending
+    return pending
+
+
+def _build_wecom_app_construction_image_prompt(repo: DutyRepository, query: WechatQueryRequest) -> str:
+    pending = _remember_wecom_app_construction_image_request(repo, query)
+    sites = list(pending.get("sites") or [])
+    if sites:
+        return (
+            "已进入施工图片模式，请选择施工地点或直接回复完整施工地点。\n"
+            f"{_construction_site_lines(sites)}\n\n"
+            f"也可以直接回复：{DEFAULT_CONSTRUCTION_LOCATION}\n"
+            "回复“取消”可退出。"
+        )
+    return (
+        "已进入施工图片模式，请先回复施工地点。\n"
+        f"例如：{DEFAULT_CONSTRUCTION_LOCATION}\n"
+        "随后我会提醒你发送 2 张施工图片。回复“取消”可退出。"
+    )
+
+
+def _build_wecom_app_construction_site_menu(repo: DutyRepository, query: WechatQueryRequest) -> str:
+    sites = repo.list_construction_sites()
+    WECOM_APP_PENDING_CONSTRUCTION_SITES[_wecom_app_pending_key(query)] = {
+        "expires_at": time.time() + WECOM_APP_PENDING_CONSTRUCTION_TTL_SECONDS,
+        "stage": "action",
+    }
+    site_text = f"\n\n当前施工点：\n{_construction_site_lines(sites)}" if sites else "\n\n当前还没有维护施工点。"
+    return (
+        "施工点维护：\n"
+        "1. 新增\n"
+        "2. 删除\n"
+        "3. 修改\n"
+        "回复对应数字继续，回复“取消”退出。"
+        f"{site_text}"
+    )
+
+
+def _construction_cancel_text(text: str) -> bool:
+    return _normalize_wechat_query_text(text) in {"取消", "退出", "放弃", "取消操作"}
+
+
+def _construction_numeric_choice(text: str) -> int | None:
+    value = _normalize_wechat_query_text(text)
+    match = re.match(r"^([1-9]\d*)", value)
+    return int(match.group(1)) if match else None
+
+
+async def _handle_wecom_app_construction_text(
+    repo: DutyRepository,
+    uploads: Path,
+    client: WeComClient,
+    message: Any,
+    text: str,
+    query: WechatQueryRequest,
+) -> bool:
+    del uploads
+    userid = str(message.from_user or "").strip()
+    key = _wecom_app_pending_key(query)
+    if _is_wecom_app_construction_image_request(text):
+        await client.send_text(userid, _build_wecom_app_construction_image_prompt(repo, query))
+        return True
+    if _is_wecom_app_construction_site_request(text):
+        await client.send_text(userid, _build_wecom_app_construction_site_menu(repo, query))
+        return True
+
+    site_pending = WECOM_APP_PENDING_CONSTRUCTION_SITES.get(key)
+    if site_pending:
+        if not _construction_pending_valid(site_pending):
+            WECOM_APP_PENDING_CONSTRUCTION_SITES.pop(key, None)
+            await client.send_text(userid, "施工点维护已过期，请重新点击“施工点维护”。")
+            return True
+        if _construction_cancel_text(text):
+            WECOM_APP_PENDING_CONSTRUCTION_SITES.pop(key, None)
+            await client.send_text(userid, "已退出施工点维护。")
+            return True
+        handled = await _handle_wecom_app_construction_site_text(repo, client, userid, key, site_pending, text)
+        if handled:
+            return True
+
+    image_pending = WECOM_APP_PENDING_CONSTRUCTION_IMAGES.get(key)
+    if not image_pending:
+        return False
+    if not _construction_pending_valid(image_pending):
+        WECOM_APP_PENDING_CONSTRUCTION_IMAGES.pop(key, None)
+        await client.send_text(userid, "施工图片模式已过期，请重新点击“施工图片”。")
+        return True
+    if _construction_cancel_text(text):
+        WECOM_APP_PENDING_CONSTRUCTION_IMAGES.pop(key, None)
+        await client.send_text(userid, "已退出施工图片模式。")
+        return True
+    if str(image_pending.get("stage") or "") != "location":
+        await client.send_text(userid, "请继续发送施工图片；如需退出请回复“取消”。")
+        return True
+    location = _construction_location_from_text(image_pending, text)
+    if not location:
+        await client.send_text(userid, "没有识别到施工地点，请重新发送完整施工地点，或回复施工点序号。")
+        return True
+    image_pending.update(
+        {
+            "stage": "images",
+            "location": location,
+            "image_paths": [],
+            "expires_at": time.time() + WECOM_APP_PENDING_CONSTRUCTION_TTL_SECONDS,
+        }
+    )
+    await client.send_text(userid, f"已记录施工地点：{location}\n请发送第 1 张施工图片。")
+    return True
+
+
+async def _handle_wecom_app_construction_site_text(
+    repo: DutyRepository,
+    client: WeComClient,
+    userid: str,
+    key: str,
+    pending: dict[str, Any],
+    text: str,
+) -> bool:
+    stage = str(pending.get("stage") or "action")
+    choice = _construction_numeric_choice(text)
+    if stage == "action":
+        if choice == 1:
+            pending.update({"stage": "add", "expires_at": time.time() + WECOM_APP_PENDING_CONSTRUCTION_TTL_SECONDS})
+            await client.send_text(userid, f"请发送要新增的施工点名称，例如：{DEFAULT_CONSTRUCTION_LOCATION}")
+            return True
+        if choice == 2:
+            sites = repo.list_construction_sites()
+            if not sites:
+                await client.send_text(userid, "当前没有可删除的施工点。")
+                WECOM_APP_PENDING_CONSTRUCTION_SITES.pop(key, None)
+                return True
+            pending.update({"stage": "delete", "sites": sites, "expires_at": time.time() + WECOM_APP_PENDING_CONSTRUCTION_TTL_SECONDS})
+            await client.send_text(userid, f"请选择要删除的施工点序号：\n{_construction_site_lines(sites)}")
+            return True
+        if choice == 3:
+            sites = repo.list_construction_sites()
+            if not sites:
+                await client.send_text(userid, "当前没有可修改的施工点。")
+                WECOM_APP_PENDING_CONSTRUCTION_SITES.pop(key, None)
+                return True
+            pending.update({"stage": "modify_select", "sites": sites, "expires_at": time.time() + WECOM_APP_PENDING_CONSTRUCTION_TTL_SECONDS})
+            await client.send_text(userid, f"请选择要修改的施工点序号：\n{_construction_site_lines(sites)}")
+            return True
+        await client.send_text(userid, "请回复 1 新增、2 删除、3 修改，或回复“取消”退出。")
+        return True
+    if stage == "add":
+        site = repo.add_construction_site(text)
+        WECOM_APP_PENDING_CONSTRUCTION_SITES.pop(key, None)
+        await client.send_text(userid, f"施工点已新增：{site['name']}")
+        return True
+    if stage == "delete":
+        sites = list(pending.get("sites") or repo.list_construction_sites())
+        if not choice or not (1 <= choice <= len(sites)):
+            await client.send_text(userid, "序号不正确，请重新回复要删除的施工点序号，或回复“取消”。")
+            return True
+        site = sites[choice - 1]
+        repo.delete_construction_site(int(site["id"]))
+        WECOM_APP_PENDING_CONSTRUCTION_SITES.pop(key, None)
+        await client.send_text(userid, f"施工点已删除：{site['name']}")
+        return True
+    if stage == "modify_select":
+        sites = list(pending.get("sites") or repo.list_construction_sites())
+        if not choice or not (1 <= choice <= len(sites)):
+            await client.send_text(userid, "序号不正确，请重新回复要修改的施工点序号，或回复“取消”。")
+            return True
+        pending.update({"stage": "modify_name", "site_id": sites[choice - 1]["id"], "expires_at": time.time() + WECOM_APP_PENDING_CONSTRUCTION_TTL_SECONDS})
+        await client.send_text(userid, f"请发送新的施工点名称。\n当前：{sites[choice - 1]['name']}")
+        return True
+    if stage == "modify_name":
+        site = repo.update_construction_site(int(pending.get("site_id") or 0), text)
+        WECOM_APP_PENDING_CONSTRUCTION_SITES.pop(key, None)
+        await client.send_text(userid, f"施工点已修改为：{site['name'] if site else text}")
+        return True
+    return False
+
+
+def _construction_location_from_text(pending: dict[str, Any], text: str) -> str:
+    choice = _construction_numeric_choice(text)
+    sites = list(pending.get("sites") or [])
+    if choice:
+        return str(sites[choice - 1].get("name") or "").strip() if 1 <= choice <= len(sites) else ""
+    return str(text or "").strip()
+
+
+async def _handle_wecom_app_construction_image(repo: DutyRepository, uploads: Path, client: WeComClient, message: Any) -> bool:
+    userid = str(message.from_user or "").strip()
+    query = _wecom_app_query_from_message(message, "施工图片")
+    key = _wecom_app_pending_key(query)
+    pending = WECOM_APP_PENDING_CONSTRUCTION_IMAGES.get(key)
+    if not pending:
+        return False
+    if not _construction_pending_valid(pending):
+        WECOM_APP_PENDING_CONSTRUCTION_IMAGES.pop(key, None)
+        await client.send_text(userid, "施工图片模式已过期，请重新点击“施工图片”。")
+        return True
+    if str(pending.get("stage") or "") != "images":
+        await client.send_text(userid, "收到图片，但还没有施工地点。请先回复施工地点，再发送两张施工图片。")
+        return True
+    media_id = str(getattr(message, "media_id", "") or getattr(message, "content", "") or "").strip()
+    if not media_id:
+        return True
+    try:
+        image_bytes = await client.download_media(media_id)
+        image_path = _save_roster_upload_bytes(f"construction-{media_id}.jpg", "image/jpeg", image_bytes, uploads)
+        image_paths = [*list(pending.get("image_paths") or []), str(image_path)]
+        pending.update({"image_paths": image_paths, "expires_at": time.time() + WECOM_APP_PENDING_CONSTRUCTION_TTL_SECONDS})
+        if len(image_paths) < 2:
+            await client.send_text(userid, "已收到第 1 张施工图片，请继续发送第 2 张施工图片。")
+            return True
+        await client.send_text(userid, "已收到 2 张施工图片，正在生成 Word 文档，请稍候…")
+        result = _build_wecom_app_construction_docx(repo, uploads, str(pending.get("location") or ""), [Path(p) for p in image_paths[:2]])
+        WECOM_APP_PENDING_CONSTRUCTION_IMAGES.pop(key, None)
+        await _send_wecom_app_construction_docx(client, userid, result)
+        repo.save_send_record(kind="construction_docx_wechat", target=userid, status="success", content=result["location"])
+    except Exception as exc:
+        LOGGER.exception("企业微信自建应用施工图片生成失败")
+        await client.send_text(userid, f"施工图片 Word 生成失败：{exc}")
+        repo.save_send_record(kind="construction_docx_wechat", target=userid, status="failed", content=str(pending.get("location") or ""), error=str(exc))
+    return True
+
+
+def _construction_template_path() -> Path:
+    candidates = [
+        Path(os.getenv("CONSTRUCTION_IMAGE_TEMPLATE_PATH", "")).expanduser() if os.getenv("CONSTRUCTION_IMAGE_TEMPLATE_PATH", "").strip() else None,
+        Path(__file__).resolve().parent / "templates" / "construction_images.docx",
+        Path(r"D:\17457\桌面\只放施工图片.docx"),
+    ]
+    for candidate in candidates:
+        if candidate and candidate.is_file():
+            return candidate
+    return Path(__file__).resolve().parent / "templates" / "construction_images.docx"
+
+
+def _build_wecom_app_construction_docx(repo: DutyRepository, uploads: Path, location: str, image_paths: list[Path]) -> dict[str, Any]:
+    del repo
+    clean_location = str(location or "").strip() or DEFAULT_CONSTRUCTION_LOCATION
+    uploads.mkdir(parents=True, exist_ok=True)
+    filename = f"construction-doc-{uuid.uuid4().hex}.docx"
+    output_path = uploads / filename
+    build_construction_image_docx(
+        template_path=_construction_template_path(),
+        output_path=output_path,
+        location=clean_location,
+        image_paths=image_paths,
+    )
+    if not construction_docx_contains_location(output_path, clean_location):
+        raise RuntimeError("生成后的 Word 未写入施工地点")
+    _cleanup_old_uploads(uploads)
+    return {
+        "success": True,
+        "location": clean_location,
+        "file_path": str(output_path),
+        "file_url": f"/api/uploads/{filename}",
+        "file_full_url": _public_app_url(f"/api/uploads/{filename}"),
+    }
+
+
+async def _send_wecom_app_construction_docx(client: WeComClient, userid: str, result: dict[str, Any]) -> None:
+    path = Path(str(result.get("file_path") or ""))
+    link = str(result.get("file_full_url") or result.get("file_url") or "")
+    content = f"施工图片 Word 已生成：{result.get('location')}\n下载：{link}"
+    if path.is_file() and hasattr(client, "send_file"):
+        try:
+            await client.send_file(userid, path.name, path.read_bytes())
+        except Exception as exc:
+            LOGGER.exception("企业微信自建应用发送施工图片 Word 文件失败")
+            content += f"\n文件消息发送失败：{exc}，请使用下载链接。"
+    await client.send_text(userid, content)
+
+
 def _build_wechat_roster_confirm_response(
     repo: DutyRepository,
     year: int,
@@ -3690,6 +4014,10 @@ async def _build_wechat_query_response(
     text = _consume_wechat_query_menu_selection(query, raw_text)
     if _is_wecom_app_query(query) and _is_wecom_app_roster_import_request(text):
         return _build_wecom_app_roster_import_prompt_response(query)
+    if _is_wecom_app_query(query) and _is_wecom_app_construction_image_request(text):
+        return {"success": True, "query_type": "construction_image_prompt", "reply": _build_wecom_app_construction_image_prompt(repo, query)}
+    if _is_wecom_app_query(query) and _is_wecom_app_construction_site_request(text):
+        return {"success": True, "query_type": "construction_site_menu", "reply": _build_wecom_app_construction_site_menu(repo, query)}
     if (
         _is_wecom_app_query(query)
         and not _is_wechat_self_bind_command(text)
@@ -3964,12 +4292,16 @@ async def _handle_wecom_app_message(repo: DutyRepository, uploads: Path, message
         return
     client = _wecom_app_client_from_repo(repo)
     if str(message.msg_type or "").strip() == "image":
+        if await _handle_wecom_app_construction_image(repo, uploads, client, message):
+            return
         await _handle_wecom_app_roster_image(repo, uploads, client, message)
         return
     text = _wecom_app_message_command_text(message, repo)
     if not text:
         return
     query = _wecom_app_query_from_message(message, text)
+    if await _handle_wecom_app_construction_text(repo, uploads, client, message, text, query):
+        return
     roster_pending = WECOM_APP_PENDING_ROSTER_IMPORTS.get(_wecom_app_pending_key(query))
     if _is_wecom_app_roster_pending_text(text) and roster_pending:
         try:
@@ -4214,6 +4546,8 @@ def _looks_like_duty_wechat_command(
             _is_wechat_daily_duty_query,
             _is_wechat_rest_query,
             _is_wecom_app_roster_import_request,
+            _is_wecom_app_construction_image_request,
+            _is_wecom_app_construction_site_request,
             _is_wechat_next_reminder_query,
             _is_wechat_monitor_query,
         )
@@ -5405,6 +5739,8 @@ def _wechat_query_menu_selection_command(text: str) -> str:
         "9": f"查询{today}机电",
         "10": "隧道机电",
         "11": "查询休息",
+        "12": "施工图片",
+        "13": "施工点维护",
     }.get(text, text)
 
 
@@ -5693,6 +6029,8 @@ def _wechat_query_help_text() -> str:
         f"9. 查询{today}机电\n"
         "10. 查看隧道机电录入格式\n"
         "11. 查询休息\n"
+        "12. 施工图片\n"
+        "13. 施工点维护\n"
         "直接回复序号即可执行。\n"
         "发送“巡查记录”可获取巡查记录查询模板。\n"
         f"示例：{DEFAULT_PATROL_RECORD_TEMPLATE}\n"
@@ -8101,6 +8439,8 @@ def _interaction_command_catalog(repo: DutyRepository) -> list[dict[str, Any]]:
         item("查询本周监控", "监控班查询", False, "图文", True),
         item("查询我的监控", "个人监控班查询", True, "图文", True),
         item("查询休息", "休息统计", True, "图文", True, "可写 查询商邱宏休息"),
+        item("施工图片", "施工影像 Word", False, "文件", True, "按提示发送地点和 2 张图片"),
+        item("施工点维护", "施工点维护", False, "文字", True, "1 新增 / 2 删除 / 3 修改"),
         item("机电模板", "隧道机电模板", True, "文字", True),
         item("修改模板", "隧道机电修改模板", True, "文字", True),
         item("录入今日机电", "隧道机电录入", True, "文字确认/图文结果", True),

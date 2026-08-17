@@ -99,6 +99,7 @@ CONFIG_EXPORT_TABLES = [
     "feature_channel_config",
     "wechat_interaction_config",
     "wecom_app_menu_config",
+    "construction_sites",
     "personnel_names",
     "custom_reminders",
     "daily_duty_config",
@@ -326,6 +327,13 @@ class DutyRepository:
                 CREATE TABLE IF NOT EXISTS wecom_app_menu_config (
                     id INTEGER PRIMARY KEY CHECK (id = 1),
                     menu_json TEXT NOT NULL DEFAULT '[]',
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS construction_sites (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -1674,6 +1682,59 @@ class DutyRepository:
             return []
         menu = _loads_json(row["menu_json"], [])
         return menu if isinstance(menu, list) else []
+
+    def list_construction_sites(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, name, created_at, updated_at
+                FROM construction_sites
+                ORDER BY id
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def add_construction_site(self, name: str) -> dict[str, Any]:
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            raise ValueError("施工点不能为空")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO construction_sites (name) VALUES (?)
+                ON CONFLICT(name) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
+                """,
+                (clean_name,),
+            )
+            row = conn.execute(
+                "SELECT id, name, created_at, updated_at FROM construction_sites WHERE name = ?",
+                (clean_name,),
+            ).fetchone()
+        return dict(row)
+
+    def delete_construction_site(self, site_id: int) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute("DELETE FROM construction_sites WHERE id = ?", (int(site_id),))
+            return cur.rowcount > 0
+
+    def update_construction_site(self, site_id: int, name: str) -> dict[str, Any] | None:
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            raise ValueError("施工点不能为空")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE construction_sites
+                SET name = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (clean_name, int(site_id)),
+            )
+            row = conn.execute(
+                "SELECT id, name, created_at, updated_at FROM construction_sites WHERE id = ?",
+                (int(site_id),),
+            ).fetchone()
+        return dict(row) if row else None
 
     def save_wechat_interaction_log(
         self,

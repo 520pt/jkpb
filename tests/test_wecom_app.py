@@ -4,11 +4,14 @@ import asyncio
 import base64
 import hashlib
 import struct
+import zipfile
+from io import BytesIO
 from datetime import date
 from pathlib import Path
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from fastapi.testclient import TestClient
+from PIL import Image
 
 import app.main as main_module
 from app.main import create_app
@@ -36,6 +39,7 @@ class FakeWeComAppClient:
     def __init__(self) -> None:
         self.texts: list[tuple[str, str]] = []
         self.images: list[tuple[str, bytes]] = []
+        self.files: list[tuple[str, str, bytes]] = []
         self.news: list[tuple[str, dict]] = []
         self.menus: list[dict] = []
         self.media: dict[str, bytes] = {}
@@ -45,6 +49,9 @@ class FakeWeComAppClient:
 
     async def send_image(self, touser: str, image_bytes: bytes) -> None:
         self.images.append((touser, image_bytes))
+
+    async def send_file(self, touser: str, filename: str, content: bytes) -> None:
+        self.files.append((touser, filename, content))
 
     async def send_news(self, touser: str, *, title: str, description: str, image_bytes: bytes, url: str) -> None:
         self.news.append(
@@ -91,6 +98,40 @@ def _save_simple_tunnel_template(repo) -> None:
             ],
         }
     )
+
+
+def _png_bytes(color=(255, 0, 0)) -> bytes:
+    output = BytesIO()
+    Image.new("RGB", (320, 180), color).save(output, format="PNG")
+    return output.getvalue()
+
+
+def _make_construction_template(path: Path) -> None:
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Default Extension="jpeg" ContentType="image/jpeg"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>""")
+        z.writestr("_rels/.rels", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>""")
+        z.writestr("word/_rels/document.xml.rels", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.jpeg"/>
+<Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image2.jpeg"/>
+</Relationships>""")
+        z.writestr("word/document.xml", f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+<w:p><w:r><w:t>安全影像资料记录表</w:t></w:r></w:p>
+<w:p><w:r><w:t>地点</w:t></w:r><w:r><w:t>{main_module.DEFAULT_CONSTRUCTION_LOCATION}</w:t></w:r></w:p>
+<w:p><w:r><w:t>地点</w:t></w:r><w:r><w:t>{main_module.DEFAULT_CONSTRUCTION_LOCATION}</w:t></w:r></w:p>
+</w:body></w:document>""")
+        z.writestr("word/media/image1.jpeg", _png_bytes())
+        z.writestr("word/media/image2.jpeg", _png_bytes((0, 255, 0)))
 
 
 def test_wecom_app_callback_verification_returns_plain_echo(tmp_path: Path):
@@ -306,6 +347,96 @@ def test_wecom_app_image_without_roster_import_prompt_does_not_import(tmp_path: 
     assert any("请先点击“更多查询 → 导入排班”" in content for _, content in fake.texts)
 
 
+def test_wecom_app_construction_image_flow_generates_docx(tmp_path: Path, monkeypatch):
+    repo = main_module.DutyRepository(tmp_path / "duty.db")
+    fake = FakeWeComAppClient()
+    fake.media["pic-1"] = _png_bytes((255, 0, 0))
+    fake.media["pic-2"] = _png_bytes((0, 0, 255))
+    template_path = tmp_path / "construction-template.docx"
+    _make_construction_template(template_path)
+    monkeypatch.setattr(main_module, "_wecom_app_client_from_repo", lambda repo: fake)
+    monkeypatch.setattr(main_module, "_construction_template_path", lambda: template_path)
+    main_module.WECOM_APP_PENDING_CONSTRUCTION_IMAGES.clear()
+    main_module.WECOM_APP_PENDING_ROSTER_IMAGE_REQUESTS.clear()
+
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "",
+        "media_id": "",
+        "event_key": "DR_CONSTRUCTION_IMAGE",
+        "from_user": "sqh",
+        "msg_type": "event",
+    })()))
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": main_module.DEFAULT_CONSTRUCTION_LOCATION,
+        "media_id": "",
+        "event_key": "",
+        "from_user": "sqh",
+        "msg_type": "text",
+    })()))
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "pic-1",
+        "media_id": "pic-1",
+        "event_key": "",
+        "from_user": "sqh",
+        "msg_type": "image",
+    })()))
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "pic-2",
+        "media_id": "pic-2",
+        "event_key": "",
+        "from_user": "sqh",
+        "msg_type": "image",
+    })()))
+
+    assert any("请发送第 1 张施工图片" in content for _, content in fake.texts)
+    assert fake.files and fake.files[-1][1].endswith(".docx")
+    output = next((tmp_path / "uploads").glob("construction-doc-*.docx"))
+    with zipfile.ZipFile(output) as z:
+        assert main_module.DEFAULT_CONSTRUCTION_LOCATION in z.read("word/document.xml").decode("utf-8")
+        assert z.read("word/media/image1.jpeg").startswith(b"\xff\xd8")
+        assert z.read("word/media/image2.jpeg").startswith(b"\xff\xd8")
+
+
+def test_wecom_app_construction_sites_are_pending_scoped(tmp_path: Path, monkeypatch):
+    repo = main_module.DutyRepository(tmp_path / "duty.db")
+    fake = FakeWeComAppClient()
+    monkeypatch.setattr(main_module, "_wecom_app_client_from_repo", lambda repo: fake)
+    main_module.WECOM_APP_PENDING_CONSTRUCTION_SITES.clear()
+
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "1",
+        "media_id": "",
+        "event_key": "",
+        "from_user": "sqh",
+        "msg_type": "text",
+    })()))
+    assert repo.list_construction_sites() == []
+
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "",
+        "media_id": "",
+        "event_key": "DR_CONSTRUCTION_SITE_MANAGE",
+        "from_user": "sqh",
+        "msg_type": "event",
+    })()))
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "1",
+        "media_id": "",
+        "event_key": "",
+        "from_user": "sqh",
+        "msg_type": "text",
+    })()))
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "南涧至景东方向K88+730-K88+880上挡墙施工安全检查",
+        "media_id": "",
+        "event_key": "",
+        "from_user": "sqh",
+        "msg_type": "text",
+    })()))
+
+    assert repo.list_construction_sites()[0]["name"].startswith("南涧至景东方向")
+
+
 def test_wecom_app_roster_image_conflict_requires_overwrite_confirmation(tmp_path: Path, monkeypatch):
     repo = main_module.DutyRepository(tmp_path / "duty.db")
     repo.save_roster_month(2026, 8, [{"name": "商邱宏", "days": {"1": "早"}}], "old.png")
@@ -478,11 +609,15 @@ def test_create_wecom_app_menu_endpoint_uses_limited_grouped_menu(tmp_path: Path
     assert buttons[1]["sub_button"][0]["name"] == "录入今日机电"
     assert [item["key"] for item in buttons[1]["sub_button"]] == [
         "DR_TUNNEL_TODAY_SUBMIT",
+        "DR_TUNNEL_TODAY_QUERY",
         "DR_TUNNEL_TEMPLATE",
         "DR_TUNNEL_MODIFY_TEMPLATE",
         "DR_ORANGE_PATROL_RECORD",
     ]
     assert buttons[2]["name"] == "更多查询"
+    assert buttons[2]["sub_button"][0] == {"type": "click", "name": "施工图片", "key": "DR_CONSTRUCTION_IMAGE"}
+    assert buttons[2]["sub_button"][1] == {"type": "click", "name": "施工点维护", "key": "DR_CONSTRUCTION_SITE_MANAGE"}
+    assert all(item["name"] != "我的绑定" for item in buttons[2]["sub_button"])
     assert buttons[2]["sub_button"][-1] == {"type": "click", "name": "导入排班", "key": "DR_ROSTER_IMPORT"}
 
 
