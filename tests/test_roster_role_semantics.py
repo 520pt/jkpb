@@ -38,7 +38,7 @@ def test_role_semantics_reads_patrol_standby_office_and_station_white_middle_cel
     assert rows["商邱宏"]["1"] == "巡"
     assert rows["商邱宏"]["6"] == "备"
     assert rows["商邱宏"]["11"] == "休"
-    assert rows["罗森"]["3"] == ""
+    assert rows["罗森"]["3"] == "-"
     assert rows["杨伦"]["1"] == "办"
 
 

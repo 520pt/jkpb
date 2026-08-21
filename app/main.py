@@ -2115,7 +2115,7 @@ def _apply_roster_role_semantics(repo: DutyRepository, result: dict[str, Any]) -
             if role == "office":
                 label = "办"
             elif role == "station":
-                label = ""
+                label = "-"
             else:
                 label = patrol_modes.get((row_index, str(day)), "巡")
             if next_row["days"].get(str(day), "") != label:
