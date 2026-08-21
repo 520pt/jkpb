@@ -395,9 +395,9 @@
       align-items: center;
       justify-content: space-between;
       gap: 10px;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
       padding-bottom: 10px;
-      border-bottom: 1px solid var(--line);
+      border-bottom: 0;
     }
     .orange-warning-stats-head strong {
       font-size: 14px;
@@ -407,6 +407,7 @@
       color: var(--muted);
       font-size: 12px;
       line-height: 1.5;
+      margin-left: auto;
       text-align: right;
       white-space: nowrap;
     }
@@ -585,6 +586,10 @@
     }
     .orange-warning-card-body .orange-warning-card-people {
       text-align: right;
+    }
+    .orange-warning-tools {
+      border-bottom: 0;
+      padding-bottom: 0;
     }
     .patrol-delivery-row {
       display: grid;
@@ -2096,9 +2101,9 @@
     .reminder-config-card {
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 6px;
       min-height: 0;
-      padding: 10px;
+      padding: 9px;
       cursor: pointer;
       transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
     }
@@ -2113,7 +2118,7 @@
     }
     .reminder-card-head {
       display: flex;
-      align-items: flex-start;
+      align-items: center;
       justify-content: space-between;
       gap: 8px;
     }
@@ -2127,19 +2132,30 @@
       flex-wrap: wrap;
       gap: 6px;
       color: #64748b;
+      font-size: 11px;
+      line-height: 1.35;
+    }
+    .reminder-card-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex: 0 0 auto;
+    }
+    .reminder-card-header-actions button {
+      height: 28px;
+      padding: 0 10px;
       font-size: 12px;
-      line-height: 1.45;
     }
     .reminder-summary-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px;
+      gap: 6px;
     }
     .reminder-summary-item {
       display: grid;
       gap: 2px;
       min-width: 0;
-      padding: 7px 8px;
+      padding: 6px 8px;
       border: 1px solid #e2e8f0;
       border-radius: 10px;
       background: #fff;
@@ -2168,33 +2184,14 @@
       color: #991b1b;
     }
     .reminder-card-message {
-      min-height: 18px;
-      line-height: 1.45;
+      min-height: 16px;
+      line-height: 1.35;
       color: #334155;
       word-break: break-word;
       overflow: hidden;
       display: -webkit-box;
-      -webkit-line-clamp: 2;
+      -webkit-line-clamp: 1;
       -webkit-box-orient: vertical;
-    }
-    .reminder-card-actions {
-      display: flex;
-      gap: 8px;
-      justify-content: flex-end;
-      flex-wrap: wrap;
-      margin-top: auto;
-    }
-    .reminder-card-actions button {
-      height: 30px;
-      padding: 0 10px;
-      font-size: 12px;
-    }
-    .reminder-config-card .people-status-pill {
-      margin-right: 0;
-      margin-bottom: 0;
-      min-height: 22px;
-      padding: 2px 8px;
-      font-size: 12px;
     }
     .reminder-list-note {
       margin-top: -2px;
@@ -9878,21 +9875,19 @@
                   <span title="${escapeHtml(notification)}">${escapeHtml(monitorNotificationSummary())}</span>
                 </div>
               </div>
-              <span class="people-status-pill ${person.enabled === false ? "warn" : "ok"}">${escapeHtml(person.enabled === false ? "已停用" : "已启用")}</span>
+              <div class="reminder-card-header-actions">
+                <button type="button" data-edit-person="${escapeHtml(person.name)}">编辑</button>
+                <button class="danger" type="button" data-delete-person="${escapeHtml(person.name)}">删除</button>
+              </div>
             </div>
             <div class="reminder-summary-grid">
               ${reminderSummaryItem("通知目标", monitorNotificationSummary(), statusLevelForText(notification), notification)}
               ${reminderSummaryItem("发送方式", contentModeLabel(person.send_content_mode || "both"), "ok")}
               ${reminderSummaryItem("每日提醒", person.daily_time || "未配置", person.daily_time ? "ok" : "bad")}
               ${reminderSummaryItem("班前提醒", `${person.before_shift_minutes || 0} 分钟`, "ok")}
-              ${reminderSummaryItem("休息提醒", person.rest_reminder_enabled ? (person.rest_reminder_time || "已启用") : "未启用", person.rest_reminder_enabled ? "ok" : "warn")}
             </div>
-            <div class="reminder-card-message" title="${escapeHtml(person.rest_reminder_enabled ? (person.rest_message_template || "{name} {rest_status}") : "点击卡片可修改")}">
-              ${escapeHtml(person.rest_reminder_enabled ? `休息文案：${person.rest_message_template || "{name} {rest_status}"}` : "点击卡片或编辑按钮可修改")}
-            </div>
-            <div class="settings-actions reminder-card-actions">
-              <button type="button" data-edit-person="${escapeHtml(person.name)}">编辑</button>
-              <button class="danger" type="button" data-delete-person="${escapeHtml(person.name)}">删除</button>
+            <div class="reminder-card-message" title="${escapeHtml(person.rest_reminder_enabled ? `休息 ${person.rest_reminder_time || "已启用"} · ${person.rest_message_template || "{name} {rest_status}"}` : "点击卡片可修改")}">
+              ${escapeHtml(person.rest_reminder_enabled ? `休息 ${person.rest_reminder_time || "已启用"} · ${person.rest_message_template || "{name} {rest_status}"}` : "点击卡片或编辑按钮可修改")}
             </div>
           </div>
         `;
@@ -10018,7 +10013,10 @@
                   <span>${escapeHtml(customReminderNotificationSummary())}</span>
                 </div>
               </div>
-              <span class="people-status-pill ${reminder.enabled ? "ok" : "warn"}">${escapeHtml(reminder.enabled ? "已启用" : "已停用")}</span>
+              <div class="reminder-card-header-actions">
+                <button type="button" data-edit-custom-reminder="${reminder.id}">编辑</button>
+                <button class="danger" type="button" data-delete-custom-reminder="${reminder.id}">删除</button>
+              </div>
             </div>
             <div class="reminder-summary-grid">
               ${reminderSummaryItem("通知目标", customReminderNotificationSummary(), statusLevelForText(notification), notification)}
@@ -10027,10 +10025,6 @@
               ${reminderSummaryItem("匹配班次", customReminderShiftLabel(reminder.shift_code), "ok")}
             </div>
             <div class="reminder-card-message" title="${escapeHtml(reminder.message || "")}">${escapeHtml(reminder.message || "点击卡片或编辑按钮可修改").replace(/\n/g, "<br>")}</div>
-            <div class="settings-actions reminder-card-actions">
-              <button type="button" data-edit-custom-reminder="${reminder.id}">编辑</button>
-              <button class="danger" type="button" data-delete-custom-reminder="${reminder.id}">删除</button>
-            </div>
           </div>
         `;
       }).join("") || `<div class="item empty"><small>暂无自定义提醒</small></div>`;
@@ -10787,6 +10781,10 @@
         const nonDriverRoles = roles.filter((role) => !role.includes("驾驶员"));
         return nonDriverRoles.length > 1;
       });
+      const duplicatedBrief = duplicated.map(([name, roles]) => {
+        const nonDriverRoles = roles.filter((role) => !role.includes("驾驶员"));
+        return `${name}（${nonDriverRoles.join("/") || "-" }）`;
+      });
       const roleStats = roleSelectConfigs().map((config) => {
         const count = nameMultiSelectValues(config.inputId).length;
         return `<span><strong>${escapeHtml(String(count))}</strong>${escapeHtml(config.title)}</span>`;
@@ -10801,8 +10799,8 @@
           <small>${escapeHtml(unassigned.slice(0, 12).join("、") || "岗位分配已覆盖当前人员名单")}${unassigned.length > 12 ? ` 等 ${unassigned.length} 人` : ""}</small>
         </div>
         <div class="people-groups-check-card ${duplicated.length ? "warn" : "ok"}">
-          <strong>${duplicated.length ? `重复分配 ${duplicated.length} 人` : "暂无重复分配"}</strong>
-          <small>${escapeHtml(duplicated.map(([name, roles]) => `${name}：${roles.join("/")}`).slice(0, 6).join("；") || "站管、办公室、班组不重复时，这里会保持正常；驾驶员可与其他岗位重叠。")}</small>
+          <strong>${duplicated.length ? `重复岗位 ${duplicated.length} 人` : "暂无重复岗位"}</strong>
+          <small>${escapeHtml((duplicatedBrief.slice(0, 6).join("；") || "站管、办公室、班组不重复时，这里会保持正常；驾驶员可与其他岗位重叠。") + (duplicatedBrief.length > 6 ? ` 等 ${duplicatedBrief.length} 人` : ""))}</small>
         </div>
       `;
     }
@@ -10976,7 +10974,30 @@
           </div>
         </div>
       `;
+      if (open) {
+        requestAnimationFrame(() => positionNameMultiSelectPanel(box));
+      } else {
+        box.dataset.panelSide = "";
+      }
       renderPeopleGroupsOverview();
+    }
+
+    function positionNameMultiSelectPanel(box) {
+      if (!box || !box.closest("#personnelSettings")) return;
+      const panel = box.querySelector(".name-multi-select-panel");
+      if (!panel) return;
+      const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+      if (viewportWidth <= 640) return;
+      const margin = 28;
+      const desiredWidth = Math.max(460, Math.min(760, viewportWidth - margin * 2));
+      const boxRect = box.getBoundingClientRect();
+      const shouldAlignRight = boxRect.left + desiredWidth > viewportWidth - margin;
+      panel.style.width = `${desiredWidth}px`;
+      panel.style.maxWidth = `${desiredWidth}px`;
+      panel.style.minWidth = `${Math.min(desiredWidth, 640)}px`;
+      panel.style.left = shouldAlignRight ? "auto" : "0";
+      panel.style.right = shouldAlignRight ? "0" : "auto";
+      box.dataset.panelSide = shouldAlignRight ? "right" : "left";
     }
 
     function renderNameMultiSelects() {
@@ -10995,6 +11016,9 @@
     function bindNameMultiSelectDelegates() {
       if (document.documentElement.dataset.nameMultiSelectDelegated === "1") return;
       document.documentElement.dataset.nameMultiSelectDelegated = "1";
+      window.addEventListener("resize", () => {
+        document.querySelectorAll("#personnelSettings .name-multi-select[data-open='1']").forEach((item) => positionNameMultiSelectPanel(item));
+      });
       document.addEventListener("click", (event) => {
         const directoryRemove = event.target.closest(".people-directory [data-name-multi-remove]");
         if (directoryRemove) {
@@ -11066,7 +11090,11 @@
             box.dataset.open = willOpen ? "1" : "0";
             renderNameMultiSelect(box.id);
             if (willOpen) {
-              setTimeout(() => $(box.id)?.querySelector("[data-name-multi-search]")?.focus(), 0);
+              setTimeout(() => {
+                const currentBox = $(box.id);
+                if (currentBox) positionNameMultiSelectPanel(currentBox);
+                currentBox?.querySelector("[data-name-multi-search]")?.focus();
+              }, 0);
             }
             return;
           }
@@ -11153,6 +11181,7 @@
         if (!box) return;
         box.dataset.search = search.value;
         renderNameMultiSelect(box.id);
+        requestAnimationFrame(() => positionNameMultiSelectPanel(box));
         setTimeout(() => $(box.id)?.querySelector("[data-name-multi-search]")?.focus(), 0);
       }, true);
     }
