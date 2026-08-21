@@ -24,6 +24,7 @@ class CellMetrics:
     fixed_label: str | None
     ink_fraction: float
     ink_height: int
+    white_middle_like: bool = False
 
 
 def fallback_review_grid(source_image_path: str) -> dict[str, Any]:
@@ -128,7 +129,7 @@ def _read_template_ocr_texts(path: Path, template_result: dict[str, Any]) -> lis
     min_day_x = int(first_day_box["x"])
     y_min = min(int(box["y"]) for box in row_boxes)
     y_max = max(int(box["y"]) + int(box["height"]) for box in row_boxes)
-    x_min = max(0, min_day_x - 180)
+    x_min = _template_name_column_left(image, min_day_x, y_min, y_max)
     x_max = min(image.shape[1], min_day_x)
     y_min = max(0, y_min)
     y_max = min(image.shape[0], y_max)
@@ -136,10 +137,61 @@ def _read_template_ocr_texts(path: Path, template_result: dict[str, Any]) -> lis
         return []
 
     crop = image[y_min:y_max, x_min:x_max]
-    return _read_rapidocr_crop_texts(crop, x_offset=x_min, y_offset=y_min, scale=2.0)
+    texts = _read_rapidocr_crop_texts(crop, x_offset=x_min, y_offset=y_min, scale=2.0)
+    initial_names = _detect_template_names(texts, min_day_x)
+    if len(initial_names) >= len(grid):
+        return texts
+
+    # Some WeCom images are recompressed or downscaled enough that the first
+    # OCR pass misses thin Chinese strokes. Retry even when the first pass
+    # only sees the serial column or a few of the names.
+    retry = _read_rapidocr_crop_texts(
+        crop,
+        x_offset=x_min,
+        y_offset=y_min,
+        scale=3.0,
+        preprocess=True,
+    )
+    return _merge_ocr_texts(texts, retry)
 
 
-def _read_rapidocr_crop_texts(crop: Any, *, x_offset: int, y_offset: int, scale: float) -> list[OcrText]:
+def _template_name_column_left(image: Any, first_day_x: int, y_min: int, y_max: int) -> int:
+    """Find the left edge of the name column instead of assuming 180 pixels.
+
+    The fixed 180-pixel crop worked for the original template but can cut off
+    the first characters when a phone/exporter uses a wider name column. The
+    last strong vertical line before the first day column is the serial/name
+    separator in the supported roster template.
+    """
+
+    try:
+        import cv2
+        import numpy as np
+
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        start = max(0, int(y_min))
+        end = min(gray.shape[0], int(y_max))
+        if end <= start:
+            return max(0, first_day_x - 180)
+        dark = gray[start:end] < 80
+        counts = dark.sum(axis=0)
+        candidates = _group_centers(np.where(counts > dark.shape[0] * 0.45)[0])
+        before = [value for value in candidates if value < first_day_x - 4]
+        if before:
+            return max(0, before[-1] + 2)
+    except Exception:
+        pass
+    return max(0, first_day_x - 180)
+
+
+def _read_rapidocr_crop_texts(
+    crop: Any,
+    *,
+    x_offset: int,
+    y_offset: int,
+    scale: float,
+    preprocess: bool = False,
+) -> list[OcrText]:
     try:
         import cv2
     except Exception:
@@ -149,13 +201,30 @@ def _read_rapidocr_crop_texts(crop: Any, *, x_offset: int, y_offset: int, scale:
         return []
 
     resized = cv2.resize(crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+    variants = [resized]
+    if preprocess:
+        gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+        variants.extend(
+            [
+                gray,
+                cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1],
+            ]
+        )
     import tempfile
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        crop_path = Path(temp_dir) / "template-name-column.png"
-        if not cv2.imwrite(str(crop_path), resized):
-            return []
-        texts = _read_rapidocr_texts(crop_path)
+        texts: list[OcrText] = []
+        seen: set[tuple[str, int, int]] = set()
+        for index, variant in enumerate(variants):
+            crop_path = Path(temp_dir) / f"template-name-column-{index}.png"
+            if not cv2.imwrite(str(crop_path), variant):
+                continue
+            for item in _read_rapidocr_texts(crop_path):
+                key = (item.text, round(item.x / max(scale, 1.0)), round(item.y / max(scale, 1.0)))
+                if key in seen:
+                    continue
+                seen.add(key)
+                texts.append(item)
 
     return [
         OcrText(
@@ -166,6 +235,19 @@ def _read_rapidocr_crop_texts(crop: Any, *, x_offset: int, y_offset: int, scale:
         )
         for item in texts
     ]
+
+
+def _merge_ocr_texts(*groups: list[OcrText]) -> list[OcrText]:
+    merged: list[OcrText] = []
+    seen: set[tuple[str, int, int]] = set()
+    for group in groups:
+        for item in group:
+            key = (item.text, round(item.x), round(item.y))
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+    return sorted(merged, key=lambda item: (item.y, item.x))
 
 
 def extract_template_roster_image(image_path: str | Path) -> dict[str, Any] | None:
@@ -199,15 +281,18 @@ def extract_template_roster_image(image_path: str | Path) -> dict[str, Any] | No
             x1, x2 = x_lines[day_index], x_lines[day_index + 1]
             y1, y2 = y_lines[row_index], y_lines[row_index + 1]
             cell = _crop_template_cell(image, x1, y1, x2 - x1, y2 - y1)
-            cell_metrics.append(_measure_template_cell(cell))
+            metrics = _measure_template_cell(cell)
+            cell_metrics.append(metrics)
             cell_refs.append((row_index, day_index + 1))
             days[str(day_index + 1)] = ""
             boxes[str(day_index + 1)] = {"x": x1, "y": y1, "width": x2 - x1, "height": y2 - y1}
-        grid.append({"name": f"第{row_index + 1}行", "days": days, "boxes": boxes})
+        grid.append({"name": f"第{row_index + 1}行", "days": days, "boxes": boxes, "cell_meta": {}})
 
     labels = _classify_template_cell_metrics(cell_metrics)
-    for (row_index, day), label in zip(cell_refs, labels):
+    for (row_index, day), label, metrics in zip(cell_refs, labels, cell_metrics):
         grid[row_index]["days"][str(day)] = label
+        if metrics.white_middle_like:
+            grid[row_index].setdefault("cell_meta", {})[str(day)] = {"white_middle": True}
 
     return {
         "year": today.year,
@@ -272,15 +357,21 @@ def recheck_template_roster_cells(
             "name": str(row.get("name") or ""),
             "days": dict(row.get("days", {})),
             "boxes": dict(row.get("boxes", {})),
+            "cell_meta": dict(row.get("cell_meta", {})),
         }
         for row in current_grid
     ]
     issues: list[dict[str, Any]] = []
-    for (row_index, day), parsed_value in zip(cell_refs, labels):
+    for (row_index, day), parsed_value, metrics in zip(cell_refs, labels, cell_metrics):
         if row_index >= len(corrected_grid):
             continue
         current_days = corrected_grid[row_index]["days"]
         current_boxes = corrected_grid[row_index]["boxes"]
+        current_meta = corrected_grid[row_index].setdefault("cell_meta", {})
+        if metrics.white_middle_like:
+            current_meta[str(day)] = {"white_middle": True}
+        else:
+            current_meta.pop(str(day), None)
         current_value = str(current_days.get(day, ""))
         if current_value != parsed_value:
             issues.append(
@@ -356,7 +447,12 @@ def _merge_template_ocr_texts(template_result: dict[str, Any], texts: list[OcrTe
         if box:
             row_centers.append(float(box["y"]) + float(box["height"]) / 2)
 
-    for item in _detect_template_names(texts, min_day_x):
+    detected_names = _detect_template_names(texts, min_day_x)
+    template_result["recognized_name_count"] = len(detected_names)
+    template_result["name_ocr_status"] = "empty" if not detected_names else (
+        "complete" if len(detected_names) >= len(grid) else "partial"
+    )
+    for item in detected_names:
         row_index = _nearest_index(item.y, row_centers)
         if row_index is not None and row_index < len(grid):
             grid[row_index]["name"] = item.text.strip()
@@ -367,8 +463,13 @@ def _trim_template_grid_to_month(grid: list[dict[str, Any]], year: int, month: i
     for row in grid:
         days = dict(row.get("days", {}))
         boxes = dict(row.get("boxes", {}))
+        cell_meta = dict(row.get("cell_meta", {}))
         row["days"] = {str(day): value for day, value in days.items() if _is_valid_month_day(str(day), max_day)}
         row["boxes"] = {str(day): value for day, value in boxes.items() if _is_valid_month_day(str(day), max_day)}
+        if cell_meta:
+            row["cell_meta"] = {
+                str(day): value for day, value in cell_meta.items() if _is_valid_month_day(str(day), max_day)
+            }
 
 
 def _month_day_count(year: int, month: int) -> int:
@@ -387,15 +488,44 @@ def _is_valid_month_day(day: str, max_day: int) -> bool:
 
 def _detect_template_names(texts: list[OcrText], min_day_x: float) -> list[OcrText]:
     ignored = {"姓名", "序号", "时间", "工作", "天数", "排班表"}
-    names: list[OcrText] = []
+    candidates: list[OcrText] = []
     for item in texts:
-        text = item.text.strip()
-        if text in ignored or normalize_shift_code(text) is not None:
+        if not (0 <= item.x < min_day_x):
             continue
-        if not re.fullmatch(r"[\u4e00-\u9fff]{2,5}", text):
+        text = re.sub(r"[^\u4e00-\u9fff]", "", item.text.strip())
+        if not text or text in ignored or normalize_shift_code(text) is not None:
             continue
-        if 40 <= item.x < min_day_x:
-            names.append(item)
+        candidates.append(OcrText(text=text, x=item.x, y=item.y, confidence=item.confidence))
+
+    if not candidates:
+        return []
+
+    candidates.sort(key=lambda item: (item.y, item.x))
+    grouped: list[list[OcrText]] = []
+    current_group: list[OcrText] = [candidates[0]]
+    for item in candidates[1:]:
+        if abs(item.y - current_group[-1].y) <= 18:
+            current_group.append(item)
+        else:
+            grouped.append(current_group)
+            current_group = [item]
+    grouped.append(current_group)
+
+    names: list[OcrText] = []
+    for group in grouped:
+        merged = re.sub(r"[^\u4e00-\u9fff]", "", "".join(item.text for item in sorted(group, key=lambda value: value.x)))
+        if merged in ignored or normalize_shift_code(merged) is not None:
+            continue
+        if not re.fullmatch(r"[\u4e00-\u9fff]{2,5}", merged):
+            continue
+        names.append(
+            OcrText(
+                text=merged,
+                x=min(item.x for item in group),
+                y=sum(item.y for item in group) / len(group),
+                confidence=max(item.confidence for item in group),
+            )
+        )
     return sorted(names, key=lambda item: item.y)
 
 
@@ -504,7 +634,12 @@ def _score_day_line_window(image: Any, lines: list[int]) -> float:
 def _find_person_y_lines(dark: Any) -> list[int]:
     import numpy as np
 
-    line_candidates, line_counts = _find_long_horizontal_line_candidates(dark)
+    raw_line_candidates, raw_line_counts = _find_long_horizontal_line_candidates(dark)
+    line_candidates = _filter_person_row_lines(dark, raw_line_candidates)
+    line_counts = np.asarray(raw_line_counts).copy()
+    excluded = set(raw_line_candidates) - set(line_candidates)
+    for y in excluded:
+        line_counts[max(0, y - 7) : min(len(line_counts), y + 8)] = 0
     fitted = _fit_regular_person_y_lines(line_candidates, line_counts, image_height=dark.shape[0])
     if fitted:
         return fitted
@@ -527,6 +662,47 @@ def _find_person_y_lines(dark: Any) -> list[int]:
         if len(sequence) > len(best):
             best = sequence
     return best if len(best) >= 16 else []
+
+
+def _filter_person_row_lines(dark: Any, candidates: list[int]) -> list[int]:
+    """Remove header-only horizontal lines before fitting person rows.
+
+    Some exported rosters merge the serial/name header vertically while the
+    day header still has an internal horizontal line. The old detector saw
+    both header segments as person rows, producing placeholder names for the
+    first two rows (for example the 8月 image with 18 detected rows but only
+    16 people). Real person-row boundaries continue through the name column;
+    the merged header divider does not.
+    """
+
+    if not candidates:
+        return candidates
+    try:
+        import numpy as np
+
+        day_lines = _find_day_x_lines(dark)
+        if len(day_lines) < 2:
+            return candidates
+        first_day_x = int(day_lines[0])
+        column_counts = np.asarray(dark, dtype=np.uint8).sum(axis=0)
+        vertical = _group_centers(np.where(column_counts > dark.shape[0] * 0.45)[0])
+        before = [value for value in vertical if value < first_day_x - 4]
+        if not before:
+            return candidates
+        name_left = max(0, before[-1] + 2)
+        name_right = min(dark.shape[1], first_day_x)
+        if name_right - name_left < 20:
+            return candidates
+        width = name_right - name_left
+        threshold = max(12, int(width * 0.55))
+        filtered = [
+            y
+            for y in candidates
+            if int(dark[max(0, y - 1) : min(dark.shape[0], y + 2), name_left:name_right].sum()) >= threshold
+        ]
+        return filtered or candidates
+    except Exception:
+        return candidates
 
 
 def _find_long_horizontal_line_candidates(dark: Any) -> tuple[list[int], Any]:
@@ -615,11 +791,20 @@ def _measure_template_cell(cell: Any) -> CellMetrics:
         fixed_label = "休"
     elif ink_fraction < 0.035 or ink_height <= 4:
         fixed_label = ""
-    elif blue > 200 and green > 200 and red > 200 and max(mean_bgr) - min(mean_bgr) < 30:
-        fixed_label = "出差" if _looks_like_stacked_trip(ink) else ""
     else:
         fixed_label = None
-    return CellMetrics(cell=cell, fixed_label=fixed_label, ink_fraction=ink_fraction, ink_height=ink_height)
+    is_plain_white = blue > 200 and green > 200 and red > 200 and max(mean_bgr) - min(mean_bgr) < 30
+    white_middle_like = False
+    if is_plain_white:
+        white_middle_like = ink_fraction >= 0.035 and ink_height > 4 and not _looks_like_stacked_trip(ink)
+        fixed_label = "出差" if _looks_like_stacked_trip(ink) else ""
+    return CellMetrics(
+        cell=cell,
+        fixed_label=fixed_label,
+        ink_fraction=ink_fraction,
+        ink_height=ink_height,
+        white_middle_like=white_middle_like,
+    )
 
 
 def _looks_like_stacked_trip(ink: Any) -> bool:
@@ -767,15 +952,44 @@ def _detect_day_headers(texts: list[OcrText], year: int, month: int) -> list[tup
 def _detect_names(texts: list[OcrText], day_headers: list[tuple[int, float]]) -> list[OcrText]:
     min_day_x = min((x for _, x in day_headers), default=140.0)
     ignored = {"姓名", "序号", "时间", "工作", "天数", "排班表"}
-    names: list[OcrText] = []
+    candidates: list[OcrText] = []
     for item in texts:
-        text = item.text.strip()
-        if text in ignored or normalize_shift_code(text) is not None:
+        if item.x >= min_day_x:
             continue
-        if not re.fullmatch(r"[\u4e00-\u9fff]{2,5}", text):
+        text = re.sub(r"[^\u4e00-\u9fff]", "", item.text.strip())
+        if not text or text in ignored or normalize_shift_code(text) is not None:
             continue
-        if item.x < min_day_x:
-            names.append(item)
+        candidates.append(OcrText(text=text, x=item.x, y=item.y, confidence=item.confidence))
+
+    if not candidates:
+        return []
+
+    candidates.sort(key=lambda item: (item.y, item.x))
+    grouped: list[list[OcrText]] = []
+    current_group: list[OcrText] = [candidates[0]]
+    for item in candidates[1:]:
+        if abs(item.y - current_group[-1].y) <= 18:
+            current_group.append(item)
+        else:
+            grouped.append(current_group)
+            current_group = [item]
+    grouped.append(current_group)
+
+    names: list[OcrText] = []
+    for group in grouped:
+        merged = re.sub(r"[^\u4e00-\u9fff]", "", "".join(item.text for item in sorted(group, key=lambda value: value.x)))
+        if merged in ignored or normalize_shift_code(merged) is not None:
+            continue
+        if not re.fullmatch(r"[\u4e00-\u9fff]{2,5}", merged):
+            continue
+        names.append(
+            OcrText(
+                text=merged,
+                x=min(item.x for item in group),
+                y=sum(item.y for item in group) / len(group),
+                confidence=max(item.confidence for item in group),
+            )
+        )
     return sorted(names, key=lambda item: item.y)
 
 

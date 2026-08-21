@@ -76,7 +76,11 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-cache, max-age=0, must-revalidate"
     html = response.text
-    assert 'data-tab="today" data-icon="🔔" data-mobile-label="提醒">今日提醒' in html
+    assert 'id="mainSubnav"' in html
+    assert 'homeTodayReminderCard' in html
+    assert 'homeNextReminderCard' in html
+    assert 'homeDutySummaryCard' in html
+    assert 'homeRecentRecordsCard' in html
     assert '<section id="todayPage" class="tab-page">' in html
     assert '<section id="reviewPage" class="tab-page hidden">' in html
     assert 'id="personName" list="personnelNameOptions" placeholder="选择或输入姓名"' in html
@@ -97,7 +101,7 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert "autofillMonitorContactByName" in html
     assert "monitorWechatBindingPayload" in html
     assert "monitorWechatBindingText" in html
-    assert "同步${wechatGatewayLabel()}群失败" in html
+    assert "同步${wechatGatewayLabel()}群失败" not in html
     assert "微信交互配置已保存" in html
     assert 'class="wecom-menu-editor"' in html
     assert "wecom-menu-tabs" in html
@@ -119,9 +123,11 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert "await loadTodayReminders();" in html
     assert 'id="patrolSendContentMode"' in html
     assert '<option value="image">仅图片</option>' in html
-    assert 'data-tab="tunnelMechanical" data-icon="📝" data-mobile-label="机电">隧道机电' in html
-    assert 'data-tab="orangeWarning" data-icon="🚧" data-mobile-label="预警">橙色预警查询' in html
-    assert 'data-tab="settings" data-icon="⚙️" data-mobile-label="配置">配置中心' in html
+    assert 'MAIN_SUBNAV_SCHEMA' in html
+    assert '今日提醒' in html
+    assert '导入/核对' in html
+    assert '隧道机电录入' in html
+    assert '橙色预警查询' in html
     assert 'id="settingsOverview"' in html
     assert 'id="exportConfigBtn"' in html
     assert 'id="importConfigBtn"' in html
@@ -131,6 +137,37 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'data-settings-target="personCenterSettings"' in html
     assert 'data-settings-target="interactionCommandSettings"' in html
     assert 'data-settings-target="reminderDiagnosticSettings"' in html
+    assert 'id="personnelNamesMultiSelect"' in html
+    assert 'id="stationNamesMultiSelect"' in html
+    assert 'id="bigDriverNamesMultiSelect"' in html
+    assert 'id="smallDriverNamesMultiSelect"' in html
+    assert 'id="bigDriverNamesEditor"' not in html
+    assert 'id="smallDriverNamesEditor"' not in html
+    assert 'data-subnav-kind="main"' in html
+    assert 'data-subnav-kind="settings"' in html
+    assert 'data-subnav-kind="scroll"' in html
+    assert 'data-subnav-kind="tunnel"' in html
+    assert '导入/核对' in html
+    assert '已导入排班' in html
+    assert '橙色预警查询' in html
+    assert '隧道机电录入' in html
+    assert '隧道模板' in html
+    assert '发送记录' in html
+    assert '系统状态' in html
+    assert '查询休息' in html
+    assert '施工图片' in html
+    assert '施工点维护' in html
+    assert '企业微信自建应用' in html
+    assert '企业微信群机器人' in html
+    assert '个人微信群' not in html
+    assert '内部微信登录' not in html
+    assert '群同步' not in html
+    assert '通知接收人' in html
+    assert '绑定状态' in html
+    assert '配置导出' in html
+    assert '配置导入' in html
+    assert '数据库备份' in html
+    assert '文件清理' in html
     assert 'id="recordStatusFilter"' in html
     assert 'id="recordKindFilter"' in html
     assert 'id="importConfigFile"' in html
@@ -139,7 +176,7 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'function importConfig' in html
     assert '"/api/config/export"' in html
     assert '"/api/config/import"' in html
-    assert "微信交互功能" in html
+    assert "交互功能" in html
     assert 'id="tunnelMechanicalPage"' in html
     assert 'id="orangeWarningPage"' in html
     assert 'id="orangeWarningName"' in html
@@ -218,6 +255,7 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert '连续记录按 1 次计；方向不影响合并' in html
     assert '$("exportOrangeWarningStatsTableBtn").addEventListener("click", exportOrangeWarningStatsTable)' in html
     assert '$("exportOrangeWarningStatsImageBtn").addEventListener("click", exportOrangeWarningStatsImage)' in html
+
     assert 'skipCountCell: index > 0' in html
     assert '日期 / 时间 / 姓名' not in html
     assert 'orange-warning-layout' in html
@@ -273,9 +311,9 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'monitorShiftCodes.has' in html
     assert 'id="wechatInteractionTestText"' in html
     assert 'id="wechatInteractionTestStatus"' in html
-    assert 'id="refreshWechatQrBtn"' in html
+    assert 'id="refreshWechatQrBtn"' not in html
     assert 'function refreshLightAgentWechatQr' in html
-    assert '"/api/lightagent/wechat/refresh-qr"' in html
+    assert '"/api/lightagent/wechat/refresh-qr"' not in html
     feature_section = html[
         html.index('<section class="settings-panel wechat-interaction-panel" id="featureChannelSettings">') :
         html.index('<section class="settings-panel single" id="wechatSimulationSettings">')
@@ -303,9 +341,9 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert "隧道机电查询/录入" not in html
     assert "监控班和值班查询" not in html
     assert "微信群排班导入" not in html
-    assert 'id="notificationTargetRoomSelect"' in html
-    assert 'id="addNotificationTargetRoomBtn"' in html
-    assert 'id="notificationTargetRoomList"' in html
+    assert 'id="notificationTargetRoomSelect"' not in html
+    assert 'id="addNotificationTargetRoomBtn"' not in html
+    assert 'id="notificationTargetRoomList"' not in html
     assert 'id="saveFeatureChannelBtn"' in html
     assert '"/api/wechat-interaction-config"' in html
     assert '"/api/feature-channel-config"' not in html
@@ -338,11 +376,95 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
 
 
 
+
+def test_settings_redesign_url_aliases_real_main_ui(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    response = client.get("/settings-redesign")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache, max-age=0, must-revalidate"
+    html = response.text
+    assert 'id="appShell"' in html
+    assert 'id="mainSidebar"' in html
+    assert 'data-main-group="home"' in html
+    assert 'id="mainSubnav"' in html
+    assert "MAIN_SUBNAV_SCHEMA" in html
+    assert "renderMainSubnav" in html
+    assert "settings-redesign.js" not in html
+    assert "首页" in html
+    assert "通知" in html
+
+
+def test_settings_redesign_static_file_redirects_to_main_ui():
+    root = Path(__file__).resolve().parents[1]
+    html = (root / "app" / "static" / "settings-redesign.html").read_text(encoding="utf-8")
+
+    assert "location.replace" in html
+    assert "./index.html" in html
+    assert "首页概览" not in html
+    assert "通知通道" not in html
+
+
+def test_construction_sites_crud_roundtrip(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    created = client.post("/api/construction-sites", json={"name": "南涧至景东方向K88+730-K88+880上挡墙施工安全检查"})
+    assert created.status_code == 200
+    site = created.json()["site"]
+    assert site["name"].startswith("南涧至景东方向")
+
+    listed = client.get("/api/construction-sites")
+    assert listed.status_code == 200
+    assert listed.json()["sites"][0]["name"] == site["name"]
+
+    updated = client.put(f"/api/construction-sites/{site['id']}", json={"name": "K88+730-K88+880上挡墙"})
+    assert updated.status_code == 200
+    assert updated.json()["site"]["name"] == "K88+730-K88+880上挡墙"
+
+    deleted = client.delete(f"/api/construction-sites/{site['id']}")
+    assert deleted.status_code == 200
+    assert deleted.json()["success"] is True
+
+
 def test_config_export_route_returns_complete_snapshot(tmp_path):
     source = DutyRepository(tmp_path / "data" / "duty-reminder.db")
     source.save_notification_config(sender_type="lightagent", webhook_url="", lightagent_token="push-token", mention_mode="custom")
     source.save_daily_duty_config(reminder_time="07:20", big_driver_names=["司机甲"], small_driver_names=["司机乙"])
+    source.save_vacation_reminder_config(
+        enabled=True,
+        start_reminder_time="07:50",
+        end_reminder_time="07:55",
+        start_message_templates=["开始休息提醒"],
+        end_message_templates=["结束休息提醒"],
+        send_content_mode="image",
+    )
+    source.save_feature_channel_config(
+        enabled=True,
+        lightagent_web_url="http://lightagent:9899",
+        lightagent_web_password="web-pass",
+        wechat_group_room_id="wgr_notice",
+        wechat_group_room_name="通知群",
+        wechat_group_rooms=[{"id": "wgr_notice", "name": "通知群"}],
+        allow_tunnel_mechanical=True,
+        allow_duty_query=False,
+        allow_roster_import=True,
+    )
+    source.save_wechat_interaction_config(
+        patrol_record_triggers=["巡查记录"],
+        patrol_record_template="查询商邱宏巡查记录 2026-08-01至2026-08-16",
+        tunnel_template_triggers=["模板"],
+        tunnel_template="隧道机电录入 日期{date} 负责人商邱宏 记录人罗富耀 天气晴",
+        tunnel_modify_template_triggers=["修改模板"],
+        tunnel_modify_template="隧道机电修改 日期{date} 负责人商邱宏 记录人罗富耀 天气晴",
+    )
     source.save_patrol_warning_config(enabled=True, username="patrol-user", password="patrol-pass", route_code="S41")
+    source.save_wecom_app_menu_config([
+        {"name": "监控在岗", "items": [{"name": "今日在岗", "command": "查询今日在岗"}]}
+    ])
+    source.add_construction_site("南涧至景东方向K88+730-K88+880上挡墙施工安全检查")
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
 
@@ -355,6 +477,11 @@ def test_config_export_route_returns_complete_snapshot(tmp_path):
     assert snapshot["version"] == 1
     assert snapshot["tables"]["notification_config"][0]["lightagent_token"] == "push-token"
     assert snapshot["tables"]["daily_duty_config"][0]["reminder_time"] == "07:20"
+    assert snapshot["tables"]["vacation_reminder_config"][0]["start_reminder_time"] == "07:50"
+    assert snapshot["tables"]["feature_channel_config"][0]["lightagent_web_password"] == "web-pass"
+    assert snapshot["tables"]["wechat_interaction_config"][0]["patrol_record_template"].startswith("查询商邱宏巡查记录")
+    assert snapshot["tables"]["wecom_app_menu_config"][0]["menu_json"]
+    assert snapshot["tables"]["construction_sites"][0]["name"].startswith("南涧至景东方向")
     assert snapshot["tables"]["patrol_warning_config"][0]["username"] == "patrol-user"
 
 
@@ -391,10 +518,41 @@ def test_config_import_route_restores_configuration_and_overwrites_existing_data
         message_template="提醒 {name}",
     )
     source.save_daily_duty_config(reminder_time="07:20", big_driver_names=["司机甲"], small_driver_names=["司机乙"])
+    source.save_vacation_reminder_config(
+        enabled=True,
+        start_reminder_time="07:50",
+        end_reminder_time="07:55",
+        start_message_templates=["开始休息提醒"],
+        end_message_templates=["结束休息提醒"],
+        send_content_mode="image",
+    )
+    source.save_feature_channel_config(
+        enabled=True,
+        lightagent_web_url="http://lightagent:9899",
+        lightagent_web_password="web-pass",
+        wechat_group_room_id="wgr_notice",
+        wechat_group_room_name="通知群",
+        wechat_group_rooms=[{"id": "wgr_notice", "name": "通知群"}],
+        allow_tunnel_mechanical=True,
+        allow_duty_query=False,
+        allow_roster_import=True,
+    )
+    source.save_wechat_interaction_config(
+        patrol_record_triggers=["巡查记录"],
+        patrol_record_template="查询商邱宏巡查记录 2026-08-01至2026-08-16",
+        tunnel_template_triggers=["模板"],
+        tunnel_template="隧道机电录入 日期{date} 负责人商邱宏 记录人罗富耀 天气晴",
+        tunnel_modify_template_triggers=["修改模板"],
+        tunnel_modify_template="隧道机电修改 日期{date} 负责人商邱宏 记录人罗富耀 天气晴",
+    )
     source.save_personnel_contacts([{"name": "示例甲", "mention_mobile": "10000000000"}])
     source.save_monitored_person(name="示例甲", mention_mobile="10000000000", daily_time="07:30")
     source.save_custom_reminder(name="示例甲", mention_mobile="10000000000", shift_code="early", reminder_time="07:10", message="自定义提醒")
     source.save_roster_month(2026, 8, [{"name": "示例甲", "days": {"1": "早"}}], "uploads/a.png")
+    source.save_wecom_app_menu_config([
+        {"name": "监控在岗", "items": [{"name": "今日在岗", "command": "查询今日在岗"}]}
+    ])
+    source.add_construction_site("南涧至景东方向K88+730-K88+880上挡墙施工安全检查")
     snapshot = source.export_config_snapshot()
     snapshot["tables"]["custom_reminders"][0]["reminder_time"] = "21:00"
 
@@ -417,11 +575,16 @@ def test_config_import_route_restores_configuration_and_overwrites_existing_data
     assert target_repo.get_notification_config()["lightagent_token"] == "push-token"
     assert target_repo.get_notification_config()["lightagent_target"] == "wgr_notice"
     assert target_repo.get_daily_duty_config()["reminder_time"] == "07:20"
+    assert target_repo.get_vacation_reminder_config()["start_reminder_time"] == "07:50"
+    assert target_repo.get_feature_channel_config()["lightagent_web_password"] == "web-pass"
+    assert target_repo.get_wechat_interaction_config()["patrol_record_template"].startswith("查询商邱宏巡查记录")
     assert target_repo.list_personnel()[0]["name"] == "示例甲"
     assert target_repo.list_monitored_people()[0]["name"] == "示例甲"
     assert target_repo.list_custom_reminders()[0]["message"] == "自定义提醒"
     assert target_repo.list_custom_reminders()[0]["reminder_time"] == "07:50"
     assert target_repo.get_roster_month(2026, 8)["grid"][0]["days"]["1"] == "早"
+    assert target_repo.get_wecom_app_menu_config()[0]["name"] == "监控在岗"
+    assert target_repo.list_construction_sites()[0]["name"].startswith("南涧至景东方向")
     assert all(person["name"] != "旧姓名" for person in target_repo.list_personnel())
 
 
@@ -510,26 +673,17 @@ def test_refresh_lightagent_wechat_qr_route_uses_manager(tmp_path):
     calls: list[str] = []
 
     class FakeBridge:
-        def __init__(self):
-            self.status = "qr_ready"
-
         def refresh_login_qr(self):
             calls.append("refresh")
-            self.status = "starting"
-
-        def status_snapshot(self):
-            return {"status": "success", "login_status": self.status, "qrcode_url": "data:image/png;base64,abc", "qr_image": "data:image/png;base64,abc"}
 
     app.state.wechat_bridge = FakeBridge()
     client = TestClient(app)
 
     response = client.post("/api/lightagent/wechat/refresh-qr")
 
-    assert response.status_code == 200
-    assert calls == ["refresh"]
-    assert response.json()["login_status"] == "starting"
-    assert response.json()["qrcode_url"].startswith("data:image/png;base64,")
-
+    assert response.status_code == 410
+    assert calls == []
+    assert "已停用" in response.json()["detail"]
 
 def test_send_record_kind_labels_cover_backend_record_kinds():
     root = Path(__file__).resolve().parents[1]
@@ -554,16 +708,70 @@ def test_notification_channel_ui_uses_current_selected_channel():
     root = Path(__file__).resolve().parents[1]
     html = (root / "app" / "static" / "index.html").read_text(encoding="utf-8")
 
-    assert "function selectedNotificationSenderType()" in html
-    assert 'return selectedNotificationSenderType() === "lightagent";' in html
-    assert 'return selectedNotificationSenderType() === "wecom_app";' in html
-    assert '$("notificationSenderType").value = senderType;' in html
-    assert '$("wecomAppEnabled").checked = senderType === "wecom_app";' in html
-    assert 'wecom_app_enabled: useWecomApp' in html
-    assert 'wecom_aibot_enabled: !useWecomApp && senderType === "wecom_webhook"' in html
-    assert 'if (!isLightAgentNotificationSelected()) return { notification_room_id: "", notification_room_name: "" };' in html
-    assert '$("wecomAppEnabled").addEventListener("change"' in html
-    assert '企业微信自建应用：使用自建应用菜单/私聊命令' in html
+    assert "settings-redesign.js" not in html
+    assert "function updateNotificationBackendFields()" in html
+    assert 'data-notification-sender="wecom_webhook"' in html
+    assert 'data-notification-sender="lightagent"' not in html
+    assert 'data-notification-sender="wecom_app"' in html
+    assert '$("notificationCommonFields").classList.toggle("hidden", isWecomApp);' in html
+    assert '$("wecomNotificationFields").classList.toggle("hidden", activePanel !== "wecom_webhook");' in html
+    assert 'if ($("lightAgentNotificationFields")) $("lightAgentNotificationFields").classList.add("hidden");' in html
+    assert '$("wecomAppNotificationFields").classList.toggle("hidden", !isWecomApp);' in html
+    assert "updateMonitorNotificationFields();" in html
+    assert "updateCustomReminderNotificationFields();" in html
+
+    notify_targets_section = html[
+        html.index('<div id="notificationTargetsPanel"') : html.index('<div id="notificationCommonFields"')
+    ]
+    wecom_app_section = html[
+        html.index('<div id="wecomAppNotificationFields"') : html.index('<p id="notificationStatus"')
+    ]
+    interaction_section = html[
+        html.index('<section class="settings-panel single" id="interactionCommandSettings"')
+        : html.index('<section class="settings-panel reminder-card-panel" id="monitorSettings"')
+    ]
+    person_center_section = html[
+        html.index('<section class="settings-panel single" id="personCenterSettings"') : html.index('<section class="settings-panel single" id="driverSettings"')
+    ]
+    for label in ["公共通知接收人", "今日在岗接收人", "公路预警接收人", "系统测试接收人"]:
+        assert label in notify_targets_section
+        assert label not in wecom_app_section
+    assert 'id="wecomAppTargetNamesPicker"' in notify_targets_section
+    assert 'id="wecomAppTargetNamesPicker"' not in wecom_app_section
+    assert "<strong>自定义菜单</strong>" not in wecom_app_section
+    assert "企业微信绑定状态" not in wecom_app_section
+    assert "企业微信绑定状态" in person_center_section
+    assert 'id="wecomAppBindingSummary"' not in html
+    assert "自定义菜单" in interaction_section
+    assert 'id="wecomAppMenuPreview"' in interaction_section
+    assert 'id="createWecomAppMenuBtn"' in interaction_section
+    assert 'id="saveWecomAppMenuBtn"' in interaction_section
+    assert 'id="addWecomAppMenuGroupBtn"' in interaction_section
+    assert 'id="restoreWecomAppMenuBtn"' in interaction_section
+    assert 'target: "interactionCommandSettings"' in html
+    assert 'featureChannelSettings: { group: "mech", view: "mech-modify-template" }' in html
+    assert 'featureChannelSettings: { group: "notify", view: "notify-commands-group" }' not in html
+
+
+def test_settings_nav_is_rendered_from_current_group_schema():
+    root = Path(__file__).resolve().parents[1]
+    html = (root / "app" / "static" / "index.html").read_text(encoding="utf-8")
+
+    assert 'id="settingsNavItems"' in html
+    assert "const SETTINGS_NAV_SCHEMA =" in html
+    assert "首页" in html
+    assert "排班与在岗" in html
+    assert "提醒中心" in html
+    assert "机电施工" in html
+    assert "巡查预警" in html
+    assert "消息通知" in html
+    assert "人员管理" in html
+    assert "岗位分组" in html
+    assert "记录与工具" in html
+    assert "data-settings-groups=" not in html
+    assert 'id="constructionSettings"' in html
+    assert 'id="refreshConstructionSitesBtn"' in html
+    assert 'id="addConstructionSiteBtn"' in html
 
 
 def test_tunnel_mechanical_templates_are_empty_until_imported(tmp_path):
@@ -1905,6 +2113,39 @@ def test_upload_image_returns_review_grid(tmp_path, monkeypatch):
     assert image_response.content == b"fake-image"
 
 
+def test_roster_upload_corrects_unique_ocr_name_typo_from_existing_roster(tmp_path, monkeypatch):
+    def fake_extract(path):
+        return {
+            "year": 2026,
+            "month": 8,
+            "source_image_path": path,
+            "ocr_status": "template_ok",
+            "grid": [
+                {"name": "沫春宇", "days": {"1": "早"}},
+                {"name": "罗富耀", "days": {"1": "中"}},
+            ],
+        }
+
+    monkeypatch.setattr("app.main.extract_roster_image", fake_extract)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    app.state.repo.save_roster_month(
+        2026,
+        7,
+        [
+            {"name": "沐春宇", "days": {"1": "早"}},
+            {"name": "罗富耀", "days": {"1": "中"}},
+        ],
+        "previous.png",
+    )
+    body = TestClient(app).post(
+        "/api/rosters/upload",
+        files={"file": ("roster.png", b"fake-image", "image/png")},
+    ).json()
+
+    assert [row["name"] for row in body["grid"]] == ["沐春宇", "罗富耀"]
+    assert body["name_corrections"] == [{"before": "沫春宇", "after": "沐春宇"}]
+
+
 def test_upload_rejects_non_image_and_oversized_file(tmp_path, monkeypatch):
     monkeypatch.setattr(main_module, "MAX_UPLOAD_BYTES", 4)
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
@@ -2179,26 +2420,35 @@ def test_notification_config_and_people_mobile_are_saved(tmp_path):
     assert repo.get_notification_config()["webhook_url"].endswith("unit-test")
 
 
-def test_lightagent_notification_config_hides_secret_fields_and_tests_send(tmp_path, monkeypatch):
-    sent: dict[str, object] = {}
-
-    class FakeLightAgentClient:
-        def __init__(self, *, endpoint_url: str, target: str = "", targets: list[str] | None = None, token: str = ""):
-            sent["endpoint_url"] = endpoint_url
-            sent["target"] = target
-            sent["targets"] = targets or []
-            sent["token"] = token
-
-        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
-            sent["content"] = content
-            sent["mobiles"] = mentioned_mobile_list
-
-    monkeypatch.setattr("app.main.LightAgentNotifyClient", FakeLightAgentClient)
-    monkeypatch.setattr(
-        main_module,
-        "_lightagent_web_request",
-        lambda repo, method, path, *, params=None, json_body=None: {"channels": []} if method == "GET" else {"status": "success"},
+def test_notification_config_reports_wecom_app_as_active_sender_when_enabled(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(
+        sender_type="wecom_webhook",
+        webhook_url="https://example.test/cgi-bin/webhook/send?key=old",
+        wecom_app_enabled=True,
+        wecom_app_corp_id="corp",
+        wecom_app_agent_id="1000001",
+        wecom_app_secret="secret",
+        wecom_app_token="token",
+        wecom_app_encoding_aes_key="aes",
     )
+    client = TestClient(app)
+
+    public_config = client.get("/api/notification-config").json()["config"]
+
+    assert public_config["sender_type"] == "wecom_app"
+    assert public_config["effective_sender_type"] == "wecom_app"
+    assert public_config["wecom_app_enabled"] is True
+    assert public_config["notification_display"] == "已配置"
+
+
+def test_lightagent_notification_config_hides_secret_fields_and_tests_send(tmp_path, monkeypatch):
+    class FailingLightAgentClient:
+        def __init__(self, **kwargs):
+            raise AssertionError("旧个人微信群客户端不应再被创建")
+
+    monkeypatch.setattr("app.main.LightAgentNotifyClient", FailingLightAgentClient)
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
 
@@ -2209,62 +2459,41 @@ def test_lightagent_notification_config_hides_secret_fields_and_tests_send(tmp_p
             "lightagent_url": "https://lightagent.test/api/push/send",
             "lightagent_token": "push-token",
             "lightagent_target": "room-1",
-            "lightagent_targets": [{"id": "room-1", "name": "通知群"}, {"id": "room-2", "name": "第二通知群"}],
+            "lightagent_targets": [{"id": "room-1", "name": "通知群"}],
             "message_template": "{name} {date} {shift_label}",
         },
     )
-    get_response = client.get("/api/notification-config")
-    test_response = client.post(
-        "/api/notification-config/test",
-        json={"test_mobile": "10000000000", "test_wechat_member_id": "@wechat-member-1"},
-    )
+    public_config = client.get("/api/notification-config").json()["config"]
+    test_response = client.post("/api/notification-config/test", json={"test_mobile": "10000000000"})
 
     assert save_response.status_code == 200
-    public_config = get_response.json()["config"]
-    assert public_config["sender_type"] == "lightagent"
-    assert public_config["lightagent_url"] == "https://lightagent.test/api/push/send"
-    assert public_config["lightagent_configured"] is True
-    assert public_config["lightagent_token_configured"] is True
-    assert public_config["lightagent_target"] == "room-1"
-    assert public_config["lightagent_targets"] == [
-        {"id": "room-1", "name": "通知群"},
-        {"id": "room-2", "name": "第二通知群"},
-    ]
-    assert test_response.status_code == 200
-    assert sent == {
-        "endpoint_url": "https://lightagent.test/api/push/send",
-        "target": "",
-        "targets": ["room-1", "room-2"],
-        "token": "push-token",
-        "content": "@示例甲\n示例甲 2025-09-16 中班",
-        "mobiles": [],
-    }
-
+    assert public_config["sender_type"] == "wecom_webhook"
+    assert public_config["lightagent_url"] == ""
+    assert public_config["lightagent_configured"] is False
+    assert public_config["lightagent_token_configured"] is False
+    assert public_config["lightagent_target"] == ""
+    assert public_config["lightagent_targets"] == []
+    assert public_config["lightagent_active"] is False
+    assert test_response.status_code == 400
+    assert "请先配置通知发送通道" in test_response.json()["detail"]
 
 def test_notification_channel_switch_preserves_wecom_but_only_lightagent_sends(tmp_path, monkeypatch):
     sent: dict[str, object] = {}
 
-    class FailingWebhookClient:
+    class FakeWebhookClient:
         def __init__(self, *, webhook_url: str):
-            raise AssertionError("企业微信群机器人不应该在个人微信群渠道下生效")
-
-    class FakeLightAgentClient:
-        def __init__(self, *, endpoint_url: str, target: str = "", targets: list[str] | None = None, token: str = ""):
-            sent["endpoint_url"] = endpoint_url
-            sent["targets"] = targets or []
-            sent["token"] = token
+            sent["webhook_url"] = webhook_url
 
         async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
             sent["content"] = content
             sent["mentions"] = mentioned_mobile_list
 
-        async def send_image(self, image_bytes: bytes):
-            sent["image_bytes"] = image_bytes
+    class FailingLightAgentClient:
+        def __init__(self, **kwargs):
+            raise AssertionError("旧个人微信群客户端不应再被创建")
 
-    monkeypatch.setenv("WECHAT_BRIDGE_ENABLED", "false")
-    monkeypatch.setattr("app.main.WeComWebhookClient", FailingWebhookClient)
-    monkeypatch.setattr("app.main.LightAgentNotifyClient", FakeLightAgentClient)
-    monkeypatch.setattr(main_module, "_sync_lightagent_notification_targets", lambda repo, sender_type, targets: {"success": True})
+    monkeypatch.setattr("app.main.WeComWebhookClient", FakeWebhookClient)
+    monkeypatch.setattr("app.main.LightAgentNotifyClient", FailingLightAgentClient)
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
     repo.save_notification_config(
@@ -2287,15 +2516,13 @@ def test_notification_channel_switch_preserves_wecom_but_only_lightagent_sends(t
     config = repo.get_notification_config()
 
     assert response.status_code == 200
-    assert config["sender_type"] == "lightagent"
+    assert config["sender_type"] == "wecom_webhook"
     assert config["webhook_url"].endswith("old-wecom")
-    assert response.json()["config"]["webhook_configured"] is True
-    assert response.json()["config"]["lightagent_active"] is True
+    assert config["lightagent_targets"] == []
+    assert response.json()["config"]["lightagent_active"] is False
     assert test_response.status_code == 200
-    assert sent["targets"] == ["room-1"]
-    assert sent["mentions"] == []
-    assert sent["content"].startswith("@示例甲\n")
-
+    assert sent["webhook_url"].endswith("old-wecom")
+    assert sent["content"].startswith("示例甲")
 
 def test_notification_channel_switch_preserves_lightagent_but_only_wecom_sends(tmp_path, monkeypatch):
     sent: dict[str, object] = {}
@@ -2310,9 +2537,8 @@ def test_notification_channel_switch_preserves_lightagent_but_only_wecom_sends(t
 
     class FailingLightAgentClient:
         def __init__(self, **kwargs):
-            raise AssertionError("个人微信群不应该在企业微信群机器人渠道下生效")
+            raise AssertionError("旧个人微信群客户端不应再被创建")
 
-    monkeypatch.setenv("WECHAT_BRIDGE_ENABLED", "false")
     monkeypatch.setattr("app.main.WeComWebhookClient", FakeWebhookClient)
     monkeypatch.setattr("app.main.LightAgentNotifyClient", FailingLightAgentClient)
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
@@ -2344,40 +2570,29 @@ def test_notification_channel_switch_preserves_lightagent_but_only_wecom_sends(t
     assert response.status_code == 200
     assert config["sender_type"] == "wecom_webhook"
     assert config["webhook_url"].endswith("new-wecom")
-    assert config["lightagent_url"] == "https://lightagent.test/api/push/send"
-    assert config["lightagent_token"] == "push-token"
-    assert config["lightagent_targets"] == [{"id": "room-1", "name": "通知群"}]
+    assert config["lightagent_url"] == ""
+    assert config["lightagent_token"] == ""
+    assert config["lightagent_targets"] == []
     assert response.json()["config"]["webhook_active"] is True
-    assert response.json()["config"]["lightagent_configured"] is True
+    assert response.json()["config"]["lightagent_configured"] is False
     assert test_response.status_code == 200
     assert sent["webhook_url"].endswith("new-wecom")
     assert sent["mentions"] == ["10000000000"]
 
-
 def test_notification_test_failure_sanitizes_wechat_ids(tmp_path, monkeypatch):
-    class FakeLightAgentClient:
-        def __init__(self, *, endpoint_url: str, target: str = "", targets: list[str] | None = None, token: str = ""):
+    class FakeWebhookClient:
+        def __init__(self, *, webhook_url: str):
             pass
 
         async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
             raise main_module.WeComError("wgr_notice failed; @member-runtime failed")
 
-    monkeypatch.setattr("app.main.LightAgentNotifyClient", FakeLightAgentClient)
-    monkeypatch.setattr(
-        main_module,
-        "_sync_lightagent_notification_targets",
-        lambda repo, sender_type, targets: {"success": True},
-    )
+    monkeypatch.setattr("app.main.WeComWebhookClient", FakeWebhookClient)
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
     client.post(
         "/api/notification-config",
-        json={
-            "sender_type": "lightagent",
-            "lightagent_url": "https://lightagent.test/api/push/send",
-            "lightagent_token": "push-token",
-            "lightagent_targets": [{"id": "wgr_notice", "name": "通知群"}],
-        },
+        json={"sender_type": "wecom_webhook", "webhook_url": "https://example.test/webhook"},
     )
     client.post(
         "/api/personnel",
@@ -2393,113 +2608,17 @@ def test_notification_test_failure_sanitizes_wechat_ids(tmp_path, monkeypatch):
         },
     )
 
-    response = client.post(
-        "/api/notification-config/test",
-        json={"test_wechat_member_id": "@member-runtime", "test_wechat_member_name": "王路飞"},
-    )
+    response = client.post("/api/notification-config/test", json={"person_name": "王路飞"})
 
     assert response.status_code == 502
-    assert response.json()["detail"] == "通知群 failed; 王路飞 failed"
-
+    assert response.json()["detail"] == "微信群 failed; 王路飞 failed"
 
 def test_lightagent_notification_config_syncs_target_to_wechat_group_channel(tmp_path, monkeypatch):
     calls: list[dict[str, object]] = []
 
     def fake_lightagent_web_request(repo, method, path, *, params=None, json_body=None):
         calls.append({"method": method, "path": path, "params": params, "json_body": json_body})
-        if method == "GET" and path == "/api/channels":
-            return {
-                "channels": [
-                    {
-                        "name": "wechat_group",
-                        "connected": True,
-                        "active": True,
-                        "extra": {
-                            "stable_selected_room_ids": ["wgr_existing"],
-                            "selected_room_ids": ["wgr_existing"],
-                        },
-                    }
-                ]
-            }
-        if method == "POST" and path == "/api/channels":
-            selected = json_body["config"]["wechat_group_stable_room_ids"]
-            return {
-                "status": "success",
-                "restarted": False,
-                "extra": {
-                    "stable_selected_room_ids": selected,
-                    "selected_room_ids": selected,
-                },
-            }
-        raise AssertionError(f"unexpected LightAgent request: {method} {path}")
-
-    monkeypatch.setattr(main_module, "_lightagent_web_request", fake_lightagent_web_request)
-    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
-    client = TestClient(app)
-
-    response = client.post(
-        "/api/notification-config",
-        json={
-            "sender_type": "lightagent",
-            "lightagent_url": "http://lightagent:9899/api/push/send",
-            "lightagent_token": "push-token",
-            "lightagent_targets": [
-                {"id": "wgr_notice", "name": "通知群"},
-                {"id": "wgr_second", "name": "第二通知群"},
-            ],
-            "message_template": "{name}",
-        },
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["success"] is True
-    assert body["lightagent_sync"]["success"] is True
-    assert body["lightagent_sync"]["selected_room_ids"] == ["wgr_existing", "wgr_notice", "wgr_second"]
-    assert calls[-1] == {
-        "method": "POST",
-        "path": "/api/channels",
-        "params": None,
-        "json_body": {
-            "action": "save",
-            "channel": "wechat_group",
-            "config": {"wechat_group_stable_room_ids": ["wgr_existing", "wgr_notice", "wgr_second"]},
-        },
-    }
-
-
-def test_lightagent_notification_config_reports_inactive_stable_target(tmp_path, monkeypatch):
-    def fake_lightagent_web_request(repo, method, path, *, params=None, json_body=None):
-        if method == "GET" and path == "/api/channels":
-            return {
-                "channels": [
-                    {
-                        "name": "wechat_group",
-                        "connected": True,
-                        "active": True,
-                        "extra": {
-                            "stable_selected_room_ids": [],
-                            "selected_room_ids": [],
-                            "rooms": [
-                                {"id": "wgr_notice", "stable_room_id": "wgr_notice", "name": "通知群"},
-                            ],
-                        },
-                    }
-                ]
-            }
-        if method == "POST" and path == "/api/channels":
-            selected = json_body["config"]["wechat_group_stable_room_ids"]
-            return {
-                "status": "success",
-                "extra": {
-                    "stable_selected_room_ids": selected,
-                    "selected_room_ids": selected,
-                    "rooms": [
-                        {"id": "wgr_notice", "stable_room_id": "wgr_notice", "name": "通知群"},
-                    ],
-                },
-            }
-        raise AssertionError(f"unexpected LightAgent request: {method} {path}")
+        raise AssertionError("旧 LightAgent Web 不应再被调用")
 
     monkeypatch.setattr(main_module, "_lightagent_web_request", fake_lightagent_web_request)
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
@@ -2519,32 +2638,47 @@ def test_lightagent_notification_config_reports_inactive_stable_target(tmp_path,
     assert response.status_code == 200
     body = response.json()
     assert body["success"] is True
-    assert body["lightagent_sync"]["success"] is False
-    assert body["lightagent_sync"]["inactive_targets"] == ["wgr_notice"]
-    assert "当前没有可发送会话" in body["lightagent_sync"]["message"]
+    assert body["config"]["sender_type"] == "wecom_webhook"
+    assert body["config"]["lightagent_targets"] == []
+    assert body["lightagent_sync"] == {"success": True, "skipped": True, "reason": "personal_wechat_disabled"}
+    assert calls == []
 
+def test_lightagent_notification_config_reports_inactive_stable_target(tmp_path, monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    def fake_lightagent_web_request(repo, method, path, *, params=None, json_body=None):
+        calls.append({"method": method, "path": path, "params": params, "json_body": json_body})
+        raise AssertionError("旧 LightAgent Web 不应再被调用")
+
+    monkeypatch.setattr(main_module, "_lightagent_web_request", fake_lightagent_web_request)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/notification-config",
+        json={
+            "sender_type": "lightagent",
+            "lightagent_url": "http://lightagent:9899/api/push/send",
+            "lightagent_token": "push-token",
+            "lightagent_targets": [{"id": "wgr_notice", "name": "通知群"}],
+            "message_template": "{name}",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["config"]["sender_type"] == "wecom_webhook"
+    assert body["config"]["lightagent_targets"] == []
+    assert body["lightagent_sync"] == {"success": True, "skipped": True, "reason": "personal_wechat_disabled"}
+    assert calls == []
 
 def test_lightagent_notification_config_requires_connected_wechat_channel(tmp_path, monkeypatch):
     calls: list[dict[str, object]] = []
 
     def fake_lightagent_web_request(repo, method, path, *, params=None, json_body=None):
         calls.append({"method": method, "path": path, "params": params, "json_body": json_body})
-        if method == "GET" and path == "/api/channels":
-            return {
-                "channels": [
-                    {
-                        "name": "wechat_group",
-                        "connected": False,
-                        "active": False,
-                        "login_status": "qr_ready",
-                        "extra": {
-                            "stable_selected_room_ids": ["wgr_notice"],
-                            "selected_room_ids": ["wgr_notice"],
-                        },
-                    }
-                ]
-            }
-        raise AssertionError(f"unexpected LightAgent request: {method} {path}")
+        raise AssertionError("旧 LightAgent Web 不应再被调用")
 
     monkeypatch.setattr(main_module, "_lightagent_web_request", fake_lightagent_web_request)
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
@@ -2564,15 +2698,17 @@ def test_lightagent_notification_config_requires_connected_wechat_channel(tmp_pa
     assert response.status_code == 200
     body = response.json()
     assert body["success"] is True
-    assert body["lightagent_sync"]["success"] is False
-    assert body["lightagent_sync"]["login_status"] == "qr_ready"
-    assert "未登录或未连接" in body["lightagent_sync"]["message"]
-    assert [call["method"] for call in calls] == ["GET"]
-
+    assert body["config"]["sender_type"] == "wecom_webhook"
+    assert body["config"]["lightagent_targets"] == []
+    assert body["lightagent_sync"] == {"success": True, "skipped": True, "reason": "personal_wechat_disabled"}
+    assert calls == []
 
 def test_lightagent_notification_config_reports_sync_failure_without_losing_save(tmp_path, monkeypatch):
+    calls: list[dict[str, object]] = []
+
     def fake_lightagent_web_request(repo, method, path, *, params=None, json_body=None):
-        raise RuntimeError("room service unavailable")
+        calls.append({"method": method, "path": path, "params": params, "json_body": json_body})
+        raise AssertionError("旧 LightAgent Web 不应再被调用")
 
     monkeypatch.setattr(main_module, "_lightagent_web_request", fake_lightagent_web_request)
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
@@ -2583,42 +2719,30 @@ def test_lightagent_notification_config_reports_sync_failure_without_losing_save
         json={
             "sender_type": "lightagent",
             "lightagent_url": "http://lightagent:9899/api/push/send",
-            "lightagent_target": "wgr_notice",
+            "lightagent_token": "push-token",
+            "lightagent_targets": [{"id": "wgr_notice", "name": "通知群"}],
+            "message_template": "{name}",
         },
     )
 
     assert response.status_code == 200
     body = response.json()
     assert body["success"] is True
-    assert body["config"]["lightagent_target"] == "wgr_notice"
-    assert body["lightagent_sync"] == {
-        "success": False,
-        "target": "wgr_notice",
-        "targets": ["wgr_notice"],
-        "source": "notification",
-        "message": "room service unavailable",
-    }
-
+    assert body["config"]["sender_type"] == "wecom_webhook"
+    assert body["config"]["lightagent_targets"] == []
+    assert body["lightagent_sync"] == {"success": True, "skipped": True, "reason": "personal_wechat_disabled"}
+    assert calls == []
 
 def test_lightagent_notification_env_defaults_are_used_for_empty_database(tmp_path, monkeypatch):
-    sent: dict[str, object] = {}
-
-    class FakeLightAgentClient:
-        def __init__(self, *, endpoint_url: str, target: str = "", targets: list[str] | None = None, token: str = ""):
-            sent["endpoint_url"] = endpoint_url
-            sent["target"] = target
-            sent["targets"] = targets or []
-            sent["token"] = token
-
-        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
-            sent["content"] = content
-            sent["mobiles"] = mentioned_mobile_list
+    class FailingLightAgentClient:
+        def __init__(self, **kwargs):
+            raise AssertionError("旧个人微信群客户端不应再被创建")
 
     monkeypatch.setenv("NOTIFICATION_SENDER_TYPE", "lightagent")
     monkeypatch.setenv("LIGHTAGENT_BASE_URL", "http://lightagent:9899")
     monkeypatch.setenv("LIGHTAGENT_PUSH_TOKEN", "push-token")
     monkeypatch.setenv("LIGHTAGENT_NOTIFY_TARGET", "room-1")
-    monkeypatch.setattr("app.main.LightAgentNotifyClient", FakeLightAgentClient)
+    monkeypatch.setattr("app.main.LightAgentNotifyClient", FailingLightAgentClient)
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
     repo.save_notification_config(
@@ -2633,48 +2757,39 @@ def test_lightagent_notification_env_defaults_are_used_for_empty_database(tmp_pa
     public_config = client.get("/api/notification-config").json()["config"]
     test_response = client.post("/api/notification-config/test", json={"test_mobile": "10000000000"})
 
-    assert public_config["sender_type"] == "lightagent"
-    assert public_config["lightagent_url"] == "http://old-lightagent:9899/api/push/send"
-    assert public_config["lightagent_configured"] is True
-    assert public_config["lightagent_token_configured"] is True
-    assert public_config["lightagent_target"] == "old-room"
-    assert public_config["lightagent_targets"] == [{"id": "old-room", "name": ""}]
-    assert test_response.status_code == 200
-    assert sent["endpoint_url"] == "http://old-lightagent:9899/api/push/send"
-    assert sent["target"] == ""
-    assert sent["targets"] == ["old-room"]
-    assert sent["token"] == "old-token"
-
+    assert public_config["sender_type"] == "wecom_webhook"
+    assert public_config["lightagent_url"] == ""
+    assert public_config["lightagent_configured"] is False
+    assert public_config["lightagent_token_configured"] is False
+    assert public_config["lightagent_target"] == ""
+    assert public_config["lightagent_targets"] == []
+    assert test_response.status_code == 400
 
 def test_saved_wechat_bridge_notification_channel_is_not_overridden_by_wecom_env(tmp_path, monkeypatch):
     sent: dict[str, object] = {}
 
-    class FailingWebhookClient:
+    class FakeWebhookClient:
         def __init__(self, *, webhook_url: str):
-            raise AssertionError("企业微信机器人不应在个人微信群通道下生效")
-
-    class FakeWechatBridgeClient:
-        is_wechat_bridge = True
-
-        def __init__(self, *, targets: list[str]):
-            sent["targets"] = targets
+            sent["webhook_url"] = webhook_url
 
         async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
             sent["content"] = content
             sent["mentions"] = mentioned_mobile_list
 
+    class FailingWechatBridgeClient:
+        def __init__(self, **kwargs):
+            raise AssertionError("旧内置个人微信桥客户端不应再被创建")
+
     monkeypatch.setenv("WECHAT_BRIDGE_ENABLED", "true")
     monkeypatch.setenv("NOTIFICATION_SENDER_TYPE", "wecom_webhook")
     monkeypatch.setenv("WECOM_WEBHOOK_URL", "https://example.test/cgi-bin/webhook/send?key=env-wecom")
-    monkeypatch.setattr("app.main.WeComWebhookClient", FailingWebhookClient)
-    monkeypatch.setattr("app.main.WechatBridgeNotifyClient", FakeWechatBridgeClient)
+    monkeypatch.setattr("app.main.WeComWebhookClient", FakeWebhookClient)
+    monkeypatch.setattr("app.main.WechatBridgeNotifyClient", FailingWechatBridgeClient)
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
     repo.save_notification_config(
         sender_type="lightagent",
         webhook_url="https://example.test/cgi-bin/webhook/send?key=old-wecom",
-        lightagent_url="",
-        lightagent_token="",
         lightagent_target="wgr_notice",
         lightagent_targets=[{"id": "wgr_notice", "name": "通知群"}],
         message_template="{name}",
@@ -2682,138 +2797,44 @@ def test_saved_wechat_bridge_notification_channel_is_not_overridden_by_wecom_env
     client = TestClient(app)
 
     public_config = client.get("/api/notification-config").json()["config"]
-    test_response = client.post("/api/notification-config/test", json={"test_wechat_member_id": "@member-runtime"})
+    test_response = client.post("/api/notification-config/test", json={"person_name": "示例甲"})
 
-    assert public_config["sender_type"] == "lightagent"
-    assert public_config["lightagent_target"] == "wgr_notice"
+    assert public_config["sender_type"] == "wecom_webhook"
+    assert public_config["wechat_bridge_enabled"] is False
+    assert public_config["lightagent_target"] == ""
     assert test_response.status_code == 200
-    assert sent == {
-        "targets": ["wgr_notice"],
-        "content": "@示例甲\n示例甲",
-        "mentions": [],
-    }
-
+    assert sent["webhook_url"].endswith("old-wecom")
+    assert sent["content"] == "示例甲"
 
 def test_lightagent_wechat_proxy_endpoints(tmp_path, monkeypatch):
     calls: list[dict[str, object]] = []
 
     def fake_lightagent_web_request(repo, method, path, *, params=None, json_body=None):
         calls.append({"method": method, "path": path, "params": params, "json_body": json_body})
-        if method == "GET" and path == "/api/wechat_group/qrlogin":
-            return {"status": "success", "login_status": "connected"}
-        if method == "POST" and path == "/api/wechat_group/qrlogin":
-            return {"status": "success", "login_status": "waiting"}
-        if method == "GET" and path == "/api/channels":
-            return {
-                "channels": [
-                    {
-                        "name": "wechat_group",
-                        "connected": True,
-                        "login_status": "connected",
-                        "extra": {
-                            "rooms": [{"id": "room-1", "name": "test-room"}],
-                            "selected_room_ids": ["room-1"],
-                            "selected_room_names": ["test-room"],
-                        },
-                    }
-                ]
-            }
-        if method == "GET" and path == "/api/wechat-group/members":
-            return {
-                "status": "success",
-                "members": [
-                    {"runtime_sender_id": "@member-1", "sender_nickname": "Alice"},
-                    {"id": "@member-2", "nickName": "Bob"},
-                    {"sender_id": "@member-3", "sender_nickname": "@member-3"},
-                ],
-            }
-        raise AssertionError(f"unexpected LightAgent request: {method} {path}")
+        return {"status": "success"}
 
     monkeypatch.setattr(main_module, "_lightagent_web_request", fake_lightagent_web_request)
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
 
-    status_response = client.get("/api/lightagent/wechat/status")
-    refresh_response = client.post("/api/lightagent/wechat/refresh")
-    rooms_response = client.get("/api/lightagent/wechat/rooms")
-    members_response = client.get("/api/lightagent/wechat/members?room_id=room-1")
-
-    assert status_response.json()["login_status"] == "connected"
-    assert refresh_response.json()["login_status"] == "waiting"
-    assert rooms_response.json() == {
-        "status": "success",
-        "connected": True,
-        "login_status": "connected",
-        "rooms": [
-            {
-                "id": "room-1",
-                "name": "test-room",
-                "stable_room_id": "",
-                "runtime_room_id": "room-1",
-                "sendable": True,
-            }
-        ],
-        "sendable_room_count": 1,
-        "selected_room_ids": ["room-1"],
-        "selected_room_names": ["test-room"],
-    }
-    assert members_response.json()["members"] == [
-        {
-            "runtime_sender_id": "@member-1",
-            "sender_nickname": "Alice",
-            "sender_id": "@member-1",
-            "display_name": "Alice",
-            "is_raw_id_name": False,
-        },
-        {
-            "id": "@member-2",
-            "nickName": "Bob",
-            "runtime_sender_id": "@member-2",
-            "sender_id": "@member-2",
-            "display_name": "Bob",
-            "sender_nickname": "Bob",
-            "is_raw_id_name": False,
-        },
-        {
-            "sender_id": "@member-3",
-            "sender_nickname": "@member-3",
-            "runtime_sender_id": "@member-3",
-            "display_name": "@member-3",
-            "is_raw_id_name": True,
-        },
+    responses = [
+        client.get("/api/lightagent/wechat/status"),
+        client.post("/api/lightagent/wechat/refresh"),
+        client.post("/api/lightagent/wechat/refresh-qr"),
+        client.get("/api/lightagent/wechat/rooms"),
+        client.get("/api/lightagent/wechat/members?room_id=room-1"),
     ]
-    assert calls[-1] == {
-        "method": "GET",
-        "path": "/api/wechat-group/members",
-        "params": {"stable_room_id": "room-1", "limit": "500"},
-        "json_body": None,
-    }
 
+    assert [response.status_code for response in responses] == [410, 410, 410, 410, 410]
+    assert calls == []
+    assert all("已停用" in response.json()["detail"] for response in responses)
 
 def test_lightagent_wechat_rooms_marks_stable_room_without_runtime_unsendable(tmp_path, monkeypatch):
+    calls: list[dict[str, object]] = []
+
     def fake_lightagent_web_request(repo, method, path, *, params=None, json_body=None):
-        if method == "GET" and path == "/api/channels":
-            return {
-                "channels": [
-                    {
-                        "name": "wechat_group",
-                        "connected": True,
-                        "login_status": "connected",
-                        "extra": {
-                            "rooms": [
-                                {"id": "wgr_inactive", "stable_room_id": "wgr_inactive", "name": "历史群"},
-                                {
-                                    "id": "wgr_active",
-                                    "stable_room_id": "wgr_active",
-                                    "runtime_room_id": "room@@active",
-                                    "name": "当前群",
-                                },
-                            ],
-                        },
-                    }
-                ]
-            }
-        raise AssertionError(f"unexpected LightAgent request: {method} {path}")
+        calls.append({"method": method, "path": path, "params": params, "json_body": json_body})
+        return {"status": "success"}
 
     monkeypatch.setattr(main_module, "_lightagent_web_request", fake_lightagent_web_request)
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
@@ -2821,16 +2842,9 @@ def test_lightagent_wechat_rooms_marks_stable_room_without_runtime_unsendable(tm
 
     response = client.get("/api/lightagent/wechat/rooms")
 
-    assert response.status_code == 200
-    rooms = response.json()["rooms"]
-    assert rooms[0]["id"] == "wgr_inactive"
-    assert rooms[0]["runtime_room_id"] == ""
-    assert rooms[0]["sendable"] is False
-    assert "群内发言" in rooms[0]["sendable_reason"]
-    assert rooms[1]["id"] == "wgr_active"
-    assert rooms[1]["runtime_room_id"] == "room@@active"
-    assert rooms[1]["sendable"] is True
-
+    assert response.status_code == 410
+    assert calls == []
+    assert "已停用" in response.json()["detail"]
 
 def test_wechat_query_requires_token(tmp_path, monkeypatch):
     monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
@@ -2844,99 +2858,28 @@ def test_wechat_query_requires_token(tmp_path, monkeypatch):
 
 
 def test_notification_wechat_targets_restrict_wechat_interaction_room(tmp_path, monkeypatch):
-    calls: list[dict[str, object]] = []
-
-    def fake_lightagent_web_request(repo, method, path, *, params=None, json_body=None):
-        calls.append({"method": method, "path": path, "params": params, "json_body": json_body})
-        if method == "GET" and path == "/api/channels":
-            return {
-                "channels": [
-                    {
-                        "name": "wechat_group",
-                        "connected": True,
-                        "active": True,
-                        "extra": {
-                            "stable_selected_room_ids": ["wgr_notice"],
-                            "selected_room_ids": ["wgr_notice"],
-                        },
-                    }
-                ]
-            }
-        if method == "POST" and path == "/api/channels":
-            selected = json_body["config"]["wechat_group_stable_room_ids"]
-            return {
-                "status": "success",
-                "extra": {
-                    "stable_selected_room_ids": selected,
-                    "selected_room_ids": selected,
-                },
-            }
-        raise AssertionError(f"unexpected LightAgent request: {method} {path}")
-
-    monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
-    monkeypatch.setattr(main_module, "_lightagent_web_request", fake_lightagent_web_request)
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
     app.state.repo.save_notification_config(
         sender_type="lightagent",
         webhook_url="",
-        lightagent_targets=[
-            {"id": "wgr_feature", "name": "功能群"},
-            {"id": "wgr_second", "name": "第二功能群"},
-        ],
+        lightagent_targets=[{"id": "wgr_feature", "name": "功能群"}],
     )
 
     save_response = client.post(
         "/api/feature-channel-config",
-        json={
-            "enabled": True,
-            "lightagent_web_url": "http://lightagent.test",
-            "lightagent_web_password": "secret",
-            "wechat_group_room_id": "wgr_feature",
-            "wechat_group_room_name": "功能群",
-            "wechat_group_rooms": [
-                {"id": "wgr_feature", "name": "功能群"},
-                {"id": "wgr_second", "name": "第二功能群"},
-            ],
-            "allow_tunnel_mechanical": True,
-            "allow_duty_query": True,
-            "allow_roster_import": True,
-        },
+        json={"enabled": True, "wechat_group_room_id": "wgr_feature", "wechat_group_room_name": "功能群"},
     )
     get_response = client.get("/api/feature-channel-config")
-    wrong_room = client.post(
-        "/api/wechat-query",
-        headers={"X-Duty-Query-Token": "unit-token"},
-        json={"text": "隧道机电", "stable_room_id": "wgr_other", "room_id": "room@@other"},
-    )
-    second_room = client.post(
-        "/api/wechat-query",
-        headers={"X-Duty-Query-Token": "unit-token"},
-        json={"text": "隧道机电", "stable_room_id": "wgr_second", "room_id": "room@@second"},
-    )
 
-    assert save_response.status_code == 200
-    assert save_response.json()["lightagent_sync"]["success"] is True
-    assert save_response.json()["lightagent_sync"]["selected_room_ids"] == ["wgr_notice", "wgr_feature", "wgr_second"]
-    assert calls[-1]["json_body"] == {
-        "action": "save",
-        "channel": "wechat_group",
-        "config": {"wechat_group_stable_room_ids": ["wgr_notice", "wgr_feature", "wgr_second"]},
-    }
-    config = get_response.json()["config"]
-    assert config["lightagent_web_url"] == "http://lightagent.test"
-    assert config["lightagent_web_password_configured"] is True
-    assert config["wechat_group_room_id"] == "wgr_feature"
-    assert [room["id"] for room in config["wechat_group_rooms"]] == ["wgr_feature", "wgr_second"]
-    assert second_room.status_code == 200
-    assert wrong_room.status_code == 403
-    assert "通知渠道配置的个人微信群" in wrong_room.json()["detail"]
-    assert "功能群" in wrong_room.json()["detail"]
-
+    assert save_response.status_code == 410
+    assert get_response.status_code == 410
+    assert "已停用" in save_response.json()["detail"]
+    assert app.state.repo.get_notification_config()["sender_type"] == "wecom_webhook"
 
 def test_feature_channel_config_reports_lightagent_sync_failure_without_losing_save(tmp_path, monkeypatch):
     def fake_lightagent_web_request(repo, method, path, *, params=None, json_body=None):
-        raise RuntimeError("LightAgent offline")
+        raise AssertionError("旧 LightAgent Web 不应再被调用")
 
     monkeypatch.setattr(main_module, "_lightagent_web_request", fake_lightagent_web_request)
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
@@ -2949,30 +2892,17 @@ def test_feature_channel_config_reports_lightagent_sync_failure_without_losing_s
             "wechat_group_room_id": "wgr_feature",
             "wechat_group_room_name": "功能群",
             "wechat_group_rooms": [{"id": "wgr_feature", "name": "功能群"}],
-            "allow_tunnel_mechanical": True,
-            "allow_duty_query": True,
-            "allow_roster_import": True,
         },
     )
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["success"] is True
-    assert body["config"]["wechat_group_room_id"] == "wgr_feature"
-    assert body["lightagent_sync"] == {
-        "success": False,
-        "target": "wgr_feature",
-        "targets": ["wgr_feature"],
-        "source": "feature_channel",
-        "message": "LightAgent offline",
-    }
-
+    assert response.status_code == 410
+    assert "已停用" in response.json()["detail"]
 
 def test_feature_channel_legacy_permission_switches_do_not_disable_wechat_commands(tmp_path, monkeypatch):
     monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
-    client.post(
+    response = client.post(
         "/api/feature-channel-config",
         json={
             "enabled": True,
@@ -2983,26 +2913,14 @@ def test_feature_channel_legacy_permission_switches_do_not_disable_wechat_comman
         },
     )
 
-    response = client.post(
-        "/api/wechat-query",
-        headers={"X-Duty-Query-Token": "unit-token"},
-        json={"text": "巡查记录", "stable_room_id": "wgr_feature"},
-    )
-
-    assert response.status_code == 200
-    assert response.json()["query_type"] == "patrol_record_template"
-    config = client.get("/api/feature-channel-config").json()["config"]
-    assert config["enabled"] is True
-    assert config["allow_tunnel_mechanical"] is True
-    assert config["allow_duty_query"] is True
-    assert config["allow_roster_import"] is True
-
+    assert response.status_code == 410
+    assert "已停用" in response.json()["detail"]
 
 def test_feature_channel_legacy_enabled_switch_does_not_disable_wechat_commands(tmp_path, monkeypatch):
     monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
-    client.post(
+    response = client.post(
         "/api/feature-channel-config",
         json={
             "enabled": False,
@@ -3013,45 +2931,18 @@ def test_feature_channel_legacy_enabled_switch_does_not_disable_wechat_commands(
         },
     )
 
-    response = client.post(
-        "/api/wechat-query",
-        headers={"X-Duty-Query-Token": "unit-token"},
-        json={"text": "巡查记录", "stable_room_id": "wgr_feature"},
-    )
-
-    assert response.status_code == 200
-    assert response.json()["query_type"] == "patrol_record_template"
-    assert client.get("/api/feature-channel-config").json()["config"]["enabled"] is True
-
+    assert response.status_code == 410
+    assert "已停用" in response.json()["detail"]
 
 def test_feature_channel_test_uses_notification_room_when_channels_differ(tmp_path, monkeypatch):
     monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
-    client.post(
-        "/api/feature-channel-config",
-        json={
-            "wechat_group_room_id": "wgr_old_feature",
-            "wechat_group_room_name": "旧功能群",
-        },
-    )
-    client.post(
-        "/api/notification-config",
-        json={
-            "sender_type": "lightagent",
-            "lightagent_url": "http://lightagent.test/api/push/send",
-            "lightagent_target": "wgr_notify",
-            "lightagent_targets": [{"id": "wgr_notify", "name": "通知群"}],
-        },
-    )
 
     response = client.post("/api/feature-channel-config/test")
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["success"] is True
-    assert body["result"]["query_type"] == "tunnel_mechanical_template"
-
+    assert response.status_code == 410
+    assert "已停用" in response.json()["detail"]
 
 def test_wechat_interaction_config_controls_triggers_and_templates(tmp_path, monkeypatch):
     monkeypatch.setenv("DUTY_REMINDER_QUERY_TOKEN", "unit-token")
@@ -5063,6 +4954,38 @@ def test_vacation_reminder_plans_start_and_end_events(tmp_path):
     assert any(event.kind == "vacation_end" and event.person_name == "罗富耀" and event.send_at.strftime("%H:%M") == "07:55" for event in end_events)
 
 
+def test_vacation_reminder_test_uses_template_library_randomly(tmp_path, monkeypatch):
+    sent: dict[str, object] = {}
+
+    class FakeNotificationClient:
+        async def send_text(self, content: str, mentioned_mobile_list: list[str] | None = None):
+            sent["content"] = content
+            sent["mentions"] = mentioned_mobile_list or []
+
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    repo: DutyRepository = app.state.repo
+    repo.save_notification_config(sender_type="wecom_webhook", webhook_url="https://example.test/cgi-bin/webhook/send?key=unit-test")
+    monkeypatch.setattr(main_module, "_notification_client_from_repo", lambda repo: FakeNotificationClient())
+    monkeypatch.setattr(main_module.secrets, "choice", lambda items: items[-1])
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/vacation-reminder-config/test",
+        json={
+            "enabled": True,
+            "start_reminder_time": "07:50",
+            "end_reminder_time": "07:55",
+            "start_message_templates": ["第一条", "第二条"],
+            "end_message_templates": ["结束第一条", "结束第二条"],
+            "send_content_mode": "text",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["content"] == "第二条"
+    assert sent["content"] == "第二条"
+
+
 def test_wecom_app_vacation_test_rejects_unbound_person_without_record(tmp_path):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
@@ -5261,6 +5184,39 @@ def test_people_center_summarizes_bindings_and_reminders(tmp_path):
     assert person["tunnel_mechanical_partner"] == "罗富耀"
 
 
+def test_personnel_delete_removes_related_config_and_hides_roster_name(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    repo: DutyRepository = app.state.repo
+    repo.upsert_personnel_contacts([
+        {
+            "name": "张三",
+            "wecom_userid": "zs-user",
+            "mention_mobile": "13800000000",
+        }
+    ])
+    repo.save_monitored_person(name="张三", wecom_userid="zs-user", daily_time="07:50")
+    repo.save_custom_reminder(name="张三", shift_code="early", reminder_time="07:50", message="开启隧道灯")
+    repo.save_roster_month(2026, 8, [{"name": "张三", "days": {"1": "早"}}], "uploads/roster.png")
+
+    delete_response = client.delete("/api/personnel/%E5%BC%A0%E4%B8%89")
+    assert delete_response.status_code == 200
+    assert "张三" not in client.get("/api/personnel").json()["names"]
+    assert all(person["name"] != "张三" for person in client.get("/api/people").json()["people"])
+    assert all(item["name"] != "张三" for item in client.get("/api/custom-reminders").json()["reminders"])
+    assert all(item["name"] != "张三" for item in client.get("/api/people-center").json()["people"])
+
+    client.post("/api/personnel", json={"names": ["张三"], "people": [{"name": "张三", "wecom_userid": "zs-user"}]})
+    assert "张三" in client.get("/api/personnel").json()["names"]
+    assert any(person["name"] == "张三" for person in client.get("/api/people-center").json()["people"])
+
+    rename_response = client.put("/api/personnel/%E5%BC%A0%E4%B8%89", json={"name": "张三甲"})
+    assert rename_response.status_code == 200
+    assert "张三甲" in client.get("/api/personnel").json()["names"]
+    assert all(person["name"] != "张三" for person in client.get("/api/people-center").json()["people"])
+    assert any(person["name"] == "张三甲" for person in client.get("/api/people-center").json()["people"])
+
+
 def test_interaction_commands_catalog_marks_current_menu_items(tmp_path):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
@@ -5271,9 +5227,17 @@ def test_interaction_commands_catalog_marks_current_menu_items(tmp_path):
 
     commands = client.get("/api/interaction-commands").json()["commands"]
     today = next(item for item in commands if item["command"] == "查询今日在岗")
+    rest = next(item for item in commands if item["command"] == "查询休息")
+    construction_image = next(item for item in commands if item["command"] == "施工图片")
+    construction_site = next(item for item in commands if item["command"] == "施工点维护")
+    orange = next(item for item in commands if item["command"] == "橙色预警巡查记录查询")
 
     assert today["menu_available"] is True
     assert today["in_current_menu"] is True
+    assert rest["feature"] == "休息统计"
+    assert construction_image["feature"] == "施工影像 Word"
+    assert construction_site["feature"] == "施工点维护"
+    assert orange["feature"] == "橙色预警巡查记录"
     assert any(item["bind_required"] for item in commands)
 
 
@@ -6299,14 +6263,8 @@ def test_send_records_display_wechat_room_ids_as_room_names(tmp_path):
 
     record = client.get("/api/send-records").json()["records"][0]
 
-    assert record["target"] == "通知群"
-    assert "通知群" in record["error"]
-    assert "第二通知群" in record["error"]
-    assert "王路飞" in record["error"]
-    assert "wgr_" not in record["target"]
-    assert "wgr_" not in record["error"]
-    assert "@member-runtime" not in record["error"]
-
+    assert record["target"] == "微信群"
+    assert record["error"] == "微信群: target room is not active; 微信群: target room is not active; 王路飞 failed"
 
 def test_reminder_preview_uses_notification_message_template(tmp_path):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
@@ -6452,6 +6410,9 @@ def test_daily_duty_preview_summarizes_on_duty_people_and_drivers(tmp_path):
     assert body["content"] == (
         "今日在岗人员\n"
         "监控班：今日早班：示例丁，明日早班：示例辛，中班：示例己，晚班：示例甲\n"
+        "巡查班：无\n"
+        "站管：无\n"
+        "办公室：无\n"
         "驾驶员：大车：示例庚 小车：示例丙\n"
         "备勤人员：示例乙\n"
         "今日下午休息：示例戊\n"
@@ -7386,13 +7347,8 @@ def test_system_status_sanitizes_wechat_ids_in_errors(tmp_path, monkeypatch):
     body = client.get("/api/system-status").json()
 
     assert body["today_failed_count"] == 1
-    assert "通知群" in body["last_error"]
-    assert "第二通知群" in body["last_error"]
-    assert "王路飞" in body["last_error"]
-    assert "wgr_" not in body["last_error"]
+    assert "微信群" in body["last_error"]
     assert "@member-runtime" not in body["last_error"]
-    assert body["patrol_warning_monitor"]["last_error"] == "通知群 patrol error"
-
 
 def test_send_records_can_be_filtered_by_status_kind_target_and_today_failed(tmp_path, monkeypatch):
     class FrozenDateTime(datetime):
@@ -7429,10 +7385,9 @@ def test_send_records_target_filter_uses_display_names(tmp_path):
     repo: DutyRepository = app.state.repo
     repo.save_send_record(kind="daily_duty", target="wgr_notice", status="success")
 
-    records = client.get("/api/send-records?target=通知群").json()["records"]
+    records = client.get("/api/send-records?target=微信群").json()["records"]
 
-    assert [item["target"] for item in records] == ["通知群"]
-
+    assert [item["target"] for item in records] == ["微信群"]
 
 def test_resend_failed_text_record_sends_again_and_records_result(tmp_path, monkeypatch):
     sent: dict[str, object] = {}
@@ -7566,7 +7521,7 @@ def test_resend_failure_sanitizes_wechat_ids(tmp_path, monkeypatch):
     response = client.post(f"/api/send-records/{record_id}/resend")
 
     assert response.status_code == 502
-    assert response.json()["detail"] == "通知群 failed; 王路飞 failed"
+    assert response.json()["detail"] == "微信群 failed; 王路飞 failed"
 
 
 def test_recheck_roster_corrects_mismatched_cells_from_source_image(tmp_path):
@@ -7920,3 +7875,4 @@ def test_resend_tunnel_mechanical_confirmation_record_sends_result_not_digit(tmp
     resend = repo.list_send_records()[0]
     assert resend["kind"] == "tunnel_mechanical_wechat_resend"
     assert resend["content"] != "1"
+

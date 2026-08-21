@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>提醒中心</title>
+  <meta http-equiv="refresh" content="0; url=./index.html">
+  <script>
+    (function () {
+      const target = location.protocol === 'file:' ? './index.html' : '/';
+      location.replace(target);
+    })();
+  </script>
+  <style>
+    body { margin: 0; font: 14px/1.5 "Microsoft YaHei", sans-serif; background:#f5f7fb; color:#334155; display:grid; place-items:center; min-height:100vh; }
+    .card { background:#fff; border:1px solid #d8dee8; border-radius:16px; padding:20px 24px; box-shadow:0 12px 28px rgba(15,23,42,.08); text-align:center; }
+    a { color:#2563eb; text-decoration:none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div>正在跳转到新版主入口…</div>
+    <div style="margin-top:8px"><a href="./index.html">如果没有自动跳转，点这里进入</a></div>
+  </div>
+</body>
+</html>

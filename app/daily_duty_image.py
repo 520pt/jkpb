@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
@@ -9,7 +10,7 @@ from typing import Any
 from PIL import Image, ImageDraw, ImageFont
 
 
-WIDTH = 900
+WIDTH = 1200
 LEFT = 28
 GAP = 14
 HEADER_HEIGHT = 78
@@ -18,114 +19,329 @@ BLOCK_BOTTOM_PADDING = 18
 
 def render_daily_duty_image(preview: dict[str, Any]) -> bytes:
     details = preview.get("details") or {}
-    date_text = str(preview.get("send_at") or "")[:10]
-    inner_width = WIDTH - LEFT * 2
-    column_width = (inner_width - GAP * 2) // 3
-    rest_card_width = (inner_width - 36 - GAP * 2) // 3
+    image = Image.new("RGB", (WIDTH, 675), "#eef5fb")
+    draw = ImageDraw.Draw(image)
     fonts = {
-        "title": _font(22, bold=True),
-        "header": _font(19, bold=True),
-        "label": _font(15, bold=True),
-        "body": _font(18, bold=True),
-        "body_small": _font(17, bold=True),
-        "muted": _font(18),
-        "date": _font(15),
+        "title": _font(34, bold=True),
+        "section": _font(22, bold=True),
+        "label": _font(16, bold=True),
+        "label_small": _font(15, bold=True),
+        "body": _font(20, bold=True),
+        "body_small": _font(18, bold=True),
+        "date": _font(17),
+        "muted": _font(17),
     }
 
-    top_sections = [
-        ("监控班", "#0f766e", [("今日早班", details.get("early") or "无"), ("明日早班", details.get("tomorrow_early") or "无"), ("中班", details.get("middle") or "无"), ("晚班", details.get("night") or "无")]),
-        ("驾驶员", "#be123c", [("大车", details.get("big_drivers") or "无"), ("小车", details.get("small_drivers") or "无")]),
-        ("备勤", "#4d7c0f", [("备勤人员", details.get("standby") or "无")]),
-    ]
-    rest_items = [
-        ("今日下午休息", details.get("afternoon_rest") or "无"),
-        ("正在休息", details.get("resting") or "无"),
-        ("今日下午到岗", details.get("afternoon_return") or "无"),
-    ]
+    date_text, weekday_text = _date_label(str(preview.get("send_at") or ""))
+    title_box = (30, 22, WIDTH - 30, 92)
+    _rounded(draw, title_box, 26, "#ffffff", "#d8e5ef")
+    _draw_centered_y_text(draw, title_box, 56, "今日在岗", fonts["title"], "#224565")
+    meta_text = "　".join(part for part in (date_text, weekday_text) if part)
+    if meta_text:
+        meta_x = WIDTH - 56 - int(_text_width(meta_text, fonts["date"]))
+        _draw_centered_y_text(draw, title_box, meta_x, meta_text, fonts["date"], "#516d89")
 
-    top_meta = []
-    for title, accent, items in top_sections:
-        item_meta = []
-        if title == "监控班":
-            pair_width = (column_width - 40) // 2
-            for index, (label, value) in enumerate(items):
-                max_width = pair_width - 24 if index < 2 else column_width - 60
-                font = fonts["body_small"] if index < 2 else fonts["body"]
-                lines = _wrap_text(str(value), max_width, font)
-                item_meta.append({"label": label, "lines": lines, "height": max(84, 50 + len(lines) * 24), "paired": index < 2})
-            pair_height = max(item["height"] for item in item_meta[:2])
-            for item in item_meta[:2]:
-                item["height"] = pair_height
-            height = 60 + pair_height + sum(item["height"] for item in item_meta[2:]) + BLOCK_BOTTOM_PADDING
-        else:
-            for label, value in items:
-                lines = _wrap_text(str(value), column_width - 60, fonts["body"])
-                item_meta.append({"label": label, "lines": lines, "height": max(76, 50 + len(lines) * 24), "paired": False})
-            height = 60 + sum(item["height"] for item in item_meta) + BLOCK_BOTTOM_PADDING
-        top_meta.append({"title": title, "accent": accent, "items": item_meta, "height": height})
-    top_height = max(meta["height"] for meta in top_meta)
+    left_x, top_y = 30, 116
+    left_w, right_x, right_w = 575, 622, 548
+    top_card_h, rest_y, bottom_y = 232, 369, 644
+    half_w = (left_w - 14) // 2
 
-    rest_meta = []
-    for label, value in rest_items:
-        lines = _wrap_text(str(value), rest_card_width - 28, fonts["body_small"])
-        rest_meta.append({"label": label, "lines": lines, "height": max(86, 55 + len(lines) * 24)})
-    rest_card_height = max(item["height"] for item in rest_meta)
-    rest_height = 60 + rest_card_height + BLOCK_BOTTOM_PADDING
-    height = HEADER_HEIGHT + top_height + GAP + rest_height + 36
+    monitor_box = (left_x, top_y, left_x + half_w, top_y + top_card_h)
+    patrol_box = (left_x + half_w + 14, top_y, left_x + left_w, top_y + top_card_h)
+    rest_box = (left_x, rest_y, left_x + left_w, bottom_y)
+    right_box = (right_x, top_y, right_x + right_w, bottom_y)
 
-    image = Image.new("RGB", (WIDTH, height), "#f6fbf9")
-    draw = ImageDraw.Draw(image)
+    monitor_color = "#0f766e"
+    patrol_color = "#15803d"
+    rest_color = "#ea580c"
+    right_color = "#e11d48"
 
-    title_box = (LEFT, 18, WIDTH - LEFT, 64)
-    date_box = (WIDTH - LEFT - 132, 27, WIDTH - LEFT - 20, 55)
-    _rounded(draw, title_box, 8, "#0f3f3a")
-    _draw_centered_y_text(draw, title_box, LEFT + 18, "今日在岗人员", fonts["title"], "#ffffff")
-    _rounded(draw, date_box, 14, "#d9f3ee")
-    _draw_centered_y_text(draw, date_box, WIDTH - LEFT - 116, date_text, fonts["date"], "#0f3f3a")
-
-    for section_index, meta in enumerate(top_meta):
-        x = LEFT + section_index * (column_width + GAP)
-        y = HEADER_HEIGHT
-        _rounded(draw, (x, y, x + column_width, y + top_height), 8, "#ffffff", "#cde5df")
-        header_box = (x, y, x + column_width, y + 46)
-        _rounded(draw, header_box, 8, meta["accent"])
-        draw.rectangle((x, y + 36, x + column_width, y + 46), fill=meta["accent"])
-        _draw_centered_y_text(draw, header_box, x + 18, meta["title"], fonts["header"], "#ffffff")
-        item_y = y + 60
-        if meta["title"] == "监控班":
-            pair_width = (column_width - 40) // 2
-            for pair_index, item in enumerate(meta["items"][:2]):
-                item_x = x + 16 + pair_index * (pair_width + 8)
-                _rounded(draw, (item_x, item_y, item_x + pair_width, item_y + item["height"]), 8, "#f7fdfb", "#d6ebe4")
-                draw.text((item_x + 12, item_y + 12), item["label"], font=fonts["label"], fill=meta["accent"])
-                _draw_lines(draw, item["lines"], item_x + 12, item_y + 42, fonts["body_small"] if "".join(item["lines"]) != "无" else fonts["date"], "#18212f" if "".join(item["lines"]) != "无" else "#7aa79e", 24)
-            item_y += meta["items"][0]["height"]
-            items = meta["items"][2:]
-        else:
-            items = meta["items"]
-        for item in items:
-            _rounded(draw, (x + 16, item_y, x + column_width - 16, item_y + item["height"]), 8, "#f7fdfb", "#d6ebe4")
-            draw.text((x + 30, item_y + 12), item["label"], font=fonts["label"], fill=meta["accent"])
-            _draw_lines(draw, item["lines"], x + 30, item_y + 42, fonts["body"] if "".join(item["lines"]) != "无" else fonts["muted"], "#18212f" if "".join(item["lines"]) != "无" else "#7aa79e", 25)
-            item_y += item["height"]
-
-    rest_y = HEADER_HEIGHT + top_height + GAP
-    _rounded(draw, (LEFT, rest_y, LEFT + inner_width, rest_y + rest_height), 8, "#ffffff", "#f4c7d8")
-    rest_header_box = (LEFT, rest_y, LEFT + inner_width, rest_y + 46)
-    _rounded(draw, rest_header_box, 8, "#9f1239")
-    draw.rectangle((LEFT, rest_y + 36, LEFT + inner_width, rest_y + 46), fill="#9f1239")
-    _draw_centered_y_text(draw, rest_header_box, LEFT + 18, "休息状态", fonts["header"], "#ffffff")
-    for index, item in enumerate(rest_meta):
-        x = LEFT + 18 + index * (rest_card_width + GAP)
-        y = rest_y + 60
-        _rounded(draw, (x, y, x + rest_card_width, y + rest_card_height), 8, "#fff7fb", "#f4c7d8")
-        draw.text((x + 14, y + 12), item["label"], font=fonts["label"], fill="#9f1239")
-        _draw_lines(draw, item["lines"], x + 14, y + 42, fonts["body_small"] if "".join(item["lines"]) != "无" else fonts["date"], "#18212f" if "".join(item["lines"]) != "无" else "#b46980", 24)
+    _draw_monitor_panel(draw, monitor_box, monitor_color, fonts, details)
+    _draw_patrol_panel(draw, patrol_box, patrol_color, fonts, details, date_text)
+    _draw_rest_panel(draw, rest_box, rest_color, fonts, details)
+    _draw_status_panel(draw, right_box, right_color, fonts, details)
 
     output = BytesIO()
     image.save(output, format="PNG", optimize=True)
     return output.getvalue()
 
+
+def _date_label(raw: str) -> tuple[str, str]:
+    value = raw.strip()
+    if not value:
+        return "", ""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return value[:10], ""
+    weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+    return parsed.strftime("%Y-%m-%d"), weekdays[parsed.weekday()]
+
+
+def _detail(details: dict[str, Any], key: str, default: str = "无") -> str:
+    value = str(details.get(key) or "").strip()
+    return value if value else default
+
+
+def _join_values(values: list[str]) -> str:
+    seen: list[str] = []
+    for value in values:
+        for name in _split_names(value):
+            if name and name != "无" and name not in seen:
+                seen.append(name)
+    return "，".join(seen) if seen else "无"
+
+
+def _split_names(value: str) -> list[str]:
+    text = str(value or "").strip()
+    if not text or text == "无":
+        return []
+    for sep in ("、", ",", "，", "|", "/", " "):
+        text = text.replace(sep, "，")
+    return [part.strip() for part in text.split("，") if part.strip() and part.strip() != "无"]
+
+
+def _draw_card(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], *, outline: str = "#d8e5ef") -> None:
+    x1, y1, x2, y2 = box
+    _rounded(draw, (x1 + 2, y1 + 3, x2 + 2, y2 + 3), 22, "#dfe9f2")
+    _rounded(draw, box, 22, "#ffffff", outline)
+
+
+def _draw_panel_header(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    title: str,
+    color: str,
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    *,
+    right_text: str = "",
+) -> None:
+    x1, y1, x2, _ = box
+    header = (x1, y1, x2, y1 + 55)
+    _rounded(draw, header, 22, color)
+    draw.rectangle((x1, y1 + 36, x2, y1 + 55), fill=color)
+    _draw_centered_y_text(draw, header, x1 + 20, title, font, "#ffffff")
+    if right_text:
+        right_font = _font(16, bold=True)
+        right_x = x2 - 20 - int(_text_width(right_text, right_font))
+        _draw_centered_y_text(draw, header, right_x, right_text, right_font, "#eaf6ff")
+
+
+def _draw_labeled_value(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    label: str,
+    value: str,
+    accent: str,
+    fonts: dict[str, ImageFont.FreeTypeFont | ImageFont.ImageFont],
+    *,
+    fill: str = "#f8fbff",
+    outline: str = "#d8e5ef",
+) -> None:
+    x1, y1, x2, y2 = box
+    _rounded(draw, box, 12, fill, outline)
+    compact = y2 - y1 <= 62
+    value_font = _font(16, bold=True) if compact and value != "无" else (fonts["body_small"] if value != "无" else fonts["muted"])
+    label_y = y1 + (9 if compact else 13)
+    value_y = y1 + (32 if compact else 45)
+    draw.text((x1 + 13, label_y), label, font=fonts["label_small"], fill=accent)
+    lines = _wrap_text(value, x2 - x1 - 26, value_font)
+    line_font = value_font
+    line_fill = "#172033" if value != "无" else "#7794a8"
+    _draw_lines(draw, lines[:2 if compact else 3], x1 + 13, value_y, line_font, line_fill, 21 if compact else 24)
+
+
+def _draw_monitor_panel(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    accent: str,
+    fonts: dict[str, ImageFont.FreeTypeFont | ImageFont.ImageFont],
+    details: dict[str, Any],
+) -> None:
+    _draw_card(draw, box, outline="#cfe6df")
+    _draw_panel_header(draw, box, "监控", accent, fonts["section"])
+    x1, y1, x2, _ = box
+    cell_w = (x2 - x1 - 48) // 2
+    cell_h = 58
+    cells = [
+        ("今日早班", _detail(details, "early")),
+        ("明日早班", _detail(details, "tomorrow_early")),
+        ("中班", _detail(details, "middle")),
+        ("晚班", _detail(details, "night")),
+    ]
+    for index, (label, value) in enumerate(cells):
+        row, col = divmod(index, 2)
+        cx = x1 + 18 + col * (cell_w + 10)
+        cy = y1 + 74 + row * (cell_h + 14)
+        _draw_labeled_value(draw, (cx, cy, cx + cell_w, cy + cell_h), label, value, accent, fonts, fill="#f7fbff", outline="#cfe5ee")
+
+
+def _draw_patrol_panel(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    accent: str,
+    fonts: dict[str, ImageFont.FreeTypeFont | ImageFont.ImageFont],
+    details: dict[str, Any],
+    date_text: str,
+) -> None:
+    patrol_people = _detail(details, "patrol", _detail(details, "standby"))
+    patrol_date = _detail(details, "patrol_date", _compact_date(date_text) or "今日")
+    countdown = str(details.get("patrol_countdown") or details.get("standby_countdown") or "").strip()
+    countdown_text = countdown if countdown.startswith("倒计时") else (f"倒计时：{countdown}" if countdown else "")
+    _draw_card(draw, box, outline="#cfe6df")
+    _draw_panel_header(draw, box, "巡查", accent, fonts["section"], right_text=countdown_text)
+    x1, y1, x2, _ = box
+    content_x = x1 + 20
+    content_w = x2 - x1 - 40
+    y = y1 + 72
+    draw.text((content_x, y), "巡查人员", font=fonts["label"], fill=accent)
+    _draw_lines(draw, _wrap_text(patrol_people, content_w, fonts["body_small"]), content_x, y + 29, fonts["body_small"] if patrol_people != "无" else fonts["muted"], "#172033" if patrol_people != "无" else "#7794a8", 24)
+    draw.line((content_x, y + 68, x2 - 20, y + 68), fill="#d7e9df", width=2)
+    draw.text((content_x, y + 88), "巡查日期", font=fonts["label"], fill=accent)
+    draw.text((content_x, y + 116), patrol_date, font=fonts["body_small"], fill="#172033")
+
+
+def _draw_rest_panel(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    accent: str,
+    fonts: dict[str, ImageFont.FreeTypeFont | ImageFont.ImageFont],
+    details: dict[str, Any],
+) -> None:
+    _draw_card(draw, box, outline="#d8e5ef")
+    x1, y1, x2, y2 = box
+    header = (x1 + 20, y1 + 14, x2 - 20, y1 + 58)
+    _draw_centered_y_text(draw, header, x1 + 20, "休息状态", fonts["section"], accent)
+    draw.line((x1 + 20, y1 + 58, x2 - 20, y1 + 58), fill="#d8e5ef", width=2)
+    items = [
+        ("今日下午休息", _detail(details, "afternoon_rest")),
+        ("正在休息", _detail(details, "resting")),
+        ("今日下午到岗", _detail(details, "afternoon_return")),
+    ]
+    inner_x, inner_y = x1 + 20, y1 + 78
+    card_w = (x2 - x1 - 54) // 3
+    card_h = y2 - inner_y - 20
+    for index, (label, value) in enumerate(items):
+        cx = inner_x + index * (card_w + 14)
+        card = (cx, inner_y, cx + card_w, inner_y + card_h)
+        _rounded(draw, card, 12, "#fff9f2", "#fed7aa")
+        draw.text((cx + 13, inner_y + 14), label, font=fonts["label"], fill=accent)
+        draw.line((cx + 13, inner_y + 43, cx + card_w - 13, inner_y + 43), fill="#fdba74", width=2)
+        _draw_name_grid(draw, value, (cx + 13, inner_y + 56, cx + card_w - 13, inner_y + card_h - 12), accent="#172033", muted="#c17735")
+
+
+def _draw_status_panel(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    accent: str,
+    fonts: dict[str, ImageFont.FreeTypeFont | ImageFont.ImageFont],
+    details: dict[str, Any],
+) -> None:
+    _draw_card(draw, box, outline="#d8e5ef")
+    x1, y1, x2, y2 = box
+    draw.text((x1 + 18, y1 + 18), "在岗状态", font=fonts["section"], fill=accent)
+    subtitle = "按岗位汇总"
+    subtitle_x = x2 - 18 - int(_text_width(subtitle, fonts["date"]))
+    draw.text((subtitle_x, y1 + 24), subtitle, font=fonts["date"], fill="#64748b")
+    draw.line((x1 + 18, y1 + 58, x2 - 18, y1 + 58), fill="#d8e5ef", width=2)
+
+    monitor_people = _join_values([_detail(details, "early"), _detail(details, "middle"), _detail(details, "night"), _detail(details, "tomorrow_early")])
+    patrol_people = _detail(details, "patrol", _detail(details, "standby"))
+    items = [
+        ("巡查班", patrol_people),
+        ("监控班", monitor_people),
+        ("站管", _detail(details, "station", _detail(details, "station_managers"))),
+        ("办公室", _detail(details, "office")),
+        ("小车驾驶员", _detail(details, "small_drivers")),
+        ("大车驾驶员", _detail(details, "big_drivers")),
+    ]
+    row_top = y1 + 70
+    row_h = max(58, (y2 - row_top - 20) // len(items))
+    for index, (label, value) in enumerate(items):
+        ry = row_top + index * row_h
+        draw.line((x1 + 18, ry + row_h, x2 - 18, ry + row_h), fill="#e5edf5", width=1)
+        pill_w = 86 if len(label) <= 4 else 112
+        pill_h = 34
+        pill_y = ry + (row_h - pill_h) // 2
+        pill = (x1 + 24, pill_y, x1 + 24 + pill_w, pill_y + pill_h)
+        _rounded(draw, pill, 13, "#ffffff", "#d8e5ef")
+        label_x = pill[0] + max(8, int((pill_w - _text_width(label, fonts["label_small"])) / 2))
+        _draw_centered_y_text(draw, pill, label_x, label, fonts["label_small"], accent)
+        _draw_status_value(draw, value, (pill[2] + 22, ry + 6, x2 - 26, ry + row_h - 6), accent="#172033", muted="#7d8ca3")
+
+
+def _draw_status_value(
+    draw: ImageDraw.ImageDraw,
+    value: str,
+    box: tuple[int, int, int, int],
+    *,
+    accent: str,
+    muted: str,
+) -> None:
+    x1, y1, x2, y2 = box
+    text = str(value or "").strip() or "无"
+    fill = accent if text != "无" else muted
+    best_font = _font(18, bold=True) if text != "无" else _font(17)
+    best_lines = _wrap_text(text, x2 - x1, best_font)
+    best_line_h = 25
+    for size in (18, 17, 16, 15, 14, 13, 12):
+        font = _font(size, bold=True) if text != "无" else _font(size)
+        line_h = size + 7
+        lines = _wrap_text(text, x2 - x1, font)
+        if len(lines) * line_h <= y2 - y1:
+            best_font = font
+            best_lines = lines
+            best_line_h = line_h
+            break
+    start_y = y1 + max(0, ((y2 - y1) - len(best_lines) * best_line_h) // 2)
+    _draw_lines(draw, best_lines, x1, start_y, best_font, fill, best_line_h)
+
+
+def _compact_date(value: str) -> str:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        try:
+            parsed = datetime.strptime(value[:10], "%Y-%m-%d")
+        except ValueError:
+            return value[:10]
+    return f"{parsed.month}.{parsed.day}"
+
+
+def _draw_name_grid(
+    draw: ImageDraw.ImageDraw,
+    value: str,
+    box: tuple[int, int, int, int],
+    *,
+    accent: str,
+    muted: str,
+    prefer_columns: int | None = None,
+) -> None:
+    x1, y1, x2, y2 = box
+    names = _split_names(value)
+    if not names:
+        _draw_centered_y_text(draw, box, x1, "无", _font(17), muted)
+        return
+    columns = prefer_columns or (2 if len(names) <= 8 else 3)
+    columns = max(1, min(columns, 3, len(names)))
+    best_font = _font(14, bold=True)
+    best_line_h = 21
+    for size in (18, 17, 16, 15, 14, 13, 12):
+        font = _font(size, bold=True)
+        line_h = size + 7
+        rows = (len(names) + columns - 1) // columns
+        col_w = max(1, (x2 - x1 - (columns - 1) * 8) // columns)
+        if rows * line_h <= y2 - y1 and all(_text_width(name, font) <= col_w for name in names):
+            best_font = font
+            best_line_h = line_h
+            break
+    rows = (len(names) + columns - 1) // columns
+    col_w = max(1, (x2 - x1 - (columns - 1) * 8) // columns)
+    start_y = y1 + max(0, ((y2 - y1) - rows * best_line_h) // 2)
+    for index, name in enumerate(names):
+        col = index // rows
+        row = index % rows
+        draw.text((x1 + col * (col_w + 8), start_y + row * best_line_h), name, font=best_font, fill=accent)
 
 def _wrap_text(value: str, max_width: int, font: ImageFont.FreeTypeFont | ImageFont.ImageFont) -> list[str]:
     parts = [part for part in value.split("，") if part]

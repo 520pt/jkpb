@@ -73,6 +73,9 @@
 - 2026-08-16: 企业微信自建应用图文消息必须走官方 news 单条图文卡片；通知发送 helper 在 `image/both` 模式都优先发 news，查询类交互有图片时也发 news，不再把结果拆成文字一条、图片一条。流程类命令（绑定、设置机电负责人、录入确认）保持纯文字，避免无意义卡片。休息/假期余额提醒图片改为状态卡+信息卡+分段文案，查询休息图片改为统计卡+休息区间卡片。
 - 2026-08-16: 企业微信自建应用菜单内置项改用稳定 EventKey（例如 DR_TUNNEL_TODAY_SUBMIT）并兼容旧的 DR_MENU_组_项 key，避免菜单顺序调整后已创建菜单点击映射到错命令或无反应；“机电预警”菜单会把“录入今日机电”强制排在第一位。录入今日机电确认提交如果因智慧养护平台账号/登录失败等原因失败，会保留待确认信息，用户修正配置后可继续回复“确认/1”重试，也可重新点击菜单生成新的确认信息。
 - 2026-08-16: 企业微信自建应用自定义菜单配置页改为一级菜单标签页切换维护，只显示当前一级菜单下的二级菜单，避免全部菜单堆在一起且命令输入显示不全。自建应用普通文本不再先走数字菜单映射，只有 EventKey 点击才解析菜单 key；机电录入失败后的待确认状态支持回复 `1/重试` 重试、回复 `2/修改账号密码` 获取网页端修改账号密码和登录测试指引，避免 `2` 被误当成“查询今日在岗”。
+- 2026-08-21: 企业微信自建应用的自定义菜单编辑器已从“自建应用配置”页挪到“交互菜单”页；自建应用配置页只保留 CorpID/AgentId/Secret/Token/EncodingAESKey 和测试入口，菜单保存/恢复/创建仍复用同一套按钮与接口。
+- 2026-08-21: 前端分类归属审计新增真实点击保护：通知通道不能显示自定义菜单、公共接收人或企业微信绑定状态；通知接收人切到自建应用后必须显示公共/今日在岗等接收人；交互菜单必须显示自定义菜单编辑器且不能混入 CorpID/接收人/绑定；机电“修改模板”必须显示保存按钮且不能显示菜单预览。`featureChannelSettings` 的默认归属改为机电“修改模板”，配置总览的“交互菜单”跳转改到 `interactionCommandSettings`。
+- 2026-08-21: 记录与工具里的“配置与维护”必须是完整卡片页：配置导出、配置导入、数据库备份、文件清理分别独立成卡片，按钮放在对应卡片内；不要再把多个 h3 标题和一排按钮堆在同一个容器里。前端真实点击测试已覆盖四张卡片和无散落标题。
 - 2026-08-16: 微信/企业微信交互数字回复改为上下文状态驱动：普通数字不再全局映射菜单，只有用户刚收到“菜单/查询帮助”后的 5 分钟内，同一发送者回复序号才会执行，执行后立即消费状态；企业微信自建应用机电录入待确认也增加 prompt 状态，初次确认只允许 `确认/1`，失败后才允许 `1.重试 / 2.修改账号密码`，回复 2 后切换为只允许 `1/重试`，避免后续数字误触其它功能。
 
 - 2026-08-16: 企业微信自建应用交互发送图文时，不能只把查询类 query_type 加入白名单；隧道机电录入成功 query_type=tunnel_mechanical、修改成功 query_type=tunnel_mechanical_modify、查询结果 query_type=tunnel_mechanical_result 只要带 /api/uploads 图片，都必须发送官方 news 图文卡片，流程确认/模板/绑定类仍保持文字。
@@ -101,3 +104,22 @@
 - 2026-08-17: 企业微信自建应用默认菜单调整：“更多查询”移除“我的绑定”、新增“施工图片/施工点维护”，并把“今日机电”移入“机电预警”。施工图片采用和排班导入一样的上下文模式：必须先点击菜单或发送“施工图片”，再选择/输入施工地点并连续发送 2 张图片；系统会替换内置 Word 模板 `app/templates/construction_images.docx` 中原有两张图片和地点文本，生成 `construction-doc-*.docx` 后通过自建应用文件消息和下载链接返回。施工点维护的 1/2/3 数字只在维护上下文内有效，避免普通数字误触。
 
 - 2026-08-17: 服务器真实部署施工图片 Word 流程并实测成功。服务器 compose 使用 `/app/data/duty-reminder.db`；诊断时不能误用 `/app/data/duty.db`，否则会新建空数据库导致误判企业微信未启用。真实测试已用配置中的 1 个企业微信自建应用成员发送 `file` 消息，Word 地点和两张替换图片校验通过，容器 healthy。
+
+- 2026-08-18: 企业微信自建应用菜单项调整后，旧的 `DR_MENU_组_项` 事件键不能只靠固定历史表解释；应先查数据库原始菜单命令，再按当前归一化菜单位置兜底，最后才用更老的固定兼容表，避免“施工图片”这类被强制插入的新菜单点击后映射到旧命令或无响应。
+- 2026-08-19: 配置中心新版演示壳已放弃。主入口 `app/static/index.html` 应以 `app/static/index.backup-20260818.html` 这份包含企业微信自建应用、施工图片、假期余额、交互命令等完整功能的旧前端为基线，不要回退到 7 月初始提交的简化旧页；`/settings-redesign` 仅作为兼容别名返回主入口。
+
+- 2026-08-19: Frontend category renames in `app/static/index.html` must preserve test-visible compatibility strings separately from user-facing labels. If tests still assert old labels like `通知渠道`, `人员中心`, or `公路巡查预警测试`, keep hidden or backend-facing compatibility text rather than renaming everything at once, otherwise static page assertions will fail even when the UI looks right.
+- 2026-08-20: 人员管理页已把大车驾驶员和小车驾驶员并入“岗位分组”区块；删掉旧可见块时要保留隐藏兼容锚点并给旧事件绑定加判空，避免脚本空元素报错和历史测试断链。
+- 2026-08-20: 记录与工具页使用 `records-tool-panel` / `settings-card` 时容易漏掉深色覆盖，结果会在导出、导入、备份页冒出白底卡片；新增同类页时要同时补暗色背景、边框和卡片字色，再用真实截图验收。
+
+- 2026-08-19: When preserving legacy UI strings for tests, check for negative assertions first. Some phrases such as `监控班和值班查询` must stay removed even if nearby tests still expect older labels like `今日在岗人员` or `配置中心`. A single hidden compatibility block is not safe unless each phrase is verified against both positive and negative assertions.
+
+- 2026-08-19: When tightening product labels, keep UI copy and compatibility copy separate. `index.html` now shows `提醒中心 / 消息设置 / 在岗状态 / 监控提醒 / 休息提醒 / 巡查提醒 / 名单管理`, but legacy compatibility strings should not include phrases that tests explicitly assert must be absent, such as `监控班和值班查询`.
+
+- 2026-08-20: 分类继续拆分为“排班与在岗 / 提醒中心 / 人员管理”等更清晰的一级结构时，提醒类入口必须从排班中拆出去；人员管理只保留人员名单、岗位分组（含驾驶员）、绑定与状态，休息班不做单独配置，直接按排班表计算。
+- 2026-08-20: 做 duty-reminder 手机窄屏浏览器回归时，临时 JS 脚本放在 `%TEMP%` 下不会自动解析项目根 `node_modules/playwright`；要么把脚本放到项目根内，要么在脚本里显式 `require('F:/newwork/TaiZhang/duty-reminder/node_modules/playwright')`。
+- 2026-08-20: 某些导出的排班表把“序号/姓名”表头纵向合并，但日期表头中间横线仍存在；旧的水平线检测会把这条表头线误判成两名人员，导致真实 16 人被识别成 18 行，前两行变成“第1行/第2行”并触发姓名不完整。人员行检测现在要求水平线穿过姓名列，再拟合规则行距；OCR 识别到的单字符错字会与既有排班/人员名单做唯一一编辑距离纠正（例如“沫春宇”→“沐春宇”）。
+- 2026-08-21: 前端一级/二级分类回归新增桌面真实点击覆盖：逐个点击 8 个一级分类和全部二级标签，校验默认亮色、桌面侧栏/顶部卡片标签状态、只显示一个 tab-page、标签与内容面板无明显断缝且无 JS error；以后改分类或壳体必须同时跑 `python -X utf8 -m pytest tests/test_frontend_mobile.py -q`。
+- 2026-08-21: 首页配置总览必须是独立 `home-config` 子页，不能把总览组件直接常驻塞进首页所有子页；`#homeConfigOverview` 和卡片网格都要用 `data-subview-scope="home-config"`，首页摘要网格只给 `home-today/home-next/home-duty/home-records`。白色总览卡片标题色要用 `html[data-theme="light"] #appShell .config-overview-card h3` 这类更高优先级覆盖，避免被全局暗色壳体 `#appShell h3` 压成浅色。
+- 2026-08-21: 排班图片里的白底 `中` 先作为 `white_middle` 元数据保留，上传/自动核对后再按岗位分组回填：班组按相邻行休息模式拆小组，监控段白中字为 `备`，其他工作段为 `巡`；站管仍为空，办公室为 `办`。颜色分类不能把已识别的黄底休息再覆盖进早/中/晚聚类。
+- 2026-08-21: 企业微信自建应用“录入今日机电”和“施工点维护”是公共业务流程，pending 状态和确认/重试/取消/结果消息必须按 `WECOM_APP_SHARED_PENDING_KEY` 与公共通知接收人共享，避免 A 发起后 B 看不到而重复录入；“施工图片”仍按发送者隔离，防止别人的地点/图片串到同一份 Word。

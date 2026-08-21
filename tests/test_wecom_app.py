@@ -400,6 +400,32 @@ def test_wecom_app_construction_image_flow_generates_docx(tmp_path: Path, monkey
         assert z.read("word/media/image1.jpeg").startswith(b"\xff\xd8")
         assert z.read("word/media/image2.jpeg").startswith(b"\xff\xd8")
 
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "",
+        "media_id": "",
+        "event_key": "DR_CONSTRUCTION_IMAGE",
+        "from_user": "sqh",
+        "msg_type": "event",
+    })()))
+
+    assert sum("已进入施工图片模式" in content for _, content in fake.texts) == 2
+    main_module.WECOM_APP_PENDING_CONSTRUCTION_IMAGES.clear()
+
+
+def test_wecom_app_legacy_menu_key_uses_current_forced_construction_menu(tmp_path: Path):
+    repo = main_module.DutyRepository(tmp_path / "duty.db")
+
+    assert main_module._wecom_app_menu_command("DR_MENU_2_0", repo) == "施工图片"
+
+
+def test_wecom_app_all_legacy_menu_positions_map_to_current_commands(tmp_path: Path):
+    repo = main_module.DutyRepository(tmp_path / "duty.db")
+    groups = main_module._wecom_app_menu_groups(repo)
+    for group_index, group in enumerate(groups):
+        for item_index, item in enumerate(group["items"]):
+            key = f"DR_MENU_{group_index}_{item_index}"
+            assert main_module._wecom_app_menu_command(key, repo) == item["command"]
+
 
 def test_wecom_app_construction_docx_filename_sanitizes_and_dedupes(tmp_path: Path, monkeypatch):
     uploads = tmp_path / "uploads"
@@ -415,7 +441,7 @@ def test_wecom_app_construction_docx_filename_sanitizes_and_dedupes(tmp_path: Pa
     assert main_module._is_generated_upload(first)
 
 
-def test_wecom_app_construction_sites_are_pending_scoped(tmp_path: Path, monkeypatch):
+def test_wecom_app_construction_sites_are_shared_between_users(tmp_path: Path, monkeypatch):
     repo = main_module.DutyRepository(tmp_path / "duty.db")
     fake = FakeWeComAppClient()
     monkeypatch.setattr(main_module, "_wecom_app_client_from_repo", lambda repo: fake)
@@ -441,18 +467,86 @@ def test_wecom_app_construction_sites_are_pending_scoped(tmp_path: Path, monkeyp
         "content": "1",
         "media_id": "",
         "event_key": "",
-        "from_user": "sqh",
+        "from_user": "other-user",
         "msg_type": "text",
     })()))
     asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
         "content": "南涧至景东方向K88+730-K88+880上挡墙施工安全检查",
         "media_id": "",
         "event_key": "",
-        "from_user": "sqh",
+        "from_user": "other-user",
         "msg_type": "text",
     })()))
 
     assert repo.list_construction_sites()[0]["name"].startswith("南涧至景东方向")
+
+
+def test_wecom_app_construction_site_messages_use_public_targets(tmp_path: Path, monkeypatch):
+    repo = main_module.DutyRepository(tmp_path / "duty.db")
+    repo.upsert_personnel_contacts([
+        {"name": "商邱宏", "wecom_userid": "sqh"},
+        {"name": "公共接收", "wecom_userid": "public-user"},
+    ])
+    repo.save_notification_config(
+        webhook_url="",
+        wecom_app_enabled=True,
+        wecom_app_corp_id=CORP_ID,
+        wecom_app_agent_id="1000002",
+        wecom_app_secret="app-secret",
+        wecom_app_token=TOKEN,
+        wecom_app_encoding_aes_key=AES_KEY,
+        wecom_app_target_names=["公共接收"],
+    )
+    fake = FakeWeComAppClient()
+    monkeypatch.setattr(main_module, "_wecom_app_client_from_repo", lambda repo: fake)
+    main_module.WECOM_APP_PENDING_CONSTRUCTION_SITES.clear()
+
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "",
+        "media_id": "",
+        "event_key": "DR_CONSTRUCTION_SITE_MANAGE",
+        "from_user": "sqh",
+        "msg_type": "event",
+    })()))
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "1",
+        "media_id": "",
+        "event_key": "",
+        "from_user": "other-user",
+        "msg_type": "text",
+    })()))
+
+    assert any(touser == "public-user" and "施工点维护" in content for touser, content in fake.texts)
+    assert any(touser == "public-user" and "请发送要新增的施工点名称" in content for touser, content in fake.texts)
+    assert not any(touser == "sqh" and "施工点维护" in content for touser, content in fake.texts)
+
+
+def test_wecom_app_construction_image_stays_scoped_to_sender(tmp_path: Path, monkeypatch):
+    repo = main_module.DutyRepository(tmp_path / "duty.db")
+    fake = FakeWeComAppClient()
+    monkeypatch.setattr(main_module, "_wecom_app_client_from_repo", lambda repo: fake)
+    main_module.WECOM_APP_PENDING_CONSTRUCTION_IMAGES.clear()
+    main_module.WECOM_APP_PENDING_CONSTRUCTION_SITES.clear()
+
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "",
+        "media_id": "",
+        "event_key": "DR_CONSTRUCTION_IMAGE",
+        "from_user": "sqh",
+        "msg_type": "event",
+    })()))
+    fake.texts.clear()
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": main_module.DEFAULT_CONSTRUCTION_LOCATION,
+        "media_id": "",
+        "event_key": "",
+        "from_user": "other-user",
+        "msg_type": "text",
+    })()))
+
+    assert set(main_module.WECOM_APP_PENDING_CONSTRUCTION_IMAGES) == {"sqh"}
+    assert fake.texts == []
+    main_module.WECOM_APP_PENDING_CONSTRUCTION_IMAGES.clear()
 
 
 def test_wecom_app_roster_image_conflict_requires_overwrite_confirmation(tmp_path: Path, monkeypatch):
@@ -848,7 +942,10 @@ def test_wecom_app_message_binding_uses_enterprise_userid(tmp_path: Path, monkey
 def test_wecom_app_tunnel_today_submit_requires_partner_then_confirms_and_submits(tmp_path: Path, monkeypatch):
     repo = main_module.DutyRepository(tmp_path / "duty.db")
     repo.upsert_personnel_names(["商邱宏", "罗富耀"])
-    repo.upsert_personnel_contacts([{"name": "商邱宏", "wecom_userid": "shangqiuhong"}])
+    repo.upsert_personnel_contacts([
+        {"name": "商邱宏", "wecom_userid": "shangqiuhong"},
+        {"name": "罗富耀", "wecom_userid": "luofuyao"},
+    ])
     _save_simple_tunnel_template(repo)
     fake = FakeWeComAppClient()
     monkeypatch.setattr(main_module, "_wecom_app_client_from_repo", lambda repo: fake)
@@ -888,13 +985,14 @@ def test_wecom_app_tunnel_today_submit_requires_partner_then_confirms_and_submit
     fake.texts.clear()
     asyncio.run(main_module._handle_wecom_app_message(repo, uploads, message))
     assert any("请确认今日隧道机电录入信息" in content and "负责人：罗富耀" in content and "记录人：商邱宏" in content for _, content in fake.texts)
+    assert fake.texts[-1][0] == "shangqiuhong|luofuyao"
     assert not submitted
 
     fake.texts.clear()
     asyncio.run(main_module._handle_wecom_app_message(repo, uploads, type("M", (), {
         "content": "1",
         "event_key": "",
-        "from_user": "shangqiuhong",
+        "from_user": "luofuyao",
         "msg_type": "text",
     })()))
     assert submitted
@@ -902,10 +1000,64 @@ def test_wecom_app_tunnel_today_submit_requires_partner_then_confirms_and_submit
     assert submitted[0].recorder == "商邱宏"
     assert submitted[0].checkTime == date(2026, 8, 16)
     assert fake.news
-    assert fake.news[-1][0] == "shangqiuhong"
+    assert fake.news[-1][0] == "shangqiuhong|luofuyao"
     assert fake.news[-1][1]["title"] == "隧道机电录入结果"
     assert fake.news[-1][1]["description"] == "2026-08-16 隧道机电录入，共1条"
     assert all("隧道机电录入完成" not in content for _, content in fake.texts)
+
+
+def test_wecom_app_tunnel_submission_messages_use_public_targets(tmp_path: Path, monkeypatch):
+    repo = main_module.DutyRepository(tmp_path / "duty.db")
+    repo.upsert_personnel_names(["商邱宏", "罗富耀", "公共接收"])
+    repo.upsert_personnel_contacts([
+        {"name": "商邱宏", "wecom_userid": "shangqiuhong"},
+        {"name": "罗富耀", "wecom_userid": "luofuyao"},
+        {"name": "公共接收", "wecom_userid": "public-user"},
+    ])
+    repo.set_tunnel_mechanical_partner("商邱宏", "罗富耀")
+    repo.save_notification_config(
+        webhook_url="",
+        wecom_app_enabled=True,
+        wecom_app_corp_id=CORP_ID,
+        wecom_app_agent_id="1000002",
+        wecom_app_secret="app-secret",
+        wecom_app_token=TOKEN,
+        wecom_app_encoding_aes_key=AES_KEY,
+        wecom_app_target_names=["公共接收"],
+    )
+    _save_simple_tunnel_template(repo)
+    fake = FakeWeComAppClient()
+    monkeypatch.setattr(main_module, "_wecom_app_client_from_repo", lambda repo: fake)
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: date(2026, 8, 16))
+    submitted = []
+
+    async def fake_submit(repo, request, result_upload_dir=None):
+        submitted.append(request)
+        return {"success": True, "result_image_url": ""}
+
+    monkeypatch.setattr(main_module, "_submit_tunnel_mechanical", fake_submit)
+    main_module.WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.clear()
+
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "录入今日机电",
+        "event_key": "",
+        "from_user": "shangqiuhong",
+        "msg_type": "text",
+    })()))
+
+    assert any(touser == "public-user" and "请确认今日隧道机电录入信息" in content for touser, content in fake.texts)
+    assert not any(touser == "shangqiuhong" and "请确认今日隧道机电录入信息" in content for touser, content in fake.texts)
+
+    fake.texts.clear()
+    asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", type("M", (), {
+        "content": "1",
+        "event_key": "",
+        "from_user": "other-user",
+        "msg_type": "text",
+    })()))
+
+    assert submitted
+    assert any(touser == "public-user" and payload["title"] == "隧道机电录入结果" for touser, payload in fake.news)
 
 
 def test_wecom_app_tunnel_today_submit_keeps_pending_after_platform_failure(tmp_path: Path, monkeypatch):
@@ -931,7 +1083,7 @@ def test_wecom_app_tunnel_today_submit_keeps_pending_after_platform_failure(tmp_
         "msg_type": "event",
     })()
     asyncio.run(main_module._handle_wecom_app_message(repo, tmp_path / "uploads", menu_message))
-    pending_key = "shangqiuhong"
+    pending_key = main_module.WECOM_APP_SHARED_PENDING_KEY
     assert pending_key in main_module.WECOM_APP_PENDING_TUNNEL_SUBMISSIONS
 
     fake.texts.clear()

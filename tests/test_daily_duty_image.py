@@ -36,4 +36,5 @@ def test_daily_duty_image_renders_long_standby_names():
 
     assert image_bytes.startswith(b"\x89PNG")
     image = Image.open(BytesIO(image_bytes)).convert("RGB")
-    assert image.getpixel((50, 24)) == (15, 63, 58)
+    assert image.size == (1200, 675)
+    assert image.getpixel((50, 24)) == (255, 255, 255)

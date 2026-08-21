@@ -1,5 +1,5 @@
 services:
-  # duty-reminder：后台页面、提醒配置、图片生成、隧道机电查询、内置个人微信群通知。
+  # duty-reminder：后台页面、提醒配置、图片生成、隧道机电查询、企业微信通知。
   duty-reminder:
     image: ghcr.io/520pt/jkpb:latest
     container_name: duty-reminder
@@ -15,11 +15,8 @@ services:
       ADMIN_USERNAME: 520pt
       ADMIN_PASSWORD: 520pt
 
-      # 启用内置个人微信群桥，不需要再单独部署 LightAgent。
-      WECHAT_BRIDGE_ENABLED: "true"
-
-      # 微信登录态、群映射、成员映射保存目录。
-      WECHAT_BRIDGE_DATA_DIR: /app/wechat
+      # 个人微信通知通道已停用，默认不启动微信桥。
+      WECHAT_BRIDGE_ENABLED: "false"
 
       # 微信查询接口内部 token，默认即可；不要暴露给外部。
       DUTY_REMINDER_QUERY_TOKEN: 520pt
@@ -31,7 +28,7 @@ services:
       GENERATED_UPLOAD_KEEP_DAYS: "${GENERATED_UPLOAD_KEEP_DAYS:-1}"
 
       # 可选：只给智慧养护/隧道机电接口使用的代理出口。
-      # 留空不会启用；不会影响企业微信、个人微信群、GitHub 或其他外联。
+      # 留空不会启用；不会影响企业微信、GitHub 或其他外联。
       DUTY_REMINDER_TUNNEL_PROXY: "${DUTY_REMINDER_TUNNEL_PROXY:-}"
 
       # 可选：企业微信智能机器人双向交互。也可以部署后在网页「配置中心 → 消息通知渠道」填写。
@@ -45,5 +42,3 @@ services:
       # 保存上传文件和生成的提醒图片。
       - ./uploads:/app/uploads
 
-      # 保存个人微信扫码登录状态、群 ID 映射、成员 ID 映射。
-      - ./wechat:/app/wechat

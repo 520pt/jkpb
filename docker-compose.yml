@@ -15,9 +15,8 @@ services:
       MAX_UPLOAD_MB: "${MAX_UPLOAD_MB:-10}"
       UPLOAD_KEEP_DAYS: "${UPLOAD_KEEP_DAYS:-90}"
       GENERATED_UPLOAD_KEEP_DAYS: "${GENERATED_UPLOAD_KEEP_DAYS:-1}"
-      NOTIFICATION_SENDER_TYPE: "${NOTIFICATION_SENDER_TYPE:-lightagent}"
-      WECHAT_BRIDGE_ENABLED: "${WECHAT_BRIDGE_ENABLED:-true}"
-      WECHAT_BRIDGE_DATA_DIR: "${WECHAT_BRIDGE_DATA_DIR:-/app/wechat}"
+      NOTIFICATION_SENDER_TYPE: "${NOTIFICATION_SENDER_TYPE:-wecom_webhook}"
+      WECHAT_BRIDGE_ENABLED: "${WECHAT_BRIDGE_ENABLED:-false}"
       DUTY_REMINDER_QUERY_TOKEN: "${DUTY_REMINDER_QUERY_TOKEN:-520pt}"
       DUTY_REMINDER_PUBLIC_URL: "${DUTY_REMINDER_PUBLIC_URL:-}"
       DUTY_REMINDER_TUNNEL_PROXY: "${DUTY_REMINDER_TUNNEL_PROXY:-}"
@@ -32,9 +31,7 @@ services:
     volumes:
       - duty-data:/app/data
       - duty-uploads:/app/uploads
-      - duty-wechat:/app/wechat
 
 volumes:
   duty-data:
   duty-uploads:
-  duty-wechat:

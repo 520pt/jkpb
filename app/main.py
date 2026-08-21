@@ -195,6 +195,7 @@ WECOM_APP_PENDING_ROSTER_TTL_SECONDS = 5 * 60
 WECOM_APP_PENDING_CONSTRUCTION_IMAGES: dict[str, dict[str, Any]] = {}
 WECOM_APP_PENDING_CONSTRUCTION_SITES: dict[str, dict[str, Any]] = {}
 WECOM_APP_PENDING_CONSTRUCTION_TTL_SECONDS = 30 * 60
+WECOM_APP_SHARED_PENDING_KEY = "__shared__"
 WECHAT_QUERY_PENDING_MENUS: dict[str, float] = {}
 WECHAT_QUERY_MENU_TTL_SECONDS = 5 * 60
 
@@ -281,6 +282,18 @@ class NotificationTestRequest(BaseModel):
     person_name: str = "示例甲"
 
 
+class ReminderImagePreviewRequest(BaseModel):
+    preview_type: str = "monitor"
+    name: str = "商邱宏"
+    shift_code: str = "middle"
+    reminder_time: str = "07:50"
+    message: str = ""
+    daily_time: str = "07:50"
+    before_shift_minutes: int = Field(default=10, ge=0, le=1440)
+    message_template: str = DEFAULT_MESSAGE_TEMPLATE
+    send_content_mode: str = "both"
+
+
 class FeatureChannelRoomRequest(BaseModel):
     id: str = ""
     name: str = ""
@@ -309,6 +322,7 @@ class WechatInteractionConfigRequest(BaseModel):
 
 class WechatInteractionTestRequest(BaseModel):
     text: str = ""
+    channel: str = ""
     room_id: str = ""
     stable_room_id: str = ""
     room_name: str = ""
@@ -337,6 +351,10 @@ class PreviewRequest(BaseModel):
     target_date: date | None = None
 
 
+class ConstructionSiteRequest(BaseModel):
+    name: str
+
+
 class PersonnelContactRequest(BaseModel):
     name: str
     mention_mobile: str = ""
@@ -352,6 +370,10 @@ class PersonnelContactRequest(BaseModel):
 class PersonnelRequest(BaseModel):
     names: list[str] = Field(default_factory=list)
     people: list[PersonnelContactRequest] = Field(default_factory=list)
+
+
+class PersonnelRenameRequest(BaseModel):
+    name: str
 
 
 class CustomReminderRequest(BaseModel):
@@ -409,6 +431,9 @@ class DailyDutyConfigRequest(BaseModel):
     reminder_time: str = "07:50"
     big_driver_names: list[str] = []
     small_driver_names: list[str] = []
+    patrol_team_names: list[str] = []
+    station_names: list[str] = []
+    office_names: list[str] = []
     message_template: str = DEFAULT_DAILY_DUTY_TEMPLATE
     notification_room_id: str = ""
     notification_room_name: str = ""
@@ -580,10 +605,9 @@ def create_app(
     app.state.patrol_record_cache_path = base_data_dir / "patrol-warning-records-cache.json"
     app.state.scheduler_enabled = start_scheduler
     app.state.cjk_font_ready = has_cjk_font()
-    app.state.wechat_bridge_enabled = wechat_bridge_enabled()
-    app.state.wechat_bridge = get_wechat_bridge_manager() if app.state.wechat_bridge_enabled else None
-    if app.state.wechat_bridge:
-        app.state.wechat_bridge.set_message_handler(lambda message: _handle_wechat_bridge_message(repo, uploads, message))
+    # 个人微信 / LightAgent 通知通道已停用，不再启动内置微信桥。
+    app.state.wechat_bridge_enabled = False
+    app.state.wechat_bridge = None
     app.state.wecom_aibot = WeComAiBotManager()
     app.state.wecom_aibot.set_message_handler(
         lambda message: _handle_wecom_aibot_message(repo, uploads, app.state.wecom_aibot, message)
@@ -625,6 +649,19 @@ def create_app(
             static_dir / "index.html",
             headers={"Cache-Control": "no-cache, max-age=0, must-revalidate"},
         )
+
+    @app.get("/settings-redesign")
+    def settings_redesign():
+        # The standalone redesign shell was abandoned. Keep the old URL as a
+        # compatibility alias so opening it still lands on the real main UI.
+        return FileResponse(
+            static_dir / "index.html",
+            headers={"Cache-Control": "no-cache, max-age=0, must-revalidate"},
+        )
+
+    @app.get("/settings-redesign.js")
+    def settings_redesign_js():
+        raise HTTPException(status_code=410, detail="旧个人微信前端脚本已停用")
 
     @app.get("/login")
     def login_page(request: Request):
@@ -749,6 +786,8 @@ def create_app(
         target = _save_roster_upload(file, uploads)
         try:
             result = extract_roster_image(str(target))
+            result = _normalize_roster_ocr_names(repo, result)
+            result = _apply_roster_role_semantics(repo, result)
             result["source_image_url"] = f"/api/uploads/{Path(result.get('source_image_path') or target).name}"
             return result
         except HTTPException:
@@ -771,6 +810,8 @@ def create_app(
         year = request.year or _today_in_tz().year
         month = request.month or _today_in_tz().month
         checked["grid"] = _sanitize_roster_grid_for_month(list(checked.get("grid", [])), year, month)
+        checked = _apply_roster_role_semantics(repo, {"grid": checked["grid"], "issues": checked.get("issues", [])})
+        checked["issues"] = _diff_rechecked_grid(list(request.grid or []), list(checked.get("grid", [])))["issues"]
         max_day = calendar.monthrange(year, month)[1]
         checked["issues"] = [issue for issue in list(checked.get("issues", [])) if _is_valid_roster_day(str(issue.get("day") or ""), max_day)]
         return {
@@ -872,6 +913,21 @@ def create_app(
             repo.save_personnel_contacts([person.model_dump() for person in request.people])
         return {"success": True, "names": repo.list_personnel_names(), "people": repo.list_personnel()}
 
+    @app.delete("/api/personnel/{name}")
+    def delete_personnel(name: str):
+        if not repo.delete_personnel(name):
+            raise HTTPException(status_code=404, detail="人员不存在")
+        return {"success": True, "names": repo.list_personnel_names(), "people": repo.list_personnel()}
+
+    @app.put("/api/personnel/{name}")
+    def rename_personnel(name: str, request: PersonnelRenameRequest):
+        try:
+            if not repo.rename_personnel(name, request.name):
+                raise HTTPException(status_code=404, detail="人员不存在")
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"success": True, "names": repo.list_personnel_names(), "people": repo.list_personnel()}
+
     @app.get("/api/custom-reminders")
     def list_custom_reminders():
         return {"reminders": repo.list_custom_reminders()}
@@ -887,6 +943,28 @@ def create_app(
         payload["message"] = normalized_message
         reminder_id = repo.save_custom_reminder(**payload)
         return {"success": True, "id": reminder_id, "reminders": repo.list_custom_reminders()}
+
+    @app.post("/api/reminder-image-preview")
+    def reminder_image_preview(request: ReminderImagePreviewRequest):
+        event = _build_reminder_image_preview_event(repo, request)
+        return Response(content=render_shift_reminder_image(event), media_type="image/png")
+
+    @app.post("/api/reminder-channel-preview")
+    def reminder_channel_preview(request: ReminderImagePreviewRequest):
+        event = _build_reminder_image_preview_event(repo, request)
+        config = _public_notification_config(repo.get_notification_config())
+        sender = str(config.get("effective_sender_type") or config.get("sender_type") or "wecom_webhook")
+        content = event.content
+        intro = _shift_reminder_intro_content(event, personal_wechat=False) if _event_can_send_image(event) else content
+        return {
+            "success": True,
+            "sender_type": sender,
+            "sender_label": _notification_sender_label(sender),
+            "title": _event_news_title(event, intro),
+            "description": _news_text(intro, 96),
+            "mode": _event_send_content_mode(event, "both"),
+            "content": content,
+        }
 
     @app.post("/api/custom-reminders/test")
     async def test_custom_reminder(request: CustomReminderTestRequest):
@@ -1299,6 +1377,27 @@ def create_app(
     async def tunnel_mechanical_result_image(request: TunnelMechanicalResultImageRequest):
         return await _query_tunnel_mechanical_result_image(repo, request, uploads)
 
+    @app.get("/api/construction-sites")
+    def list_construction_sites():
+        return {"sites": repo.list_construction_sites()}
+
+    @app.post("/api/construction-sites")
+    def add_construction_site(request: ConstructionSiteRequest):
+        return {"success": True, "site": repo.add_construction_site(request.name)}
+
+    @app.put("/api/construction-sites/{site_id}")
+    def update_construction_site(site_id: int, request: ConstructionSiteRequest):
+        site = repo.update_construction_site(site_id, request.name)
+        if not site:
+            raise HTTPException(status_code=404, detail="施工点不存在")
+        return {"success": True, "site": site}
+
+    @app.delete("/api/construction-sites/{site_id}")
+    def delete_construction_site(site_id: int):
+        if not repo.delete_construction_site(site_id):
+            raise HTTPException(status_code=404, detail="施工点不存在")
+        return {"success": True}
+
     @app.get("/api/notification-config")
     def get_notification_config():
         return {"config": _public_notification_config(repo.get_notification_config())}
@@ -1306,7 +1405,7 @@ def create_app(
     @app.post("/api/notification-config")
     def save_notification_config(request: NotificationConfigRequest):
         existing = _notification_config_with_env_defaults(repo.get_notification_config())
-        sender_type = request.sender_type.strip() or str(existing.get("sender_type", "wecom_webhook"))
+        sender_type = _normalize_notification_sender_type(request.sender_type.strip() or str(existing.get("sender_type", "wecom_webhook")))
         webhook_url = request.webhook_url.strip() or str(existing.get("webhook_url", "")).strip()
         wecom_aibot_id = request.wecom_aibot_id.strip() or str(existing.get("wecom_aibot_id", "")).strip()
         wecom_aibot_secret = request.wecom_aibot_secret.strip() or str(existing.get("wecom_aibot_secret", "")).strip()
@@ -1320,24 +1419,11 @@ def create_app(
         )
         wecom_app_target_names = request.wecom_app_target_names
         wecom_app_function_target_names = request.wecom_app_function_target_names
-        lightagent_url = request.lightagent_url.strip() or str(existing.get("lightagent_url", "")).strip()
-        lightagent_token = request.lightagent_token.strip() or str(existing.get("lightagent_token", "")).strip()
-        request_targets = _normalize_feature_channel_rooms(
-            [
-                {"id": room.id, "name": room.name}
-                for room in request.lightagent_targets
-            ]
-        )
-        if request.lightagent_target.strip():
-            request_targets = _normalize_feature_channel_rooms(
-                request_targets + [{"id": request.lightagent_target.strip()}]
-            )
-        existing_targets = _normalize_feature_channel_rooms(existing.get("lightagent_targets"))
-        existing_legacy_target = str(existing.get("lightagent_target") or "").strip()
-        if existing_legacy_target:
-            existing_targets = _normalize_feature_channel_rooms(existing_targets + [{"id": existing_legacy_target}])
-        lightagent_targets = request_targets or existing_targets
-        lightagent_target = lightagent_targets[0]["id"] if lightagent_targets else ""
+        # 旧个人微信/LightAgent 通道已下线：保存时强制清空旧目标，避免导入旧配置后页面或调度继续认为可用。
+        lightagent_url = ""
+        lightagent_token = ""
+        lightagent_targets: list[dict[str, str]] = []
+        lightagent_target = ""
         repo.save_notification_config(
             sender_type=sender_type,
             webhook_url=webhook_url,
@@ -1477,10 +1563,10 @@ def create_app(
         message = parse_wecom_app_message(crypto.decrypt(encrypted))
         command_text = _wecom_app_message_command_text(message, repo)
         callback_query = _wecom_app_query_from_message(message, command_text)
-        callback_pending = WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.get(_wecom_app_pending_key(callback_query))
+        callback_pending = WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.get(_wecom_app_shared_pending_key())
         roster_pending = WECOM_APP_PENDING_ROSTER_IMPORTS.get(_wecom_app_pending_key(callback_query))
         construction_image_pending = WECOM_APP_PENDING_CONSTRUCTION_IMAGES.get(_wecom_app_pending_key(callback_query))
-        construction_site_pending = WECOM_APP_PENDING_CONSTRUCTION_SITES.get(_wecom_app_pending_key(callback_query))
+        construction_site_pending = WECOM_APP_PENDING_CONSTRUCTION_SITES.get(_wecom_app_shared_pending_key())
         is_pending_confirm = (
             _wecom_app_pending_allows_confirm(callback_pending)
             and _is_wecom_app_pending_confirm_text(command_text)
@@ -1569,56 +1655,15 @@ def create_app(
 
     @app.get("/api/feature-channel-config")
     def get_feature_channel_config():
-        return {"config": _public_feature_channel_config(repo.get_feature_channel_config())}
+        raise HTTPException(status_code=410, detail="旧个人微信交互通道已停用，请使用企业微信自建应用")
 
     @app.post("/api/feature-channel-config")
     def save_feature_channel_config(request: FeatureChannelConfigRequest):
-        existing = _feature_channel_config_with_env_defaults(repo.get_feature_channel_config())
-        lightagent_web_url = request.lightagent_web_url.strip() or str(existing.get("lightagent_web_url", "")).strip()
-        lightagent_web_password = request.lightagent_web_password.strip() or str(existing.get("lightagent_web_password", "")).strip()
-        rooms = _normalize_feature_channel_rooms(
-            [room.model_dump() for room in request.wechat_group_rooms]
-            or [
-                {
-                    "id": request.wechat_group_room_id,
-                    "name": request.wechat_group_room_name,
-                }
-            ]
-        )
-        repo.save_feature_channel_config(
-            enabled=True,
-            lightagent_web_url=lightagent_web_url,
-            lightagent_web_password=lightagent_web_password,
-            wechat_group_room_id=request.wechat_group_room_id.strip(),
-            wechat_group_room_name=request.wechat_group_room_name.strip(),
-            wechat_group_rooms=rooms,
-            allow_tunnel_mechanical=True,
-            allow_duty_query=True,
-            allow_roster_import=True,
-        )
-        lightagent_sync = _sync_lightagent_feature_channel_rooms(repo, True, rooms)
-        return {
-            "success": True,
-            "config": _public_feature_channel_config(repo.get_feature_channel_config()),
-            "lightagent_sync": lightagent_sync,
-        }
+        raise HTTPException(status_code=410, detail="旧个人微信交互通道已停用，请使用企业微信自建应用")
 
     @app.post("/api/feature-channel-config/test")
     async def test_feature_channel_config():
-        room_id = next(iter(_notification_wechat_target_room_ids(repo)), "")
-        if not room_id:
-            config = _feature_channel_config_with_env_defaults(repo.get_feature_channel_config())
-            room_id = next(iter(_feature_channel_config_room_ids(config)), "")
-        query = WechatQueryRequest(
-            text="隧道机电",
-            room_id=room_id,
-            stable_room_id=room_id,
-            sender_id="feature-channel-test",
-            runtime_sender_id="feature-channel-test",
-            sender_name="功能通道测试",
-        )
-        result = await _build_wechat_query_response(repo, query, uploads=uploads)
-        return {"success": True, "result": result}
+        raise HTTPException(status_code=410, detail="旧个人微信交互通道已停用，请使用企业微信自建应用")
 
     @app.get("/api/wechat-interaction-config")
     def get_wechat_interaction_config():
@@ -1678,11 +1723,13 @@ def create_app(
 
     @app.post("/api/wechat-interaction-config/simulate")
     async def simulate_wechat_interaction(request: WechatInteractionTestRequest):
+        if str(request.channel or "").strip().lower() in {"lightagent", "wechat_bridge", "personal_wechat"}:
+            raise HTTPException(status_code=410, detail="旧个人微信交互通道已停用，请使用企业微信自建应用")
         room_id = str(request.stable_room_id or request.room_id or "").strip()
         config_room_ids = _notification_wechat_target_room_ids(repo)
         if config_room_ids and room_id and room_id not in config_room_ids:
             room_name = _notification_wechat_target_room_label(repo) or "未命名微信群"
-            raise HTTPException(status_code=403, detail=f"当前微信群不是通知渠道配置的个人微信群：{room_name}")
+            raise HTTPException(status_code=403, detail=f"当前来源不在允许的交互范围内：{room_name}")
         if not room_id:
             room_id = next(iter(config_room_ids), "")
         query = WechatQueryRequest(
@@ -1712,8 +1759,13 @@ def create_app(
     def get_wechat_interaction_logs(limit: int = 20):
         return {"logs": _public_wechat_interaction_logs(repo, repo.list_wechat_interaction_logs(limit))}
 
+
+    def _disabled_personal_wechat_channel():
+        raise HTTPException(status_code=410, detail="该通知通道已停用，请使用企业微信自建应用或企业微信群机器人")
+
     @app.get("/api/lightagent/wechat/status")
     def lightagent_wechat_status():
+        _disabled_personal_wechat_channel()
         if app.state.wechat_bridge:
             return app.state.wechat_bridge.status_snapshot()
         status = _lightagent_web_request(repo, "GET", "/api/wechat_group/qrlogin")
@@ -1738,6 +1790,7 @@ def create_app(
 
     @app.post("/api/lightagent/wechat/refresh")
     def refresh_lightagent_wechat():
+        _disabled_personal_wechat_channel()
         if app.state.wechat_bridge:
             app.state.wechat_bridge.refresh_rooms()
             return app.state.wechat_bridge.status_snapshot()
@@ -1745,6 +1798,7 @@ def create_app(
 
     @app.post("/api/lightagent/wechat/refresh-qr")
     def refresh_lightagent_wechat_qr():
+        _disabled_personal_wechat_channel()
         if app.state.wechat_bridge:
             app.state.wechat_bridge.refresh_login_qr()
             return app.state.wechat_bridge.status_snapshot()
@@ -1752,6 +1806,7 @@ def create_app(
 
     @app.get("/api/lightagent/wechat/rooms")
     def lightagent_wechat_rooms():
+        _disabled_personal_wechat_channel()
         if app.state.wechat_bridge:
             app.state.wechat_bridge.refresh_rooms()
             snapshot = app.state.wechat_bridge.status_snapshot()
@@ -1783,6 +1838,7 @@ def create_app(
 
     @app.get("/api/lightagent/wechat/members")
     def lightagent_wechat_members(room_id: str):
+        _disabled_personal_wechat_channel()
         room_text = str(room_id or "").strip()
         if not room_text:
             raise HTTPException(status_code=400, detail="room_id is required")
@@ -1986,6 +2042,224 @@ def _has_unconfirmed_roster_names(grid: list[dict[str, Any]]) -> bool:
     )
 
 
+def _normalize_roster_ocr_names(repo: DutyRepository, result: dict[str, Any]) -> dict[str, Any]:
+    """Correct only unambiguous OCR name typos against existing names.
+
+    OCR can turn one Chinese character into a visually similar character, for
+    example ``沐`` into ``沫``. Keeping that typo would create a new person and
+    break reminders. Unknown or ambiguous names remain untouched and still
+    require manual confirmation.
+    """
+
+    grid = list(result.get("grid") or [])
+    if not grid:
+        return result
+    known: set[str] = set()
+    try:
+        known.update(str(name or "").strip() for name in repo.list_personnel_names())
+        for roster in repo.list_roster_months():
+            known.update(str(row.get("name") or "").strip() for row in roster.get("grid") or [])
+    except Exception:
+        LOGGER.exception("排班姓名 OCR 纠正读取已有人员失败")
+    known = {name for name in known if name and not re.fullmatch(r"第\d+行", name)}
+    if not known:
+        return result
+
+    corrections: list[dict[str, str]] = []
+    normalized_grid: list[dict[str, Any]] = []
+    for row in grid:
+        next_row = {**row}
+        raw_name = str(row.get("name") or "").strip()
+        matched = _match_known_roster_name(raw_name, known)
+        if matched and matched != raw_name:
+            next_row["name"] = matched
+            corrections.append({"before": raw_name, "after": matched})
+        normalized_grid.append(next_row)
+    return {**result, "grid": normalized_grid, "name_corrections": corrections}
+
+
+def _apply_roster_role_semantics(repo: DutyRepository, result: dict[str, Any]) -> dict[str, Any]:
+    """Translate ambiguous white ``中`` cells after the row name is known.
+
+    The image parser deliberately keeps these cells as blank plus metadata: a
+    white ``中`` is visually the same as an ordinary empty cell, and the
+    meaning depends on the configured role.  Role names come from the user's
+    personnel configuration, never from hard-coded people.
+    """
+
+    grid = [dict(row) for row in list(result.get("grid") or [])]
+    if not grid:
+        return result
+    config = repo.get_daily_duty_config()
+    station_names = _configured_name_set(config.get("station_names"))
+    office_names = _configured_name_set(config.get("office_names"))
+    patrol_names = _configured_name_set(config.get("patrol_team_names"))
+    if not (station_names or office_names or patrol_names):
+        return {**result, "grid": grid}
+
+    role_by_name = {name: "patrol" for name in patrol_names}
+    role_by_name.update({name: "office" for name in office_names})
+    role_by_name.update({name: "station" for name in station_names})
+    patrol_rows = [index for index, row in enumerate(grid) if role_by_name.get(str(row.get("name") or "").strip()) == "patrol"]
+    patrol_modes = _infer_patrol_white_cell_modes(grid, patrol_rows)
+    changed = False
+    for row_index, row in enumerate(grid):
+        name = str(row.get("name") or "").strip()
+        role = role_by_name.get(name)
+        if role not in {"office", "station", "patrol"}:
+            continue
+        next_row = {**row, "days": dict(row.get("days", {})), "cell_meta": dict(row.get("cell_meta", {}))}
+        for day, meta in next_row["cell_meta"].items():
+            if not (isinstance(meta, dict) and meta.get("white_middle")):
+                continue
+            if role == "office":
+                label = "办"
+            elif role == "station":
+                label = ""
+            else:
+                label = patrol_modes.get((row_index, str(day)), "巡")
+            if next_row["days"].get(str(day), "") != label:
+                next_row["days"][str(day)] = label
+                changed = True
+        grid[row_index] = next_row
+    return {**result, "grid": grid, "role_semantics_applied": changed}
+
+
+def _configured_name_set(values: Any) -> set[str]:
+    return {str(value or "").strip() for value in list(values or []) if str(value or "").strip()}
+
+
+def _infer_patrol_white_cell_modes(
+    grid: list[dict[str, Any]], patrol_rows: list[int]
+) -> dict[tuple[int, str], str]:
+    """Infer patrol/standby from each configured team's repeated roster block.
+
+    A patrol team is represented by consecutive configured rows.  In a block,
+    the largest contiguous run of real monitor codes (早/中/晚) is the monitor
+    phase; ambiguous white cells inside the same phase are standby, while the
+    other ambiguous work phase is patrol.  This handles per-person standby
+    exceptions without using names or calendar-specific constants.
+    """
+
+    if not patrol_rows:
+        return {}
+    modes: dict[tuple[int, str], str] = {}
+    groups: list[list[int]] = []
+    current: list[int] = []
+    for row_index in patrol_rows:
+        if current and row_index != current[-1] + 1:
+            groups.append(current)
+            current = []
+        current.append(row_index)
+    if current:
+        groups.append(current)
+
+    split_groups: list[list[int]] = []
+    for group in groups:
+        split_groups.extend(_split_patrol_rows_by_rest_pattern(grid, group))
+
+    for group in split_groups:
+        day_count = max((len(dict(grid[index].get("days", {}))) for index in group), default=0)
+        monitor_days = {
+            day
+            for day in range(1, day_count + 1)
+            if any(str(dict(grid[index].get("days", {})).get(str(day), "")).strip() in {"早", "中", "晚", "夜"} for index in group)
+        }
+        monitor_runs = _contiguous_day_runs(monitor_days)
+        for row_index in group:
+            row = grid[row_index]
+            for raw_day, meta in dict(row.get("cell_meta", {})).items():
+                if not isinstance(meta, dict) or not meta.get("white_middle"):
+                    continue
+                try:
+                    day = int(raw_day)
+                except (TypeError, ValueError):
+                    continue
+                in_monitor_phase = any(start <= day <= end for start, end in monitor_runs)
+                modes[(row_index, str(raw_day))] = "备" if in_monitor_phase else "巡"
+    return modes
+
+
+def _split_patrol_rows_by_rest_pattern(grid: list[dict[str, Any]], rows: list[int]) -> list[list[int]]:
+    groups: list[list[int]] = []
+    current: list[int] = []
+    previous_rest: set[int] | None = None
+    for row_index in rows:
+        rest_days = _row_rest_days(grid[row_index])
+        if current and not _similar_rest_days(previous_rest or set(), rest_days):
+            groups.append(current)
+            current = []
+        current.append(row_index)
+        previous_rest = rest_days
+    if current:
+        groups.append(current)
+    return groups
+
+
+def _row_rest_days(row: dict[str, Any]) -> set[int]:
+    days: set[int] = set()
+    for raw_day, code in dict(row.get("days", {})).items():
+        if not _is_rest_code(str(code)):
+            continue
+        try:
+            days.add(int(raw_day))
+        except (TypeError, ValueError):
+            continue
+    return days
+
+
+def _similar_rest_days(left: set[int], right: set[int]) -> bool:
+    if not left or not right:
+        return True
+    return len(left & right) / max(1, min(len(left), len(right))) >= 0.5
+
+
+def _contiguous_day_runs(days: set[int]) -> list[tuple[int, int]]:
+    runs: list[tuple[int, int]] = []
+    start: int | None = None
+    previous: int | None = None
+    for day in sorted(days):
+        if start is None:
+            start = previous = day
+            continue
+        if previous is not None and day == previous + 1:
+            previous = day
+            continue
+        runs.append((start, previous if previous is not None else start))
+        start = previous = day
+    if start is not None:
+        runs.append((start, previous if previous is not None else start))
+    return runs
+
+
+def _match_known_roster_name(raw_name: str, known_names: set[str]) -> str:
+    if not raw_name or re.fullmatch(r"第\d+行", raw_name) or raw_name in known_names:
+        return raw_name
+    candidates = [name for name in known_names if len(name) == len(raw_name)]
+    if not candidates:
+        return raw_name
+    scored = sorted((_levenshtein_distance(raw_name, name), name) for name in candidates)
+    best_distance = scored[0][0]
+    best = [name for distance, name in scored if distance == best_distance]
+    return best[0] if best_distance == 1 and len(best) == 1 else raw_name
+
+
+def _levenshtein_distance(left: str, right: str) -> int:
+    previous = list(range(len(right) + 1))
+    for row_index, left_char in enumerate(left, start=1):
+        current = [row_index]
+        for column_index, right_char in enumerate(right, start=1):
+            current.append(
+                min(
+                    current[-1] + 1,
+                    previous[column_index] + 1,
+                    previous[column_index - 1] + (left_char != right_char),
+                )
+            )
+        previous = current
+    return previous[-1]
+
+
 def _sanitize_roster_grid_for_month(grid: list[dict[str, Any]], year: int, month: int) -> list[dict[str, Any]]:
     max_day = calendar.monthrange(int(year), int(month))[1]
     sanitized: list[dict[str, Any]] = []
@@ -1996,6 +2270,11 @@ def _sanitize_roster_grid_for_month(grid: list[dict[str, Any]], year: int, month
         next_row["days"] = {str(day): value for day, value in days.items() if _is_valid_roster_day(str(day), max_day)}
         if boxes:
             next_row["boxes"] = {str(day): value for day, value in boxes.items() if _is_valid_roster_day(str(day), max_day)}
+        cell_meta = dict(row.get("cell_meta", {}))
+        if cell_meta:
+            next_row["cell_meta"] = {
+                str(day): value for day, value in cell_meta.items() if _is_valid_roster_day(str(day), max_day)
+            }
         sanitized.append(next_row)
     return sanitized
 
@@ -2251,7 +2530,8 @@ def _safe_next_url(next_url: str) -> str:
 
 def _normalize_notification_sender_type(value: str) -> str:
     normalized = str(value or "wecom_webhook").strip().lower()
-    return normalized if normalized in {"wecom_webhook", "lightagent"} else "wecom_webhook"
+    # 旧通知通道已停用，旧配置统一回落到企业微信群机器人。
+    return normalized if normalized in {"wecom_webhook"} else "wecom_webhook"
 
 
 def _normalize_notification_mention_mode(value: str) -> str:
@@ -2260,25 +2540,6 @@ def _normalize_notification_mention_mode(value: str) -> str:
 
 
 def _env_notification_config_defaults() -> dict[str, Any]:
-    lightagent_base_url = os.getenv("LIGHTAGENT_BASE_URL", "").strip().rstrip("/")
-    lightagent_push_url = f"{lightagent_base_url}/api/push/send" if lightagent_base_url else ""
-    env_target_ids = _split_env_list(
-        os.getenv("LIGHTAGENT_NOTIFY_TARGETS", "").strip()
-        or os.getenv("LIGHTAGENT_TARGETS", "").strip()
-    )
-    env_target_names = _split_env_list(os.getenv("LIGHTAGENT_NOTIFY_TARGET_NAMES", ""))
-    env_targets = _normalize_feature_channel_rooms(
-        [
-            {"id": target_id, "name": env_target_names[index] if index < len(env_target_names) else ""}
-            for index, target_id in enumerate(env_target_ids)
-        ]
-    )
-    single_target = (
-        os.getenv("LIGHTAGENT_NOTIFY_TARGET", "").strip()
-        or os.getenv("LIGHTAGENT_TARGET", "").strip()
-    )
-    if single_target:
-        env_targets = _normalize_feature_channel_rooms(env_targets + [{"id": single_target}])
     return {
         "sender_type": os.getenv("NOTIFICATION_SENDER_TYPE", "").strip(),
         "webhook_url": os.getenv("WECOM_WEBHOOK_URL", "").strip(),
@@ -2291,17 +2552,11 @@ def _env_notification_config_defaults() -> dict[str, Any]:
         "wecom_app_secret": os.getenv("WECOM_APP_SECRET", "").strip() or os.getenv("WECOM_CORP_SECRET", "").strip(),
         "wecom_app_token": os.getenv("WECOM_APP_TOKEN", "").strip(),
         "wecom_app_encoding_aes_key": os.getenv("WECOM_APP_ENCODING_AES_KEY", "").strip(),
-        "lightagent_url": (
-            os.getenv("LIGHTAGENT_NOTIFY_URL", "").strip()
-            or os.getenv("LIGHTAGENT_PUSH_URL", "").strip()
-            or lightagent_push_url
-        ),
-        "lightagent_token": (
-            os.getenv("LIGHTAGENT_NOTIFY_TOKEN", "").strip()
-            or os.getenv("LIGHTAGENT_PUSH_TOKEN", "").strip()
-        ),
-        "lightagent_target": single_target,
-        "lightagent_targets": env_targets,
+        # 旧个人微信/LightAgent 环境变量不再参与默认配置。
+        "lightagent_url": "",
+        "lightagent_token": "",
+        "lightagent_target": "",
+        "lightagent_targets": [],
         "mention_mode": os.getenv("NOTIFICATION_MENTION_MODE", "").strip(),
         "mention_targets": os.getenv("NOTIFICATION_MENTION_TARGETS", "").strip(),
     }
@@ -2326,13 +2581,9 @@ def _notification_config_with_env_defaults(config: dict[str, Any]) -> dict[str, 
         else bool(lightagent_targets and (wechat_bridge_enabled() or str(merged.get("lightagent_url", "")).strip()))
     )
     env_sender_type = _normalize_notification_sender_type(env_config["sender_type"]) if env_config["sender_type"] else ""
-    has_env_lightagent = bool(env_config["lightagent_targets"] and (wechat_bridge_enabled() or env_config["lightagent_url"]))
     env_can_select_sender = bool(env_sender_type and not has_active_config)
     if env_can_select_sender:
         sender_type = env_sender_type
-        merged["sender_type"] = sender_type
-    elif not has_active_config and has_env_lightagent:
-        sender_type = env_sender_type or "lightagent"
         merged["sender_type"] = sender_type
 
     for key in ("webhook_url", "lightagent_url", "lightagent_token", "lightagent_target", "mention_mode", "mention_targets"):
@@ -2348,13 +2599,11 @@ def _notification_config_with_env_defaults(config: dict[str, Any]) -> dict[str, 
             merged[key] = env_config[key]
     if env_config["wecom_app_enabled"]:
         merged["wecom_app_enabled"] = env_config["wecom_app_enabled"].lower() in {"1", "true", "yes", "on"}
-    if env_config["lightagent_targets"] and (
-        env_can_select_sender or not _normalize_feature_channel_rooms(merged.get("lightagent_targets"))
-    ):
-        merged["lightagent_targets"] = env_config["lightagent_targets"]
-        merged["lightagent_target"] = env_config["lightagent_targets"][0]["id"]
-    else:
-        merged["lightagent_targets"] = lightagent_targets
+    # 旧个人微信/LightAgent 通道已下线：无论数据库或环境变量里是否有旧值，对外和调度都视为未配置。
+    merged["lightagent_url"] = ""
+    merged["lightagent_token"] = ""
+    merged["lightagent_target"] = ""
+    merged["lightagent_targets"] = []
     return merged
 
 
@@ -2477,7 +2726,7 @@ def _public_feature_channel_config(config: dict[str, Any]) -> dict[str, Any]:
     primary_room = rooms[0] if rooms else {}
     return {
         "enabled": True,
-        "wechat_bridge_enabled": wechat_bridge_enabled(),
+        "wechat_bridge_enabled": False,
         "lightagent_web_url": str(config.get("lightagent_web_url") or ""),
         "lightagent_web_password_configured": bool(str(config.get("lightagent_web_password") or "").strip()),
         "wechat_group_room_id": str(primary_room.get("id") or ""),
@@ -2540,11 +2789,7 @@ def _wechat_interaction_config(repo: DutyRepository) -> dict[str, Any]:
 
 def _public_wechat_interaction_config(repo: DutyRepository) -> dict[str, Any]:
     config = _wechat_interaction_config(repo)
-    notification = _notification_config_with_env_defaults(repo.get_notification_config())
-    rooms = _normalize_feature_channel_rooms(notification.get("lightagent_targets"))
-    legacy = str(notification.get("lightagent_target") or "").strip()
-    if legacy:
-        rooms = _normalize_feature_channel_rooms(rooms + [{"id": legacy}])
+    rooms: list[dict[str, str]] = []
     return {
         **config,
         "defaults": copy.deepcopy(DEFAULT_WECHAT_INTERACTION_CONFIG),
@@ -2594,9 +2839,25 @@ def _wecom_app_menu_command(value: str, repo: DutyRepository | None = None) -> s
         raw_command = _wecom_app_raw_menu_command(repo, int(legacy_match.group(1)), int(legacy_match.group(2)))
         if raw_command:
             return raw_command
+        current_command = _wecom_app_group_menu_command(repo, int(legacy_match.group(1)), int(legacy_match.group(2)))
+        if current_command:
+            return current_command
     if text in WECOM_APP_LEGACY_INDEX_MENU_COMMANDS:
         return WECOM_APP_LEGACY_INDEX_MENU_COMMANDS[text]
     return text
+
+
+def _wecom_app_group_menu_command(repo: DutyRepository, group_index: int, item_index: int) -> str:
+    try:
+        groups = _wecom_app_menu_groups(repo)
+    except Exception:
+        return ""
+    if not (0 <= group_index < len(groups)):
+        return ""
+    items = groups[group_index].get("items") or []
+    if not (0 <= item_index < len(items)):
+        return ""
+    return str(items[item_index].get("command") or "").strip()
 
 
 def _wecom_app_raw_menu_command(repo: DutyRepository, group_index: int, item_index: int) -> str:
@@ -2984,12 +3245,7 @@ def _lightagent_web_request(
 
 
 def _sync_lightagent_notification_targets(repo: DutyRepository, sender_type: str, targets: list[dict[str, str]]) -> dict[str, Any]:
-    if _normalize_notification_sender_type(sender_type) != "lightagent":
-        return {"success": True, "skipped": True, "reason": "not_lightagent"}
-    room_ids = [str(room.get("id") or "").strip() for room in targets or [] if str(room.get("id") or "").strip()]
-    if not room_ids:
-        return {"success": True, "skipped": True, "reason": "empty_targets"}
-    return _sync_lightagent_wechat_group_targets(repo, room_ids, source="notification")
+    return {"success": True, "skipped": True, "reason": "personal_wechat_disabled"}
 
 
 def _sync_lightagent_feature_channel_rooms(
@@ -2997,12 +3253,7 @@ def _sync_lightagent_feature_channel_rooms(
     enabled: bool,
     rooms: list[dict[str, str]],
 ) -> dict[str, Any]:
-    if not enabled:
-        return {"success": True, "skipped": True, "reason": "feature_channel_disabled"}
-    room_ids = [str(room.get("id") or "").strip() for room in rooms or [] if str(room.get("id") or "").strip()]
-    if not room_ids:
-        return {"success": True, "skipped": True, "reason": "empty_rooms"}
-    return _sync_lightagent_wechat_group_targets(repo, room_ids, source="feature_channel")
+    return {"success": True, "skipped": True, "reason": "personal_wechat_disabled"}
 
 
 def _sync_lightagent_wechat_group_targets(
@@ -3103,7 +3354,7 @@ def _sync_lightagent_wechat_group_targets(
                 "targets": target_ids,
                 "missing_targets": missing_targets,
                 "selected_room_ids": returned_ids,
-                "message": "LightAgent 已响应，但未确认目标群已进入个人微信群选中列表",
+                "message": "LightAgent 已响应，但未确认目标群已进入当前选中列表",
             }
         returned_rooms = _normalize_lightagent_wechat_rooms(returned_extra.get("rooms") or extra.get("rooms") or [])
         if returned_rooms:
@@ -3341,7 +3592,7 @@ def _require_feature_channel_for_wechat_query(
     configured_room_ids = _notification_wechat_target_room_ids(repo)
     if configured_room_ids and not (configured_room_ids & _feature_channel_query_room_ids(query)):
         room_name = _notification_wechat_target_room_label(repo) or "未命名微信群"
-        raise HTTPException(status_code=403, detail=f"当前微信群不是通知渠道配置的个人微信群：{room_name}")
+        raise HTTPException(status_code=403, detail=f"当前来源不在允许的交互范围内：{room_name}")
 
 
 def _require_feature_channel_for_roster_import(
@@ -3353,7 +3604,7 @@ def _require_feature_channel_for_roster_import(
     supplied = {str(room_id or "").strip(), str(stable_room_id or "").strip()} - {""}
     if configured_room_ids and not (configured_room_ids & supplied):
         room_name = _notification_wechat_target_room_label(repo) or "未命名微信群"
-        raise HTTPException(status_code=403, detail=f"当前微信群不是通知渠道配置的个人微信群：{room_name}")
+        raise HTTPException(status_code=403, detail=f"当前来源不在允许的交互范围内：{room_name}")
 
 
 def _build_wechat_roster_import_response(
@@ -3367,6 +3618,8 @@ def _build_wechat_roster_import_response(
     try:
         result = extract_roster_image(str(target))
         result = _auto_recheck_wechat_roster_result(target, result)
+        result = _normalize_roster_ocr_names(repo, result)
+        result = _apply_roster_role_semantics(repo, result)
     except Exception as exc:
         target.unlink(missing_ok=True)
         LOGGER.exception("微信群排班表识别失败：%s", exc)
@@ -3398,6 +3651,7 @@ def _build_wechat_roster_import_response(
         source_image_path=str(result.get("source_image_path") or target),
         overwrite=overwrite,
         ocr_status=str(result.get("ocr_status") or ""),
+        name_ocr_status=str(result.get("name_ocr_status") or ""),
         source_image_url=str(result.get("source_image_url") or ""),
         issues=list(result.get("issues") or []),
     )
@@ -3412,6 +3666,8 @@ def _build_wechat_roster_import_response_from_path(
     try:
         result = extract_roster_image(str(source_path))
         result = _auto_recheck_wechat_roster_result(source_path, result)
+        result = _normalize_roster_ocr_names(repo, result)
+        result = _apply_roster_role_semantics(repo, result)
     except Exception as exc:
         LOGGER.exception("企业微信排班表识别失败：%s", exc)
         return {
@@ -3675,7 +3931,7 @@ def _build_wecom_app_construction_image_prompt(repo: DutyRepository, query: Wech
 
 def _build_wecom_app_construction_site_menu(repo: DutyRepository, query: WechatQueryRequest) -> str:
     sites = repo.list_construction_sites()
-    WECOM_APP_PENDING_CONSTRUCTION_SITES[_wecom_app_pending_key(query)] = {
+    WECOM_APP_PENDING_CONSTRUCTION_SITES[_wecom_app_shared_pending_key()] = {
         "expires_at": time.time() + WECOM_APP_PENDING_CONSTRUCTION_TTL_SECONDS,
         "stage": "action",
     }
@@ -3710,37 +3966,38 @@ async def _handle_wecom_app_construction_text(
 ) -> bool:
     del uploads
     userid = str(message.from_user or "").strip()
-    key = _wecom_app_pending_key(query)
+    user_key = _wecom_app_pending_key(query)
     if _is_wecom_app_construction_image_request(text):
         await client.send_text(userid, _build_wecom_app_construction_image_prompt(repo, query))
         return True
     if _is_wecom_app_construction_site_request(text):
-        await client.send_text(userid, _build_wecom_app_construction_site_menu(repo, query))
+        await _send_wecom_app_shared_text(repo, client, userid, _build_wecom_app_construction_site_menu(repo, query))
         return True
 
-    site_pending = WECOM_APP_PENDING_CONSTRUCTION_SITES.get(key)
+    shared_key = _wecom_app_shared_pending_key()
+    site_pending = WECOM_APP_PENDING_CONSTRUCTION_SITES.get(shared_key)
     if site_pending:
         if not _construction_pending_valid(site_pending):
-            WECOM_APP_PENDING_CONSTRUCTION_SITES.pop(key, None)
-            await client.send_text(userid, "施工点维护已过期，请重新点击“施工点维护”。")
+            WECOM_APP_PENDING_CONSTRUCTION_SITES.pop(shared_key, None)
+            await _send_wecom_app_shared_text(repo, client, userid, "施工点维护已过期，请重新点击“施工点维护”。")
             return True
         if _construction_cancel_text(text):
-            WECOM_APP_PENDING_CONSTRUCTION_SITES.pop(key, None)
-            await client.send_text(userid, "已退出施工点维护。")
+            WECOM_APP_PENDING_CONSTRUCTION_SITES.pop(shared_key, None)
+            await _send_wecom_app_shared_text(repo, client, userid, "已退出施工点维护。")
             return True
-        handled = await _handle_wecom_app_construction_site_text(repo, client, userid, key, site_pending, text)
+        handled = await _handle_wecom_app_construction_site_text(repo, client, userid, shared_key, site_pending, text)
         if handled:
             return True
 
-    image_pending = WECOM_APP_PENDING_CONSTRUCTION_IMAGES.get(key)
+    image_pending = WECOM_APP_PENDING_CONSTRUCTION_IMAGES.get(user_key)
     if not image_pending:
         return False
     if not _construction_pending_valid(image_pending):
-        WECOM_APP_PENDING_CONSTRUCTION_IMAGES.pop(key, None)
+        WECOM_APP_PENDING_CONSTRUCTION_IMAGES.pop(user_key, None)
         await client.send_text(userid, "施工图片模式已过期，请重新点击“施工图片”。")
         return True
     if _construction_cancel_text(text):
-        WECOM_APP_PENDING_CONSTRUCTION_IMAGES.pop(key, None)
+        WECOM_APP_PENDING_CONSTRUCTION_IMAGES.pop(user_key, None)
         await client.send_text(userid, "已退出施工图片模式。")
         return True
     if str(image_pending.get("stage") or "") != "location":
@@ -3775,55 +4032,55 @@ async def _handle_wecom_app_construction_site_text(
     if stage == "action":
         if choice == 1:
             pending.update({"stage": "add", "expires_at": time.time() + WECOM_APP_PENDING_CONSTRUCTION_TTL_SECONDS})
-            await client.send_text(userid, f"请发送要新增的施工点名称，例如：{DEFAULT_CONSTRUCTION_LOCATION}")
+            await _send_wecom_app_shared_text(repo, client, userid, f"请发送要新增的施工点名称，例如：{DEFAULT_CONSTRUCTION_LOCATION}")
             return True
         if choice == 2:
             sites = repo.list_construction_sites()
             if not sites:
-                await client.send_text(userid, "当前没有可删除的施工点。")
+                await _send_wecom_app_shared_text(repo, client, userid, "当前没有可删除的施工点。")
                 WECOM_APP_PENDING_CONSTRUCTION_SITES.pop(key, None)
                 return True
             pending.update({"stage": "delete", "sites": sites, "expires_at": time.time() + WECOM_APP_PENDING_CONSTRUCTION_TTL_SECONDS})
-            await client.send_text(userid, f"请选择要删除的施工点序号：\n{_construction_site_lines(sites)}")
+            await _send_wecom_app_shared_text(repo, client, userid, f"请选择要删除的施工点序号：\n{_construction_site_lines(sites)}")
             return True
         if choice == 3:
             sites = repo.list_construction_sites()
             if not sites:
-                await client.send_text(userid, "当前没有可修改的施工点。")
+                await _send_wecom_app_shared_text(repo, client, userid, "当前没有可修改的施工点。")
                 WECOM_APP_PENDING_CONSTRUCTION_SITES.pop(key, None)
                 return True
             pending.update({"stage": "modify_select", "sites": sites, "expires_at": time.time() + WECOM_APP_PENDING_CONSTRUCTION_TTL_SECONDS})
-            await client.send_text(userid, f"请选择要修改的施工点序号：\n{_construction_site_lines(sites)}")
+            await _send_wecom_app_shared_text(repo, client, userid, f"请选择要修改的施工点序号：\n{_construction_site_lines(sites)}")
             return True
-        await client.send_text(userid, "请回复 1 新增、2 删除、3 修改，或回复“取消”退出。")
+        await _send_wecom_app_shared_text(repo, client, userid, "请回复 1 新增、2 删除、3 修改，或回复“取消”退出。")
         return True
     if stage == "add":
         site = repo.add_construction_site(text)
         WECOM_APP_PENDING_CONSTRUCTION_SITES.pop(key, None)
-        await client.send_text(userid, f"施工点已新增：{site['name']}")
+        await _send_wecom_app_shared_text(repo, client, userid, f"施工点已新增：{site['name']}")
         return True
     if stage == "delete":
         sites = list(pending.get("sites") or repo.list_construction_sites())
         if not choice or not (1 <= choice <= len(sites)):
-            await client.send_text(userid, "序号不正确，请重新回复要删除的施工点序号，或回复“取消”。")
+            await _send_wecom_app_shared_text(repo, client, userid, "序号不正确，请重新回复要删除的施工点序号，或回复“取消”。")
             return True
         site = sites[choice - 1]
         repo.delete_construction_site(int(site["id"]))
         WECOM_APP_PENDING_CONSTRUCTION_SITES.pop(key, None)
-        await client.send_text(userid, f"施工点已删除：{site['name']}")
+        await _send_wecom_app_shared_text(repo, client, userid, f"施工点已删除：{site['name']}")
         return True
     if stage == "modify_select":
         sites = list(pending.get("sites") or repo.list_construction_sites())
         if not choice or not (1 <= choice <= len(sites)):
-            await client.send_text(userid, "序号不正确，请重新回复要修改的施工点序号，或回复“取消”。")
+            await _send_wecom_app_shared_text(repo, client, userid, "序号不正确，请重新回复要修改的施工点序号，或回复“取消”。")
             return True
         pending.update({"stage": "modify_name", "site_id": sites[choice - 1]["id"], "expires_at": time.time() + WECOM_APP_PENDING_CONSTRUCTION_TTL_SECONDS})
-        await client.send_text(userid, f"请发送新的施工点名称。\n当前：{sites[choice - 1]['name']}")
+        await _send_wecom_app_shared_text(repo, client, userid, f"请发送新的施工点名称。\n当前：{sites[choice - 1]['name']}")
         return True
     if stage == "modify_name":
         site = repo.update_construction_site(int(pending.get("site_id") or 0), text)
         WECOM_APP_PENDING_CONSTRUCTION_SITES.pop(key, None)
-        await client.send_text(userid, f"施工点已修改为：{site['name'] if site else text}")
+        await _send_wecom_app_shared_text(repo, client, userid, f"施工点已修改为：{site['name'] if site else text}")
         return True
     return False
 
@@ -3945,6 +4202,7 @@ def _build_wechat_roster_confirm_response(
     source_image_path: str = "",
     overwrite: bool = False,
     ocr_status: str = "",
+    name_ocr_status: str = "",
     source_image_url: str = "",
     issues: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
@@ -3957,6 +4215,13 @@ def _build_wechat_roster_confirm_response(
             "reply": f"排班表年月无效：{year}年{month}月，请到网页端上传后手动校对。",
         }
     if _has_unconfirmed_roster_names(sanitized_grid):
+        name_status = str(name_ocr_status or "").strip()
+        if name_status == "empty":
+            name_hint = "原图没有识别到姓名列文字，请确认图片左侧的“序号/姓名”列没有被裁掉，并发送完整、清晰的原图。"
+        elif name_status == "partial":
+            name_hint = "原图的姓名列只识别到一部分，请到网页端补全未识别姓名后再确认导入。"
+        else:
+            name_hint = "请到网页端补全未识别姓名后再确认导入。"
         return {
             "success": False,
             "import_status": "needs_names",
@@ -3970,7 +4235,7 @@ def _build_wechat_roster_confirm_response(
             "query_type": "roster_import",
             "reply": (
                 f"已识别 {year}年{month}月排班表，共 {len(sanitized_grid)} 行，"
-                "但姓名没有识别完整，暂不自动导入。请到 duty-reminder 网页端上传校对后确认。"
+                f"但姓名没有识别完整，暂不自动导入。{name_hint}"
             ),
         }
     existing = repo.get_roster_month(year, month)
@@ -4335,11 +4600,11 @@ async def _handle_wecom_app_message(repo: DutyRepository, uploads: Path, message
     if _is_wecom_app_roster_import_request(text):
         await _send_wecom_app_result(client, userid, _build_wecom_app_roster_import_prompt_response(query), uploads)
         return
-    pending = WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.get(_wecom_app_pending_key(query))
+    pending = WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.get(_wecom_app_shared_pending_key())
     if _is_wecom_app_pending_account_help_text(text) and _wecom_app_pending_allows_account_help(pending):
         pending["prompt"] = "account_help_retry"
         pending["expires_at"] = time.time() + WECOM_APP_PENDING_TUNNEL_TTL_SECONDS
-        await client.send_text(userid, _wecom_app_tunnel_account_help_reply())
+        await _send_wecom_app_shared_text(repo, client, userid, _wecom_app_tunnel_account_help_reply())
         return
     normalized = _normalize_wechat_query_text(text)
     if not (
@@ -4351,7 +4616,8 @@ async def _handle_wecom_app_message(repo: DutyRepository, uploads: Path, message
     try:
         await client.send_text(userid, "正在查询，请稍候…")
         result = await _build_wechat_query_response_with_log(repo, query, uploads=uploads)
-        await _send_wecom_app_result(client, userid, result, uploads)
+        result_userid = _wecom_app_shared_touser(repo, userid) if result.get("shared_scope") else userid
+        await _send_wecom_app_result(client, result_userid, result, uploads)
     except Exception:
         LOGGER.exception("企业微信自建应用处理消息失败")
         try:
@@ -4799,6 +5065,19 @@ def _wecom_app_pending_key(query: WechatQueryRequest) -> str:
     return userid.removeprefix("wecom_user:")
 
 
+def _wecom_app_shared_pending_key() -> str:
+    return WECOM_APP_SHARED_PENDING_KEY
+
+
+def _wecom_app_shared_touser(repo: DutyRepository, fallback_userid: str) -> str:
+    targets = _wecom_app_default_tousers(repo)
+    return "|".join(targets) or str(fallback_userid or "").strip()
+
+
+async def _send_wecom_app_shared_text(repo: DutyRepository, client: WeComClient, fallback_userid: str, content: str) -> None:
+    await client.send_text(_wecom_app_shared_touser(repo, fallback_userid), content)
+
+
 def _wecom_app_pending_prompt(pending: dict[str, Any] | None) -> str:
     return str((pending or {}).get("prompt") or "confirm").strip() or "confirm"
 
@@ -4888,13 +5167,15 @@ def _tunnel_mechanical_copy_line(request: TunnelMechanicalSubmitRequest) -> str:
 
 
 def _remember_wecom_app_tunnel_submission(query: WechatQueryRequest, request: TunnelMechanicalSubmitRequest) -> dict[str, Any]:
-    key = _wecom_app_pending_key(query)
-    if key:
-        WECOM_APP_PENDING_TUNNEL_SUBMISSIONS[key] = {
-            "expires_at": time.time() + WECOM_APP_PENDING_TUNNEL_TTL_SECONDS,
-            "prompt": "confirm",
-            "payload": request.model_dump(mode="json"),
-        }
+    WECOM_APP_PENDING_TUNNEL_SUBMISSIONS[_wecom_app_shared_pending_key()] = {
+        "expires_at": time.time() + WECOM_APP_PENDING_TUNNEL_TTL_SECONDS,
+        "prompt": "confirm",
+        "payload": request.model_dump(mode="json"),
+    }
+    return _tunnel_mechanical_confirmation_response(request)
+
+
+def _tunnel_mechanical_confirmation_response(request: TunnelMechanicalSubmitRequest) -> dict[str, Any]:
     selected_count = len([row for row in request.rows if row.enabled])
     copy_line = _tunnel_mechanical_copy_line(request)
     reply = (
@@ -4912,6 +5193,7 @@ def _remember_wecom_app_tunnel_submission(query: WechatQueryRequest, request: Tu
         "success": True,
         "query_type": "tunnel_mechanical_confirm",
         "status": "pending",
+        "shared_scope": True,
         "reply": reply,
         "replies": [reply],
         "template": copy_line,
@@ -5004,12 +5286,18 @@ async def _build_wecom_app_pending_tunnel_response(
 ) -> dict[str, Any] | None:
     if not _is_wecom_app_query(query):
         return None
-    key = _wecom_app_pending_key(query)
-    pending = WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.get(key)
+    pending = WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.get(_wecom_app_shared_pending_key())
     if not pending:
         if _is_wecom_app_pending_confirm_text(text) or _is_wecom_app_pending_account_help_text(text):
             return {"success": False, "query_type": "tunnel_mechanical_confirm", "reply": "没有待确认的机电录入，请先点击“录入今日机电”。"}
         return None
+    if (
+        _normalize_wechat_query_text(text) == "录入今日机电"
+        and float(pending.get("expires_at") or 0) >= time.time()
+    ):
+        return _tunnel_mechanical_confirmation_response(
+            _rebuild_tunnel_mechanical_request(dict(pending.get("payload") or {}))
+        )
     if _is_wecom_app_pending_account_help_text(text):
         if not _wecom_app_pending_allows_account_help(pending):
             return None
@@ -5018,6 +5306,7 @@ async def _build_wecom_app_pending_tunnel_response(
         return {
             "success": True,
             "query_type": "tunnel_mechanical_account_help",
+            "shared_scope": True,
             "reply": _wecom_app_tunnel_account_help_reply(),
         }
     if not _is_wecom_app_pending_confirm_text(text):
@@ -5025,12 +5314,13 @@ async def _build_wecom_app_pending_tunnel_response(
     if not _wecom_app_pending_allows_confirm(pending):
         return None
     if float(pending.get("expires_at") or 0) < time.time():
-        WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.pop(key, None)
+        WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.pop(_wecom_app_shared_pending_key(), None)
         return {"success": False, "query_type": "tunnel_mechanical_confirm", "reply": "待确认信息已过期，请重新点击“录入今日机电”。"}
     request = _rebuild_tunnel_mechanical_request(dict(pending.get("payload") or {}))
     result = await _submit_tunnel_mechanical_wechat_request(repo, query, request, uploads=uploads)
+    result["shared_scope"] = True
     if result.get("success"):
-        WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.pop(key, None)
+        WECOM_APP_PENDING_TUNNEL_SUBMISSIONS.pop(_wecom_app_shared_pending_key(), None)
     else:
         pending["expires_at"] = time.time() + WECOM_APP_PENDING_TUNNEL_TTL_SECONDS
         pending["prompt"] = "retry_options"
@@ -6697,29 +6987,22 @@ def _public_notification_config(config: dict[str, Any]) -> dict[str, Any]:
     wecom_app_secret = str(config.get("wecom_app_secret", "")).strip()
     wecom_app_token = str(config.get("wecom_app_token", "")).strip()
     wecom_app_encoding_aes_key = str(config.get("wecom_app_encoding_aes_key", "")).strip()
-    lightagent_url = str(config.get("lightagent_url", "")).strip()
-    lightagent_targets = _normalize_feature_channel_rooms(config.get("lightagent_targets"))
-    lightagent_target = str(config.get("lightagent_target", "")).strip()
-    if lightagent_target:
-        lightagent_targets = _normalize_feature_channel_rooms(lightagent_targets + [{"id": lightagent_target}])
-    lightagent_target = lightagent_targets[0]["id"] if lightagent_targets else ""
-    lightagent_token = str(config.get("lightagent_token", "")).strip()
+    lightagent_url = ""
+    lightagent_targets: list[dict[str, str]] = []
+    lightagent_target = ""
+    lightagent_token = ""
     sender_type = _normalize_notification_sender_type(str(config.get("sender_type") or "wecom_webhook"))
     mention_mode = _normalize_notification_mention_mode(str(config.get("mention_mode") or "person"))
     wecom_app_configured = _wecom_app_config_complete(config, require_callback=True)
     wecom_app_active = bool(config.get("wecom_app_enabled"))
     effective_sender_type = "wecom_app" if wecom_app_active else sender_type
     webhook_active = not wecom_app_active and sender_type == "wecom_webhook"
-    lightagent_active = not wecom_app_active and sender_type == "lightagent"
-    active_configured = (
-        wecom_app_configured
-        if wecom_app_active
-        else (bool(webhook_url) if webhook_active else bool(lightagent_targets and (lightagent_url or wechat_bridge_enabled())))
-    )
+    lightagent_active = False
+    active_configured = wecom_app_configured if wecom_app_active else bool(webhook_url)
     return {
-        "sender_type": sender_type,
+        "sender_type": effective_sender_type if wecom_app_active else sender_type,
         "effective_sender_type": effective_sender_type,
-        "wechat_bridge_enabled": wechat_bridge_enabled(),
+        "wechat_bridge_enabled": False,
         "webhook_url": "",
         "webhook_configured": bool(webhook_url),
         "webhook_active": webhook_active and bool(webhook_url),
@@ -6747,10 +7030,10 @@ def _public_notification_config(config: dict[str, Any]) -> dict[str, Any]:
         "wecom_app_system_target_names_text": "\n".join(list((config.get("wecom_app_function_target_names") or {}).get("system") or [])),
         "wecom_app_callback_url": _public_app_url("/api/wecom-app/callback"),
         "lightagent_url": lightagent_url,
-        "lightagent_configured": bool(lightagent_targets and (lightagent_url or wechat_bridge_enabled())),
-        "lightagent_active": lightagent_active and bool(lightagent_targets and (lightagent_url or wechat_bridge_enabled())),
-        "lightagent_display": "已配置" if lightagent_targets and (lightagent_url or wechat_bridge_enabled()) else "未配置",
-        "lightagent_token_configured": bool(lightagent_token),
+        "lightagent_configured": False,
+        "lightagent_active": False,
+        "lightagent_display": "已停用",
+        "lightagent_token_configured": False,
         "lightagent_target": lightagent_target,
         "lightagent_targets": lightagent_targets,
         "mention_mode": mention_mode,
@@ -8377,6 +8660,7 @@ def _filter_send_records(
 
 def _build_people_center(repo: DutyRepository) -> list[dict[str, Any]]:
     names = set(repo.list_personnel_names())
+    deleted_names = repo.list_deleted_personnel_names()
     personnel_by_name = {str(person.get("name") or "").strip(): person for person in repo.list_personnel()}
     monitored_by_name = {str(person.get("name") or "").strip(): person for person in repo.list_monitored_people()}
     custom_by_name: dict[str, list[dict[str, Any]]] = {}
@@ -8395,6 +8679,8 @@ def _build_people_center(repo: DutyRepository) -> list[dict[str, Any]]:
                 names.add(name)
     rows: list[dict[str, Any]] = []
     for name in sorted(names, key=lambda value: value):
+        if name in deleted_names:
+            continue
         personnel = personnel_by_name.get(name, {})
         monitored = monitored_by_name.get(name, {})
         custom = custom_by_name.get(name, [])
@@ -8920,6 +9206,9 @@ def _build_daily_duty_preview(repo: DutyRepository, target: date) -> dict[str, A
             afternoon_return.append(row["name"])
     big_driver_set = set(config["big_driver_names"])
     small_driver_set = set(config["small_driver_names"])
+    patrol_team_set = set(config["patrol_team_names"])
+    station_set = set(config["station_names"])
+    office_set = set(config["office_names"])
     on_duty_names = [row["name"] for row in rows if _is_on_duty_code(row["code"])]
     big_drivers = [name for name in on_duty_names if name in big_driver_set]
     small_drivers = [name for name in on_duty_names if name in small_driver_set]
@@ -8929,6 +9218,9 @@ def _build_daily_duty_preview(repo: DutyRepository, target: date) -> dict[str, A
         | set(shift_names["night"])
         | set(big_drivers)
         | set(small_drivers)
+        | patrol_team_set
+        | station_set
+        | office_set
         | set(afternoon_rest)
         | set(resting)
         | set(afternoon_return)
@@ -8939,6 +9231,9 @@ def _build_daily_duty_preview(repo: DutyRepository, target: date) -> dict[str, A
         "tomorrow_early": _join_names(shift_names["tomorrow_early"]),
         "middle": _join_names(shift_names["middle"]),
         "night": _join_names(shift_names["night"]),
+        "patrol": _join_names([name for name in on_duty_names if name in patrol_team_set]) or _join_names(standby),
+        "station": _join_names([name for name in on_duty_names if name in station_set]),
+        "office": _join_names([name for name in on_duty_names if name in office_set]),
         "big_drivers": _join_names(big_drivers),
         "small_drivers": _join_names(small_drivers),
         "standby": _join_names(standby),
@@ -9198,7 +9493,7 @@ def _build_system_status(repo: DutyRepository, scheduler_enabled: bool, cjk_font
         "webhook_configured": bool(notification_config.get("webhook_configured")),
         "notification_configured": bool(notification_config.get("notification_configured")),
         "notification_sender_type": str(notification_config.get("effective_sender_type") or notification_config.get("sender_type") or "wecom_webhook"),
-        "wechat_bridge_enabled": wechat_bridge_enabled(),
+        "wechat_bridge_enabled": False,
         "cjk_font_ready": cjk_font_ready,
         "roster_month_count": repo.count_roster_months(),
         "monitored_people_count": repo.count_monitored_people(),
@@ -9262,7 +9557,7 @@ def _build_system_checks(
         "通知通道",
         "ok" if notification_config.get("notification_configured") else "error",
         "已配置" if notification_config.get("notification_configured") else "未配置通知通道，提醒只会生成不会发送",
-        "到配置中心设置企业微信自建应用/群机器人/个人微信群",
+        "到配置中心设置企业微信自建应用或群机器人",
     )
     add(
         "font",
@@ -9648,6 +9943,78 @@ def _notification_target_names(repo: DutyRepository, event: ReminderEvent | str 
             names.append(target.lstrip("@"))
     return list(dict.fromkeys([name for name in names if name]))
 
+
+
+def _notification_sender_label(sender: str) -> str:
+    value = str(sender or "wecom_webhook").strip()
+    if value == "wecom_app":
+        return "企业微信自建应用"
+    return "企业微信群机器人"
+
+
+def _shift_from_preview_code(value: str) -> Shift:
+    normalized = str(value or "middle").strip().lower()
+    return {
+        "early": Shift.EARLY,
+        "middle": Shift.MIDDLE,
+        "night": Shift.NIGHT,
+        "早": Shift.EARLY,
+        "中": Shift.MIDDLE,
+        "晚": Shift.NIGHT,
+        "夜": Shift.NIGHT,
+    }.get(normalized, Shift.MIDDLE)
+
+
+def _preview_work_date(now: datetime, shift: Shift) -> date:
+    if shift is Shift.EARLY and now.hour >= 12:
+        return now.date() + timedelta(days=1)
+    return now.date()
+
+
+def _build_reminder_image_preview_event(repo: DutyRepository, request: ReminderImagePreviewRequest) -> ReminderEvent:
+    name = str(request.name or "").strip() or "商邱宏"
+    now = datetime.now(TZ)
+    shift = _shift_from_preview_code(request.shift_code)
+    work_date = _preview_work_date(now, shift)
+    send_time = _validate_hhmm(str(request.reminder_time or request.daily_time or "07:50"))
+    send_hour, send_minute = [int(part) for part in send_time.split(":", 1)]
+    kind = str(request.preview_type or "monitor").strip().lower()
+    if kind.startswith("custom"):
+        message = _custom_reminder_message_for_name(str(request.message or "").strip() or "需要检查隧道灯", name) or "需要检查隧道灯"
+        content = _render_simple_template(
+            message,
+            {
+                "name": name,
+                "date": work_date.isoformat(),
+                "time_range": f"{shift.start_time:%H:%M}至{shift.end_time:%H:%M}",
+                "shift_label": "晚班" if shift is Shift.NIGHT else shift.label,
+                "reminder_time": send_time,
+            },
+        )
+        return ReminderEvent(
+            kind="custom_test",
+            person_name=name,
+            send_at=datetime.combine(now.date(), datetime.min.time(), tzinfo=TZ).replace(hour=send_hour, minute=send_minute),
+            content=content,
+            send_content_mode=_normalize_send_content_mode(request.send_content_mode, "both"),
+        )
+    template = str(request.message_template or "").strip() or str(repo.get_notification_config().get("message_template") or DEFAULT_MESSAGE_TEMPLATE)
+    content = _render_message_template(
+        template,
+        {
+            "name": name,
+            "date": work_date.isoformat(),
+            "time_range": f"{shift.start_time:%H:%M}至{shift.end_time:%H:%M}",
+            "shift_label": "晚班" if shift is Shift.NIGHT else shift.label,
+        },
+    )
+    return ReminderEvent(
+        kind="monitor_test",
+        person_name=name,
+        send_at=datetime.combine(now.date(), datetime.min.time(), tzinfo=TZ).replace(hour=send_hour, minute=send_minute),
+        content=content,
+        send_content_mode=_normalize_send_content_mode(request.send_content_mode, "both"),
+    )
 
 def _notification_true_mentions_for_event(repo: DutyRepository, client: Any, event: ReminderEvent) -> list[str]:
     if _is_personal_wechat_notify_client(client) or _is_wecom_app_notify_client(client):
@@ -10566,25 +10933,6 @@ def _notification_client_from_config(config: dict[str, Any], repo: DutyRepositor
     if bool(config.get("wecom_app_enabled")):
         return _wecom_app_notify_client_from_config(config, repo)
     sender_type = _normalize_notification_sender_type(str(config.get("sender_type") or "wecom_webhook"))
-    if sender_type == "lightagent":
-        targets = _normalize_feature_channel_rooms(config.get("lightagent_targets"))
-        legacy_target = str(config.get("lightagent_target", "")).strip()
-        if legacy_target:
-            targets = _normalize_feature_channel_rooms(targets + [{"id": legacy_target}])
-        target_ids = [room["id"] for room in targets if room.get("id")]
-        if not target_ids:
-            return None
-        if wechat_bridge_enabled():
-            return WechatBridgeNotifyClient(targets=target_ids)
-        endpoint_url = str(config.get("lightagent_url", "")).strip()
-        if not endpoint_url:
-            return None
-        return LightAgentNotifyClient(
-            endpoint_url=endpoint_url,
-            targets=target_ids,
-            token=str(config.get("lightagent_token") or ""),
-        )
-
     webhook_url = str(config.get("webhook_url", "")).strip()
     if not webhook_url:
         return None
@@ -10612,3 +10960,4 @@ def _wecom_client_from_env() -> WeComClient | None:
 
 
 app = create_app()
+

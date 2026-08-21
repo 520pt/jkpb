@@ -371,6 +371,9 @@ def test_daily_duty_config_roundtrip(tmp_path: Path):
         reminder_time="07:20",
         big_driver_names=["示例庚"],
         small_driver_names=["示例丙"],
+        patrol_team_names=["示例甲"],
+        station_names=["示例乙"],
+        office_names=["示例丁"],
         message_template="今日 {early} {big_drivers}",
     )
 
@@ -379,6 +382,9 @@ def test_daily_duty_config_roundtrip(tmp_path: Path):
         "reminder_time": "07:20",
         "big_driver_names": ["示例庚"],
         "small_driver_names": ["示例丙"],
+        "patrol_team_names": ["示例甲"],
+        "station_names": ["示例乙"],
+        "office_names": ["示例丁"],
         "message_template": "今日 {early} {big_drivers}",
         "notification_room_id": "",
         "notification_room_name": "",
@@ -564,6 +570,8 @@ def test_notification_config_roundtrips_multiple_lightagent_targets(tmp_path: Pa
 
     config = repo.get_notification_config()
 
+    assert config["sender_type"] == "wecom_webhook"
+    # 旧 LightAgent 字段只作为历史配置/导入导出兼容保留，不能再选为发送通道。
     assert config["lightagent_target"] == "wgr_notice"
     assert config["lightagent_targets"] == [
         {"id": "wgr_notice", "name": "通知群"},

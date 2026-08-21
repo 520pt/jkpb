@@ -155,6 +155,26 @@ def test_template_parser_fits_person_lines_when_any_row_has_trip_text_noise(tmp_
             }
 
 
+def test_person_lines_skip_merged_name_header_divider():
+    image = np.full((727, 1114, 3), 255, dtype=np.uint8)
+    x_lines = [159 + index * 25 for index in range(32)]
+    y_lines = [98 + index * 32 for index in range(17)]
+
+    # The exported layout has two header rows. The divider at y=68 exists in
+    # the day area but does not cross the vertically merged serial/name header.
+    for x in [28, 67, *x_lines]:
+        cv2.line(image, (x, 38), (x, y_lines[-1]), (0, 0, 0), 1)
+    cv2.line(image, (0, 38), (1080, 38), (0, 0, 0), 1)
+    cv2.line(image, (159, 68), (1080, 68), (0, 0, 0), 1)
+    cv2.line(image, (0, 98), (1080, 98), (0, 0, 0), 1)
+    for y in y_lines[1:]:
+        cv2.line(image, (0, y), (1080, y), (0, 0, 0), 1)
+
+    dark = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) < 80
+
+    assert _find_person_y_lines(dark) == y_lines
+
+
 def test_template_recheck_uses_existing_cell_boxes(tmp_path: Path):
     image_path = tmp_path / "roster.png"
     _write_synthetic_roster(image_path)
@@ -244,6 +264,34 @@ def test_template_parser_merges_name_column_ocr_without_full_image_ocr(tmp_path:
     assert len(result["grid"]) == 15
     assert result["grid"][0]["name"] == "示例甲"
     assert result["grid"][1]["name"] == "示例乙"
+
+
+def test_template_parser_merges_split_name_column_ocr(tmp_path: Path, monkeypatch):
+    image_path = tmp_path / "roster.png"
+    _write_synthetic_roster(image_path)
+
+    monkeypatch.setattr(
+        "app.ocr._read_ocr_texts",
+        lambda path: (_ for _ in ()).throw(AssertionError("template import must not call full-image OCR")),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.ocr._read_template_ocr_texts",
+        lambda path, template_result: [
+            OcrText(text="商", x=104, y=136),
+            OcrText(text="邱宏", x=116, y=136),
+            OcrText(text="罗", x=104, y=169),
+            OcrText(text="富耀", x=116, y=169),
+        ],
+        raising=False,
+    )
+
+    result = extract_roster_image(image_path)
+
+    assert result["ocr_status"] == "template_ok"
+    assert len(result["grid"]) == 15
+    assert result["grid"][0]["name"] == "商邱宏"
+    assert result["grid"][1]["name"] == "罗富耀"
 
 
 def test_non_template_image_does_not_fall_back_to_ocr(tmp_path: Path, monkeypatch):

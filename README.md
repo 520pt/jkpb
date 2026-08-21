@@ -49,7 +49,7 @@ GitHub Actions 会自动构建镜像并推送到 GitHub Container Registry：
 ghcr.io/520pt/jkpb:latest
 ```
 
-`docker-compose.yml` 只会启动 `duty-reminder` 一个服务。个人微信群通知已经内置在本项目镜像内，不需要再单独部署 LightAgent。
+`docker-compose.yml` 只会启动 `duty-reminder` 一个服务。通知只保留企业微信群机器人和企业微信自建应用。
 
 ### Docker 镜像部署
 
@@ -78,14 +78,11 @@ services:
     environment:
       ADMIN_USERNAME: 520pt
       ADMIN_PASSWORD: 520pt
-      WECHAT_BRIDGE_ENABLED: "true"
-      WECHAT_BRIDGE_DATA_DIR: /app/wechat
       DUTY_REMINDER_QUERY_TOKEN: 520pt
       DUTY_REMINDER_TUNNEL_PROXY: ""
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads
-      - ./wechat:/app/wechat
 ```
 
 部署步骤：
@@ -108,7 +105,7 @@ echo 'DUTY_REMINDER_TUNNEL_PROXY=socks5h://127.0.0.1:10808' >> .env
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-这个变量只用于智慧养护/隧道机电接口，不会影响企业微信、个人微信群、GitHub 或其它外联请求。不要使用系统全局的 `HTTP_PROXY` / `HTTPS_PROXY` 来解决这个问题。
+这个变量只用于智慧养护/隧道机电接口，不会影响企业微信、GitHub 或其它外联请求。不要使用系统全局的 `HTTP_PROXY` / `HTTPS_PROXY` 来解决这个问题。
 
 图片导入默认使用固定排班表模板解析：检测表格线并按单元格颜色/像素特征识别班次，不再对整张图片运行 OCR。姓名列会做局部 OCR，识别不到的姓名需要在导入校对页面手动修正。
 
@@ -124,16 +121,13 @@ INSTALL_OCR=true docker compose up -d --build
 
 - `./data:/app/data`：SQLite 数据库、排班、配置、发送记录。
 - `./uploads:/app/uploads`：上传的排班图片。
-- `./wechat:/app/wechat`：内置个人微信群桥的微信登录态、群 ID 映射、成员 ID 映射。
 
-因此更新镜像、重新 `docker compose -f docker-compose.prod.yml up -d` 后数据仍会保留。不要删除服务器目录里的 `data`、`uploads` 和 `wechat`。
-NAS 或宿主机重启后，只要 `./wechat` 目录仍在且微信网页版登录态没有被微信侧踢下线，容器会随 `restart: unless-stopped` 自动启动并恢复登录。若删除 `./wechat`、改了挂载目录、账号在手机端退出网页微信、微信侧判定登录态失效，后台会重新出现扫码登录状态，需要再次扫码。
+因此更新镜像、重新 `docker compose -f docker-compose.prod.yml up -d` 后数据仍会保留。不要删除服务器目录里的 `data` 和 `uploads`。
 
 本地构建用的 `docker-compose.yml` 默认使用 Docker volume：
 
 - `duty-data:/app/data`：SQLite 数据库、排班、配置、发送记录。
 - `duty-uploads:/app/uploads`：上传的排班图片。
-- `duty-wechat:/app/wechat`：内置个人微信群桥的登录态、群 ID 映射、成员 ID 映射。
 
 不要执行 `docker compose down -v` 或手动删除 `duty-data` / `duty-uploads` / `duty-wechat` volume，否则会删除本地构建环境的数据。
 
@@ -165,17 +159,6 @@ https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_WEBHOOK_KEY
 
 保存后前端不会回显完整机器人地址，只显示“已配置”。监控班提醒里的“@ 手机号”填写企业微信成员手机号，机器人会通过 `mentioned_mobile_list` 在群里 @ 对应人员。页面提供“测试发送”按钮，驾驶员监测板块也提供“测试发送今日在岗”按钮。
 
-### 内置个人微信群
-
-选择“LightAgent 个人微信群”后，启用内置个人微信群桥并添加一个或多个通知微信群。`duty-reminder` 会直接通过内置桥发送文本和图片提醒，不需要独立的个人微信群服务镜像。
-
-Docker 部署时保持：
-
-```text
-WECHAT_BRIDGE_ENABLED=true
-```
-
-通知群可以在页面同步微信群后添加多个；“微信群交互配置”用于配置哪些微信群可以主动触发查询、隧道机电和排班导入。
 
 ## 运行安全
 

@@ -18,6 +18,9 @@ LEGACY_DAILY_DUTY_TEMPLATE = (
 DEFAULT_DAILY_DUTY_TEMPLATE = (
     "今日在岗人员\n"
     "监控班：今日早班：{early}，明日早班：{tomorrow_early}，中班：{middle}，晚班：{night}\n"
+    "巡查班：{patrol}\n"
+    "站管：{station}\n"
+    "办公室：{office}\n"
     "驾驶员：大车：{big_drivers} 小车：{small_drivers}\n"
     "备勤人员：{standby}\n"
     "今日下午休息：{afternoon_rest}\n"
@@ -89,7 +92,7 @@ DEFAULT_PATROL_WARNING_END_TEMPLATE = (
     "预警已结束：{elapsed_hours} 小时\n"
     "距离预警结束后{window_hours}小时内{patrol_frequency_clause}，倒计时结束还有 {remaining_hours} 小时。"
 )
-NOTIFICATION_SENDER_TYPES = {"wecom_webhook", "lightagent"}
+NOTIFICATION_SENDER_TYPES = {"wecom_webhook"}
 NOTIFICATION_MENTION_MODES = {"none", "all", "person", "custom"}
 CONFIG_EXPORT_TABLES = [
     "roster_months",
@@ -101,6 +104,7 @@ CONFIG_EXPORT_TABLES = [
     "wecom_app_menu_config",
     "construction_sites",
     "personnel_names",
+    "deleted_personnel",
     "custom_reminders",
     "daily_duty_config",
     "vacation_reminder_config",
@@ -364,6 +368,11 @@ class DutyRepository:
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
+                CREATE TABLE IF NOT EXISTS deleted_personnel (
+                    name TEXT PRIMARY KEY,
+                    deleted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
                 CREATE TABLE IF NOT EXISTS custom_reminders (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
@@ -385,6 +394,9 @@ class DutyRepository:
                     reminder_time TEXT NOT NULL DEFAULT '07:50',
                     big_driver_names_json TEXT NOT NULL DEFAULT '[]',
                     small_driver_names_json TEXT NOT NULL DEFAULT '[]',
+                    patrol_team_names_json TEXT NOT NULL DEFAULT '[]',
+                    station_names_json TEXT NOT NULL DEFAULT '[]',
+                    office_names_json TEXT NOT NULL DEFAULT '[]',
                     message_template TEXT NOT NULL DEFAULT '',
                     notification_room_id TEXT NOT NULL DEFAULT '',
                     notification_room_name TEXT NOT NULL DEFAULT '',
@@ -590,6 +602,12 @@ class DutyRepository:
                 conn.execute("ALTER TABLE daily_duty_config ADD COLUMN notification_room_name TEXT NOT NULL DEFAULT ''")
             if "send_content_mode" not in daily_columns:
                 conn.execute("ALTER TABLE daily_duty_config ADD COLUMN send_content_mode TEXT NOT NULL DEFAULT 'both'")
+            if "patrol_team_names_json" not in daily_columns:
+                conn.execute("ALTER TABLE daily_duty_config ADD COLUMN patrol_team_names_json TEXT NOT NULL DEFAULT '[]'")
+            if "station_names_json" not in daily_columns:
+                conn.execute("ALTER TABLE daily_duty_config ADD COLUMN station_names_json TEXT NOT NULL DEFAULT '[]'")
+            if "office_names_json" not in daily_columns:
+                conn.execute("ALTER TABLE daily_duty_config ADD COLUMN office_names_json TEXT NOT NULL DEFAULT '[]'")
             vacation_columns = {row["name"] for row in conn.execute("PRAGMA table_info(vacation_reminder_config)").fetchall()}
             if "start_message_templates_json" not in vacation_columns:
                 conn.execute("ALTER TABLE vacation_reminder_config ADD COLUMN start_message_templates_json TEXT NOT NULL DEFAULT '[]'")
@@ -829,6 +847,7 @@ class DutyRepository:
         clean_names = sorted({name.strip() for name in names if name and name.strip()})
         with self._connect() as conn:
             for name in clean_names:
+                conn.execute("DELETE FROM deleted_personnel WHERE name = ?", (name,))
                 conn.execute(
                     """
                     INSERT INTO personnel_names (name) VALUES (?)
@@ -871,6 +890,7 @@ class DutyRepository:
                     existing[key] = value
         with self._connect() as conn:
             for name, values in sorted(clean_contacts.items()):
+                conn.execute("DELETE FROM deleted_personnel WHERE name = ?", (name,))
                 conn.execute(
                     """
                     INSERT INTO personnel_names (
@@ -936,6 +956,7 @@ class DutyRepository:
             else:
                 conn.execute("DELETE FROM personnel_names")
             for name in clean_names:
+                conn.execute("DELETE FROM deleted_personnel WHERE name = ?", (name,))
                 conn.execute(
                     """
                     INSERT INTO personnel_names (name) VALUES (?)
@@ -944,12 +965,83 @@ class DutyRepository:
                     (name,),
                 )
 
+    def list_deleted_personnel_names(self) -> set[str]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT name FROM deleted_personnel ORDER BY name").fetchall()
+        return {row["name"] for row in rows}
+
+    def delete_personnel(self, name: str) -> bool:
+        clean_name = str(name or "").strip()
+        if not clean_name:
+            return False
+        with self._connect() as conn:
+            conn.execute("DELETE FROM personnel_names WHERE name = ?", (clean_name,))
+            conn.execute("DELETE FROM monitored_people WHERE name = ?", (clean_name,))
+            conn.execute("DELETE FROM custom_reminders WHERE name = ?", (clean_name,))
+            conn.execute(
+                """
+                INSERT INTO deleted_personnel (name)
+                VALUES (?)
+                ON CONFLICT(name) DO UPDATE SET deleted_at = CURRENT_TIMESTAMP
+                """,
+                (clean_name,),
+            )
+        return True
+
+    def rename_personnel(self, old_name: str, new_name: str) -> bool:
+        clean_old = str(old_name or "").strip()
+        clean_new = str(new_name or "").strip()
+        if not clean_old or not clean_new:
+            return False
+        if clean_old == clean_new:
+            return True
+        with self._connect() as conn:
+            conflict = conn.execute(
+                """
+                SELECT 1 FROM (
+                    SELECT name FROM personnel_names
+                    UNION ALL
+                    SELECT name FROM monitored_people
+                    UNION ALL
+                    SELECT name FROM custom_reminders
+                    UNION ALL
+                    SELECT name FROM deleted_personnel
+                ) WHERE name = ? LIMIT 1
+                """,
+                (clean_new,),
+            ).fetchone()
+            if conflict:
+                raise ValueError("新姓名已存在")
+            updated = 0
+            for table in ("personnel_names", "monitored_people", "custom_reminders", "deleted_personnel"):
+                updated += conn.execute(f"UPDATE {table} SET name = ? WHERE name = ?", (clean_new, clean_old)).rowcount
+            for table in ("roster_months", "roster_versions"):
+                rows = conn.execute(f"SELECT rowid AS rid, grid_json FROM {table}").fetchall()
+                for row in rows:
+                    try:
+                        grid = json.loads(row["grid_json"] or "[]")
+                    except Exception:
+                        continue
+                    changed = False
+                    for item in grid:
+                        if str(item.get("name") or "").strip() == clean_old:
+                            item["name"] = clean_new
+                            changed = True
+                    if changed:
+                        conn.execute(
+                            f"UPDATE {table} SET grid_json = ? WHERE rowid = ?",
+                            (json.dumps(grid, ensure_ascii=False), row["rid"]),
+                        )
+                        updated += 1
+        return updated > 0
+
     def save_personnel_contacts(self, contacts: list[dict[str, Any]]) -> None:
         with self._connect() as conn:
             for contact in contacts:
                 name = str(contact.get("name") or "").strip()
                 if not name:
                     continue
+                conn.execute("DELETE FROM deleted_personnel WHERE name = ?", (name,))
                 conn.execute(
                     """
                     INSERT INTO personnel_names (
@@ -1031,7 +1123,14 @@ class DutyRepository:
 
     def list_personnel_names(self) -> list[str]:
         with self._connect() as conn:
-            rows = conn.execute("SELECT name FROM personnel_names ORDER BY name").fetchall()
+            rows = conn.execute(
+                """
+                SELECT name
+                FROM personnel_names
+                WHERE name NOT IN (SELECT name FROM deleted_personnel)
+                ORDER BY name
+                """
+            ).fetchall()
         return [row["name"] for row in rows]
 
     def list_personnel(self) -> list[dict[str, str]]:
@@ -1043,6 +1142,7 @@ class DutyRepository:
                     wechat_group_member_id, wechat_group_runtime_sender_id, wechat_group_member_name,
                     tunnel_mechanical_partner
                 FROM personnel_names
+                WHERE name NOT IN (SELECT name FROM deleted_personnel)
                 ORDER BY name
                 """
             ).fetchall()
@@ -1071,6 +1171,7 @@ class DutyRepository:
         if not clean_name:
             return
         with self._connect() as conn:
+            conn.execute("DELETE FROM deleted_personnel WHERE name = ?", (clean_name,))
             conn.execute(
                 """
                 INSERT INTO personnel_names (name, tunnel_mechanical_partner) VALUES (?, ?)
@@ -1807,6 +1908,9 @@ class DutyRepository:
         reminder_time: str = "07:50",
         big_driver_names: list[str] | None = None,
         small_driver_names: list[str] | None = None,
+        patrol_team_names: list[str] | None = None,
+        station_names: list[str] | None = None,
+        office_names: list[str] | None = None,
         message_template: str = DEFAULT_DAILY_DUTY_TEMPLATE,
         notification_room_id: str = "",
         notification_room_name: str = "",
@@ -1816,13 +1920,16 @@ class DutyRepository:
             conn.execute(
                 """
                 INSERT INTO daily_duty_config
-                    (id, enabled, reminder_time, big_driver_names_json, small_driver_names_json, message_template, notification_room_id, notification_room_name, send_content_mode)
-                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, enabled, reminder_time, big_driver_names_json, small_driver_names_json, patrol_team_names_json, station_names_json, office_names_json, message_template, notification_room_id, notification_room_name, send_content_mode)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     enabled = excluded.enabled,
                     reminder_time = excluded.reminder_time,
                     big_driver_names_json = excluded.big_driver_names_json,
                     small_driver_names_json = excluded.small_driver_names_json,
+                    patrol_team_names_json = excluded.patrol_team_names_json,
+                    station_names_json = excluded.station_names_json,
+                    office_names_json = excluded.office_names_json,
                     message_template = excluded.message_template,
                     notification_room_id = excluded.notification_room_id,
                     notification_room_name = excluded.notification_room_name,
@@ -1834,6 +1941,9 @@ class DutyRepository:
                     reminder_time or "07:50",
                     json.dumps(big_driver_names or [], ensure_ascii=False),
                     json.dumps(small_driver_names or [], ensure_ascii=False),
+                    json.dumps(patrol_team_names or [], ensure_ascii=False),
+                    json.dumps(station_names or [], ensure_ascii=False),
+                    json.dumps(office_names or [], ensure_ascii=False),
                     _normalize_daily_duty_template(message_template),
                     str(notification_room_id or "").strip(),
                     str(notification_room_name or "").strip(),
@@ -1850,6 +1960,9 @@ class DutyRepository:
                 "reminder_time": "07:50",
                 "big_driver_names": [],
                 "small_driver_names": [],
+                "patrol_team_names": [],
+                "station_names": [],
+                "office_names": [],
                 "message_template": DEFAULT_DAILY_DUTY_TEMPLATE,
                 "notification_room_id": "",
                 "notification_room_name": "",
@@ -1860,6 +1973,9 @@ class DutyRepository:
             "reminder_time": row["reminder_time"],
             "big_driver_names": json.loads(row["big_driver_names_json"] or "[]"),
             "small_driver_names": json.loads(row["small_driver_names_json"] or "[]"),
+            "patrol_team_names": json.loads(row["patrol_team_names_json"] or "[]"),
+            "station_names": json.loads(row["station_names_json"] or "[]"),
+            "office_names": json.loads(row["office_names_json"] or "[]"),
             "message_template": _normalize_daily_duty_template(row["message_template"]),
             "notification_room_id": row["notification_room_id"],
             "notification_room_name": row["notification_room_name"],
