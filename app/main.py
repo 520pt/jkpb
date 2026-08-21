@@ -432,6 +432,7 @@ class DailyDutyConfigRequest(BaseModel):
     big_driver_names: list[str] = []
     small_driver_names: list[str] = []
     patrol_team_names: list[str] = []
+    patrol_team_groups: list[dict[str, Any]] = []
     station_names: list[str] = []
     office_names: list[str] = []
     message_template: str = DEFAULT_DAILY_DUTY_TEMPLATE
@@ -9207,6 +9208,7 @@ def _build_daily_duty_preview(repo: DutyRepository, target: date) -> dict[str, A
     big_driver_set = set(config["big_driver_names"])
     small_driver_set = set(config["small_driver_names"])
     patrol_team_set = set(config["patrol_team_names"])
+    patrol_names, patrol_semantics_seen = _patrol_team_summary_names(rows, patrol_team_set)
     station_set = set(config["station_names"])
     office_set = set(config["office_names"])
     on_duty_names = [row["name"] for row in rows if _is_on_duty_code(row["code"])]
@@ -9218,20 +9220,25 @@ def _build_daily_duty_preview(repo: DutyRepository, target: date) -> dict[str, A
         | set(shift_names["night"])
         | set(big_drivers)
         | set(small_drivers)
-        | patrol_team_set
         | station_set
         | office_set
         | set(afternoon_rest)
         | set(resting)
         | set(afternoon_return)
     )
+    if patrol_semantics_seen:
+        excluded |= set(patrol_names)
+    else:
+        excluded |= patrol_team_set
     standby = [name for name in on_duty_names if name not in excluded]
     values = {
         "early": _join_names(shift_names["early"]),
         "tomorrow_early": _join_names(shift_names["tomorrow_early"]),
         "middle": _join_names(shift_names["middle"]),
         "night": _join_names(shift_names["night"]),
-        "patrol": _join_names([name for name in on_duty_names if name in patrol_team_set]) or _join_names(standby),
+        "patrol": _join_names(patrol_names)
+        if patrol_semantics_seen
+        else (_join_names([name for name in on_duty_names if name in patrol_team_set]) or _join_names(standby)),
         "station": _join_names([name for name in on_duty_names if name in station_set]),
         "office": _join_names([name for name in on_duty_names if name in office_set]),
         "big_drivers": _join_names(big_drivers),
@@ -9251,6 +9258,22 @@ def _build_daily_duty_preview(repo: DutyRepository, target: date) -> dict[str, A
         "notification_room_name": str(config.get("notification_room_name") or ""),
         "send_content_mode": _normalize_send_content_mode(str(config.get("send_content_mode") or "both"), "both"),
     }
+
+
+def _patrol_team_summary_names(rows: list[dict[str, str]], patrol_team_set: set[str]) -> tuple[list[str], bool]:
+    patrol_names: list[str] = []
+    semantics_seen = False
+    for row in rows:
+        name = str(row.get("name") or "").strip()
+        if not name or name not in patrol_team_set:
+            continue
+        code = str(row.get("code") or "").strip()
+        if code == "巡":
+            patrol_names.append(name)
+            semantics_seen = True
+        elif code in {"备", "早", "中", "晚", "夜"}:
+            semantics_seen = True
+    return patrol_names, semantics_seen
 
 
 def _diff_roster_grids(existing_grid: list[dict[str, Any]], incoming_grid: list[dict[str, Any]]) -> list[dict[str, Any]]:

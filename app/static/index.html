@@ -7145,9 +7145,17 @@
                     <div id="officeNamesMultiSelect" class="name-multi-select" data-target-input="officeNames" data-title="办公室" data-empty-label="暂无办公室人员"></div>
                     <textarea id="officeNames" class="hidden-field"></textarea>
                   </label>
-                  <label class="people-role-card">班组
-                    <div id="patrolTeamNamesMultiSelect" class="name-multi-select" data-target-input="patrolTeamNames" data-title="班组" data-empty-label="暂无班组人员"></div>
-                    <textarea id="patrolTeamNames" class="hidden-field"></textarea>
+                  <label class="people-role-card">一班
+                    <div id="patrolTeamOneNamesMultiSelect" class="name-multi-select" data-target-input="patrolTeamOneNames" data-title="一班" data-empty-label="暂无一班人员"></div>
+                    <textarea id="patrolTeamOneNames" class="hidden-field"></textarea>
+                  </label>
+                  <label class="people-role-card">二班
+                    <div id="patrolTeamTwoNamesMultiSelect" class="name-multi-select" data-target-input="patrolTeamTwoNames" data-title="二班" data-empty-label="暂无二班人员"></div>
+                    <textarea id="patrolTeamTwoNames" class="hidden-field"></textarea>
+                  </label>
+                  <label class="people-role-card">三班
+                    <div id="patrolTeamThreeNamesMultiSelect" class="name-multi-select" data-target-input="patrolTeamThreeNames" data-title="三班" data-empty-label="暂无三班人员"></div>
+                    <textarea id="patrolTeamThreeNames" class="hidden-field"></textarea>
                   </label>
                   <label class="people-role-card">大车驾驶员
                     <div id="bigDriverNamesMultiSelect" class="name-multi-select" data-target-input="bigDriverNames" data-title="大车驾驶员" data-empty-label="从人员名单中选择"></div>
@@ -8657,7 +8665,7 @@
             `发送时间：${daily.reminder_time || "07:50"}`,
             isWecomAppNotificationSelected() ? `接收人：${wecomAppTargetSummary("daily_duty")}` : "",
             `通知通道：${notificationText}`,
-            `岗位分组：班组 ${(daily.patrol_team_names || []).length} 人，站管 ${(daily.station_names || []).length} 人，办公室 ${(daily.office_names || []).length} 人，大车驾驶员 ${(daily.big_driver_names || []).length} 人，小车驾驶员 ${(daily.small_driver_names || []).length} 人`,
+            `岗位分组：${(normalizePatrolTeamGroups(daily.patrol_team_groups || [], daily.patrol_team_names || []) || []).map((group) => `${group.name} ${group.members.length} 人`).join("，")}，站管 ${(daily.station_names || []).length} 人，办公室 ${(daily.office_names || []).length} 人，大车驾驶员 ${(daily.big_driver_names || []).length} 人，小车驾驶员 ${(daily.small_driver_names || []).length} 人`,
           ].filter(Boolean),
           actions: [
             { label: "去配置", target: "driverSettings", primary: true },
@@ -10288,10 +10296,14 @@
       { containerId: "personnelNamesMultiSelect", inputId: "personnelNames", title: "人员名单", mode: "directory", emptyLabel: "暂无人员，先导入排班或手动添加" },
       { containerId: "stationNamesMultiSelect", inputId: "stationNames", title: "站管", emptyLabel: "暂无站管" },
       { containerId: "officeNamesMultiSelect", inputId: "officeNames", title: "办公室", emptyLabel: "暂无办公室人员" },
-      { containerId: "patrolTeamNamesMultiSelect", inputId: "patrolTeamNames", title: "班组", emptyLabel: "暂无班组人员" },
+      { containerId: "patrolTeamOneNamesMultiSelect", inputId: "patrolTeamOneNames", title: "一班", emptyLabel: "暂无一班人员" },
+      { containerId: "patrolTeamTwoNamesMultiSelect", inputId: "patrolTeamTwoNames", title: "二班", emptyLabel: "暂无二班人员" },
+      { containerId: "patrolTeamThreeNamesMultiSelect", inputId: "patrolTeamThreeNames", title: "三班", emptyLabel: "暂无三班人员" },
       { containerId: "bigDriverNamesMultiSelect", inputId: "bigDriverNames", title: "大车驾驶员", emptyLabel: "暂无大车驾驶员" },
       { containerId: "smallDriverNamesMultiSelect", inputId: "smallDriverNames", title: "小车驾驶员", emptyLabel: "暂无小车驾驶员" },
     ];
+
+    const PATROL_TEAM_GROUP_TITLES = ["一班", "二班", "三班"];
 
     function roleSelectConfigs() {
       return NAME_MULTI_SELECT_CONFIGS.filter((config) => config.mode !== "directory");
@@ -10326,6 +10338,40 @@
         });
       });
       return map;
+    }
+
+    function patrolTeamGroupConfigs() {
+      return PATROL_TEAM_GROUP_TITLES.map((title, index) => ({
+        title,
+        inputId: `patrolTeam${["One", "Two", "Three"][index]}Names`,
+        emptyLabel: `暂无${title}人员`,
+      }));
+    }
+
+    function patrolTeamGroupMembers() {
+      return patrolTeamGroupConfigs().map((config) => ({
+        name: config.title,
+        members: nameMultiSelectValues(config.inputId),
+      }));
+    }
+
+    function normalizePatrolTeamGroups(groups = [], fallbackNames = []) {
+      const groupList = Array.isArray(groups) ? groups : [];
+      if (groupList.length) {
+        return PATROL_TEAM_GROUP_TITLES.map((title, index) => {
+          const group = groupList[index] || {};
+          const members = Array.isArray(group.members) ? group.members : (Array.isArray(group.names) ? group.names : []);
+          return {
+            name: String(group.name || title).trim() || title,
+            members: parseNameList(members.join ? members.join("，") : String(members || "")),
+          };
+        });
+      }
+      return [
+        { name: "一班", members: parseNameList((fallbackNames || []).join ? (fallbackNames || []).join("，") : String(fallbackNames || "")) },
+        { name: "二班", members: [] },
+        { name: "三班", members: [] },
+      ];
     }
 
     function personnelContactSummary(name) {
@@ -11162,12 +11208,14 @@
     if ($("addSmallDriverBtn")) $("addSmallDriverBtn").addEventListener("click", () => addDriverName("smallDriverNames"));
 
     function dailyDutyConfigPayload() {
+      const patrolGroups = patrolTeamGroupMembers();
       return {
         enabled: $("dailyDutyEnabled").checked,
         reminder_time: $("dailyDutyTime").value || "07:50",
         big_driver_names: parseNameList($("bigDriverNames").value),
         small_driver_names: parseNameList($("smallDriverNames").value),
-        patrol_team_names: parseNameList($("patrolTeamNames").value),
+        patrol_team_names: Array.from(new Set(patrolGroups.flatMap((group) => group.members))).filter(Boolean),
+        patrol_team_groups: patrolGroups,
         station_names: parseNameList($("stationNames").value),
         office_names: parseNameList($("officeNames").value),
         message_template: $("dailyDutyTemplate").value.trim(),
@@ -11186,7 +11234,10 @@
       if ($("dailyDutySendContentMode")) $("dailyDutySendContentMode").value = config.send_content_mode || "both";
       setNameListValue("bigDriverNames", config.big_driver_names || []);
       setNameListValue("smallDriverNames", config.small_driver_names || []);
-      setNameListValue("patrolTeamNames", config.patrol_team_names || []);
+      const patrolGroups = normalizePatrolTeamGroups(config.patrol_team_groups || [], config.patrol_team_names || []);
+      patrolTeamGroupConfigs().forEach((groupConfig, index) => {
+        setNameListValue(groupConfig.inputId, patrolGroups[index]?.members || []);
+      });
       setNameListValue("stationNames", config.station_names || []);
       setNameListValue("officeNames", config.office_names || []);
       $("dailyDutyTemplate").value = config.message_template || "";
@@ -13901,8 +13952,9 @@
         ? `${person.daily_time || "未设时间"} / 班前 ${person.before_shift_minutes || 0} 分钟`
         : "";
       const dutyConfig = state.dailyDutyConfig || {};
+      const patrolGroups = normalizePatrolTeamGroups(dutyConfig.patrol_team_groups || [], dutyConfig.patrol_team_names || []);
       const dutyGroups = [
-        ["班组", dutyConfig.patrol_team_names || []],
+        ...patrolGroups.map((group) => [group.name, group.members || []]),
         ["站管", dutyConfig.station_names || []],
         ["办公室", dutyConfig.office_names || []],
         ["大车驾驶员", dutyConfig.big_driver_names || []],
@@ -14936,7 +14988,9 @@
     setupNameMultiSelect("personnelNamesMultiSelect");
     setupNameMultiSelect("stationNamesMultiSelect");
     setupNameMultiSelect("officeNamesMultiSelect");
-    setupNameMultiSelect("patrolTeamNamesMultiSelect");
+    setupNameMultiSelect("patrolTeamOneNamesMultiSelect");
+    setupNameMultiSelect("patrolTeamTwoNamesMultiSelect");
+    setupNameMultiSelect("patrolTeamThreeNamesMultiSelect");
     setupNameMultiSelect("bigDriverNamesMultiSelect");
     setupNameMultiSelect("smallDriverNamesMultiSelect");
     loadTodayReminders();

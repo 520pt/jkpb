@@ -19,3 +19,8 @@ apk_analysis_*/
 .env
 *.log
 wechat/
+app/static/index.backup-*.html
+app/static/wenxibuddy081401.html
+app/static/settings-redesign.js
+package.json
+package-lock.json

@@ -27,6 +27,7 @@ DEFAULT_DAILY_DUTY_TEMPLATE = (
     "正在休息：{resting}\n"
     "今日下午到岗：{afternoon_return}"
 )
+DEFAULT_PATROL_TEAM_GROUP_NAMES = ("一班", "二班", "三班")
 LEGACY_REST_MESSAGE_TEMPLATE = "{name} {date} 今天休息"
 LEGACY_TOMORROW_REST_MESSAGE_TEMPLATE = "{name} {date} 明天休息"
 DEFAULT_REST_MESSAGE_TEMPLATE = "{name} {rest_status}"
@@ -92,6 +93,42 @@ DEFAULT_PATROL_WARNING_END_TEMPLATE = (
     "预警已结束：{elapsed_hours} 小时\n"
     "距离预警结束后{window_hours}小时内{patrol_frequency_clause}，倒计时结束还有 {remaining_hours} 小时。"
 )
+
+
+def _clean_name_list(values: list[str] | None) -> list[str]:
+    seen: list[str] = []
+    for value in values or []:
+        name = str(value or "").strip()
+        if name and name not in seen:
+            seen.append(name)
+    return seen
+
+
+def _normalize_patrol_team_groups(groups: list[dict[str, Any]] | None, fallback_names: list[str] | None = None) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    raw_groups = list(groups or [])
+    if raw_groups:
+        for index, group in enumerate(raw_groups[: len(DEFAULT_PATROL_TEAM_GROUP_NAMES)]):
+            members = group.get("members")
+            if members is None:
+                members = group.get("names")
+            normalized.append(
+                {
+                    "name": str(group.get("name") or DEFAULT_PATROL_TEAM_GROUP_NAMES[index]).strip() or DEFAULT_PATROL_TEAM_GROUP_NAMES[index],
+                    "members": _clean_name_list(list(members or [])),
+                }
+            )
+    elif fallback_names is not None:
+        normalized.append({"name": DEFAULT_PATROL_TEAM_GROUP_NAMES[0], "members": _clean_name_list(list(fallback_names))})
+    while len(normalized) < len(DEFAULT_PATROL_TEAM_GROUP_NAMES):
+        normalized.append({"name": DEFAULT_PATROL_TEAM_GROUP_NAMES[len(normalized)], "members": []})
+    return normalized[: len(DEFAULT_PATROL_TEAM_GROUP_NAMES)]
+
+
+def _flatten_patrol_team_groups(groups: list[dict[str, Any]] | None, fallback_names: list[str] | None = None) -> list[str]:
+    if groups:
+        return _clean_name_list([name for group in groups for name in list(group.get("members") or group.get("names") or [])])
+    return _clean_name_list(list(fallback_names or []))
 NOTIFICATION_SENDER_TYPES = {"wecom_webhook"}
 NOTIFICATION_MENTION_MODES = {"none", "all", "person", "custom"}
 CONFIG_EXPORT_TABLES = [
@@ -395,6 +432,7 @@ class DutyRepository:
                     big_driver_names_json TEXT NOT NULL DEFAULT '[]',
                     small_driver_names_json TEXT NOT NULL DEFAULT '[]',
                     patrol_team_names_json TEXT NOT NULL DEFAULT '[]',
+                    patrol_team_groups_json TEXT NOT NULL DEFAULT '[]',
                     station_names_json TEXT NOT NULL DEFAULT '[]',
                     office_names_json TEXT NOT NULL DEFAULT '[]',
                     message_template TEXT NOT NULL DEFAULT '',
@@ -604,6 +642,8 @@ class DutyRepository:
                 conn.execute("ALTER TABLE daily_duty_config ADD COLUMN send_content_mode TEXT NOT NULL DEFAULT 'both'")
             if "patrol_team_names_json" not in daily_columns:
                 conn.execute("ALTER TABLE daily_duty_config ADD COLUMN patrol_team_names_json TEXT NOT NULL DEFAULT '[]'")
+            if "patrol_team_groups_json" not in daily_columns:
+                conn.execute("ALTER TABLE daily_duty_config ADD COLUMN patrol_team_groups_json TEXT NOT NULL DEFAULT '[]'")
             if "station_names_json" not in daily_columns:
                 conn.execute("ALTER TABLE daily_duty_config ADD COLUMN station_names_json TEXT NOT NULL DEFAULT '[]'")
             if "office_names_json" not in daily_columns:
@@ -1909,6 +1949,7 @@ class DutyRepository:
         big_driver_names: list[str] | None = None,
         small_driver_names: list[str] | None = None,
         patrol_team_names: list[str] | None = None,
+        patrol_team_groups: list[dict[str, Any]] | None = None,
         station_names: list[str] | None = None,
         office_names: list[str] | None = None,
         message_template: str = DEFAULT_DAILY_DUTY_TEMPLATE,
@@ -1920,14 +1961,15 @@ class DutyRepository:
             conn.execute(
                 """
                 INSERT INTO daily_duty_config
-                    (id, enabled, reminder_time, big_driver_names_json, small_driver_names_json, patrol_team_names_json, station_names_json, office_names_json, message_template, notification_room_id, notification_room_name, send_content_mode)
-                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, enabled, reminder_time, big_driver_names_json, small_driver_names_json, patrol_team_names_json, patrol_team_groups_json, station_names_json, office_names_json, message_template, notification_room_id, notification_room_name, send_content_mode)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     enabled = excluded.enabled,
                     reminder_time = excluded.reminder_time,
                     big_driver_names_json = excluded.big_driver_names_json,
                     small_driver_names_json = excluded.small_driver_names_json,
                     patrol_team_names_json = excluded.patrol_team_names_json,
+                    patrol_team_groups_json = excluded.patrol_team_groups_json,
                     station_names_json = excluded.station_names_json,
                     office_names_json = excluded.office_names_json,
                     message_template = excluded.message_template,
@@ -1939,11 +1981,12 @@ class DutyRepository:
                 (
                     int(enabled),
                     reminder_time or "07:50",
-                    json.dumps(big_driver_names or [], ensure_ascii=False),
-                    json.dumps(small_driver_names or [], ensure_ascii=False),
-                    json.dumps(patrol_team_names or [], ensure_ascii=False),
-                    json.dumps(station_names or [], ensure_ascii=False),
-                    json.dumps(office_names or [], ensure_ascii=False),
+                    json.dumps(_clean_name_list(big_driver_names), ensure_ascii=False),
+                    json.dumps(_clean_name_list(small_driver_names), ensure_ascii=False),
+                    json.dumps(_flatten_patrol_team_groups(patrol_team_groups, patrol_team_names), ensure_ascii=False),
+                    json.dumps(_normalize_patrol_team_groups(patrol_team_groups, patrol_team_names), ensure_ascii=False),
+                    json.dumps(_clean_name_list(station_names), ensure_ascii=False),
+                    json.dumps(_clean_name_list(office_names), ensure_ascii=False),
                     _normalize_daily_duty_template(message_template),
                     str(notification_room_id or "").strip(),
                     str(notification_room_name or "").strip(),
@@ -1961,6 +2004,7 @@ class DutyRepository:
                 "big_driver_names": [],
                 "small_driver_names": [],
                 "patrol_team_names": [],
+                "patrol_team_groups": _normalize_patrol_team_groups(None, []),
                 "station_names": [],
                 "office_names": [],
                 "message_template": DEFAULT_DAILY_DUTY_TEMPLATE,
@@ -1974,6 +2018,10 @@ class DutyRepository:
             "big_driver_names": json.loads(row["big_driver_names_json"] or "[]"),
             "small_driver_names": json.loads(row["small_driver_names_json"] or "[]"),
             "patrol_team_names": json.loads(row["patrol_team_names_json"] or "[]"),
+            "patrol_team_groups": _normalize_patrol_team_groups(
+                json.loads(row["patrol_team_groups_json"] or "[]"),
+                json.loads(row["patrol_team_names_json"] or "[]"),
+            ),
             "station_names": json.loads(row["station_names_json"] or "[]"),
             "office_names": json.loads(row["office_names_json"] or "[]"),
             "message_template": _normalize_daily_duty_template(row["message_template"]),

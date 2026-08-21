@@ -141,6 +141,10 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'id="stationNamesMultiSelect"' in html
     assert 'id="bigDriverNamesMultiSelect"' in html
     assert 'id="smallDriverNamesMultiSelect"' in html
+    assert 'id="patrolTeamOneNamesMultiSelect"' in html
+    assert 'id="patrolTeamTwoNamesMultiSelect"' in html
+    assert 'id="patrolTeamThreeNamesMultiSelect"' in html
+    assert 'id="patrolTeamNamesMultiSelect"' not in html
     assert 'id="bigDriverNamesEditor"' not in html
     assert 'id="smallDriverNamesEditor"' not in html
     assert 'data-subnav-kind="main"' in html
@@ -6551,6 +6555,46 @@ def test_daily_duty_preview_excludes_resting_driver(tmp_path):
     assert body["details"]["afternoon_return"] == "示例庚"
     assert "大车：无" in body["content"]
     assert "今日下午到岗：示例庚" in body["content"]
+
+
+def test_daily_duty_preview_keeps_monitor_shift_people_out_of_patrol_list(tmp_path):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/rosters/confirm",
+        json={
+            "year": 2025,
+            "month": 9,
+            "source_image_path": "uploads/month.png",
+            "grid": [
+                {"name": "商邱宏", "days": {"16": "早"}},
+                {"name": "罗富耀", "days": {"16": "中"}},
+                {"name": "王德刚", "days": {"16": "巡"}},
+                {"name": "沐春宇", "days": {"16": "备"}},
+            ],
+        },
+    )
+    client.post(
+        "/api/daily-duty-config",
+        json={
+            "enabled": True,
+            "reminder_time": "07:20",
+            "patrol_team_names": ["商邱宏", "罗富耀", "王德刚", "沐春宇"],
+            "send_content_mode": "image",
+        },
+    )
+
+    response = client.post("/api/daily-duty-preview", json={"target_date": "2025-09-16"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["details"]["early"] == "商邱宏"
+    assert body["details"]["middle"] == "罗富耀"
+    assert body["details"]["patrol"] == "王德刚"
+    assert body["details"]["standby"] == "沐春宇"
+    assert "巡查班：王德刚" in body["content"]
+    assert "监控班：今日早班：商邱宏，明日早班：无，中班：罗富耀，晚班：无" in body["content"]
+    assert "备勤人员：沐春宇" in body["content"]
 
 
 def test_daily_duty_test_sends_preview_image_to_webhook(tmp_path, monkeypatch):
