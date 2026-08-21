@@ -1649,6 +1649,9 @@
       color: #ffffff;
       box-shadow: 0 1px 2px rgba(37, 99, 235, 0.18);
     }
+    #wecomAppConfigBody.hidden {
+      display: none;
+    }
     .daily-duty-layout {
       display: grid;
       grid-template-columns: minmax(420px, 0.95fr) minmax(360px, 1.05fr);
@@ -6829,8 +6832,8 @@
               <div class="notification-title-row">
                 <h3 id="notificationChannelTitle" class="page-level-title">通知通道</h3>
                 <div class="notification-channel-switch" role="group" aria-label="发送通道">
-                  <button type="button" data-notification-sender="wecom_webhook">切换到企业微信群机器人</button>
-                  <button type="button" data-notification-sender="wecom_app">切换到企业微信自建应用</button>
+                  <button type="button" data-notification-sender="wecom_webhook">企业微信群机器人</button>
+                  <button type="button" data-notification-sender="wecom_app">企业微信自建应用</button>
                 </div>
                 <input id="notificationSenderType" type="hidden" value="wecom_webhook" />
               </div>
@@ -6946,17 +6949,19 @@
                       3）Token 和 EncodingAESKey 可以在企业微信页面随机生成，再填到这里保存。<br />
                       4）保存本页面配置后，再到企业微信页面点“保存/验证 URL”。群内机器人异常时，优先使用这个自建应用私聊查询。
                     </div>
-                    <div class="field-grid">
-                      <label>企业 ID CorpID <input id="wecomAppCorpId" autocomplete="off" placeholder="例如 wwxxxxxxxxxxxxxx" /></label>
-                      <label>应用 AgentId <input id="wecomAppAgentId" autocomplete="off" placeholder="自建应用详情里的 AgentId" /></label>
-                      <label>应用 Secret <input id="wecomAppSecret" type="password" autocomplete="new-password" placeholder="已配置时可留空" /></label>
-                      <label>回调 Token <input id="wecomAppToken" type="password" autocomplete="new-password" placeholder="接收消息页面的 Token，已配置时可留空" /></label>
-                      <label>EncodingAESKey <input id="wecomAppEncodingAesKey" type="password" autocomplete="new-password" placeholder="43 位，已配置时可留空" /></label>
-                    </div>
+                    <div id="wecomAppConfigBody" class="stack">
+                      <div class="field-grid">
+                        <label>企业 ID CorpID <input id="wecomAppCorpId" autocomplete="off" placeholder="例如 wwxxxxxxxxxxxxxx" /></label>
+                        <label>应用 AgentId <input id="wecomAppAgentId" autocomplete="off" placeholder="自建应用详情里的 AgentId" /></label>
+                        <label>应用 Secret <input id="wecomAppSecret" type="password" autocomplete="new-password" placeholder="已配置时可留空" /></label>
+                        <label>回调 Token <input id="wecomAppToken" type="password" autocomplete="new-password" placeholder="接收消息页面的 Token，已配置时可留空" /></label>
+                        <label>EncodingAESKey <input id="wecomAppEncodingAesKey" type="password" autocomplete="new-password" placeholder="43 位，已配置时可留空" /></label>
+                      </div>
 
-                    <div class="item">
-                      <strong>配置测试</strong>
-                      <small>测试会通过企业微信自建应用发送一条消息。收到后请在自建应用里回复“菜单”，能返回查询菜单就说明回调交互也生效。自定义菜单现在放在“交互菜单”页维护。</small>
+                      <div class="item">
+                        <strong>配置测试</strong>
+                        <small>测试会通过企业微信自建应用发送一条消息。收到后请在自建应用里回复“菜单”，能返回查询菜单就说明回调交互也生效。自定义菜单现在放在“交互菜单”页维护。</small>
+                      </div>
                     </div>
                   </div>
                   <div class="settings-actions notification-card-actions">
@@ -12209,6 +12214,7 @@
       const activePanel = selectedNotificationSenderType();
       const isLightAgent = false;
       const isWecomApp = activePanel === "wecom_app";
+      const wecomAppEnabled = Boolean($("wecomAppEnabled") && $("wecomAppEnabled").checked);
       document.querySelectorAll("[data-notification-sender]").forEach((button) => {
         const active = button.dataset.notificationSender === activePanel;
         button.classList.toggle("active", active);
@@ -12217,7 +12223,8 @@
       $("notificationCommonFields").classList.toggle("hidden", isWecomApp);
       $("wecomNotificationFields").classList.toggle("hidden", activePanel !== "wecom_webhook");
       if ($("lightAgentNotificationFields")) $("lightAgentNotificationFields").classList.add("hidden");
-      if ($("wecomAppTargetsEditor")) $("wecomAppTargetsEditor").classList.toggle("hidden", !isWecomApp);
+      if ($("wecomAppTargetsEditor")) $("wecomAppTargetsEditor").classList.toggle("hidden", !isWecomApp || !wecomAppEnabled);
+      if ($("wecomAppConfigBody")) $("wecomAppConfigBody").classList.toggle("hidden", !isWecomApp || !wecomAppEnabled);
       $("wecomAppNotificationFields").classList.toggle("hidden", !isWecomApp);
       if ($("lightAgentUrlField")) $("lightAgentUrlField").classList.add("hidden");
       if ($("lightAgentTokenField")) $("lightAgentTokenField").classList.add("hidden");
@@ -12456,13 +12463,11 @@
     if ($("wecomAiBotEnabled")) $("wecomAiBotEnabled").addEventListener("change", updateWechatInteractionChannelHints);
     if ($("wecomAppEnabled")) {
       $("wecomAppEnabled").addEventListener("change", () => {
-        if ($("wecomAppEnabled").checked) {
+        if ($("wecomAppEnabled").checked && selectedNotificationSenderType() !== "wecom_app") {
           setNotificationSenderType("wecom_app");
-        } else if (selectedNotificationSenderType() === "wecom_app") {
-          setNotificationSenderType("wecom_webhook");
-        } else {
-          updateNotificationBackendFields();
+          return;
         }
+        updateNotificationBackendFields();
       });
     }
     $("notificationMentionMode").addEventListener("change", updateNotificationMentionFields);
