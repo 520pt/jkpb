@@ -123,3 +123,4 @@
 - 2026-08-21: 首页配置总览必须是独立 `home-config` 子页，不能把总览组件直接常驻塞进首页所有子页；`#homeConfigOverview` 和卡片网格都要用 `data-subview-scope="home-config"`，首页摘要网格只给 `home-today/home-next/home-duty/home-records`。白色总览卡片标题色要用 `html[data-theme="light"] #appShell .config-overview-card h3` 这类更高优先级覆盖，避免被全局暗色壳体 `#appShell h3` 压成浅色。
 - 2026-08-21: 排班图片里的白底 `中` 先作为 `white_middle` 元数据保留，上传/自动核对后再按岗位分组回填：班组按相邻行休息模式拆小组，监控段白中字为 `备`，其他工作段为 `巡`；站管仍为空，办公室为 `办`。颜色分类不能把已识别的黄底休息再覆盖进早/中/晚聚类。
 - 2026-08-21: 企业微信自建应用“录入今日机电”和“施工点维护”是公共业务流程，pending 状态和确认/重试/取消/结果消息必须按 `WECOM_APP_SHARED_PENDING_KEY` 与公共通知接收人共享，避免 A 发起后 B 看不到而重复录入；“施工图片”仍按发送者隔离，防止别人的地点/图片串到同一份 Word。
+- 2026-08-22: 岗位分组里的“班组”已改成默认三组（一班/二班/三班）保存与回显；旧的平铺 `patrol_team_names` 仍保留兼容，但前端/API/数据库现在都要同步维护 `patrol_team_groups`，不要再把分组压成一串名单。
