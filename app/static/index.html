@@ -2083,7 +2083,7 @@
       max-height: calc(100vh - 172px);
     }
     .reminder-card-list {
-      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
       align-content: start;
       flex: 1;
       min-height: 0;
@@ -2096,30 +2096,109 @@
     .reminder-config-card {
       display: flex;
       flex-direction: column;
-      gap: 7px;
-      min-height: 142px;
+      gap: 8px;
+      min-height: 0;
       padding: 10px;
+      cursor: pointer;
+      transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
     }
-    .reminder-config-card strong {
+    .reminder-config-card:hover {
+      border-color: #93c5fd;
+      box-shadow: 0 6px 18px rgba(59, 130, 246, 0.08);
+      transform: translateY(-1px);
+    }
+    .reminder-config-card.editing {
+      border-color: #60a5fa;
+      background: #eff6ff;
+    }
+    .reminder-card-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .reminder-card-head strong {
       margin: 0;
       font-size: 14px;
       line-height: 1.35;
     }
-    .reminder-config-card small {
-      display: block;
+    .reminder-card-subtitle {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      color: #64748b;
+      font-size: 12px;
       line-height: 1.45;
     }
-    .reminder-card-message {
-      min-height: 20px;
-      line-height: 1.45;
-      color: #111827;
-      word-break: break-word;
-    }
-    .reminder-card-actions {
+    .reminder-summary-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 8px;
+    }
+    .reminder-summary-item {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+      padding: 7px 8px;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      background: #fff;
+    }
+    .reminder-summary-item span {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.2;
+    }
+    .reminder-summary-item strong {
+      min-width: 0;
+      color: #0f172a;
+      font-size: 12px;
+      line-height: 1.35;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .reminder-summary-item.ok strong {
+      color: #166534;
+    }
+    .reminder-summary-item.warn strong {
+      color: #92400e;
+    }
+    .reminder-summary-item.bad strong {
+      color: #991b1b;
+    }
+    .reminder-card-message {
+      min-height: 18px;
+      line-height: 1.45;
+      color: #334155;
+      word-break: break-word;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+    .reminder-card-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      flex-wrap: wrap;
       margin-top: auto;
+    }
+    .reminder-card-actions button {
+      height: 30px;
+      padding: 0 10px;
+      font-size: 12px;
+    }
+    .reminder-config-card .people-status-pill {
+      margin-right: 0;
+      margin-bottom: 0;
+      min-height: 22px;
+      padding: 2px 8px;
+      font-size: 12px;
+    }
+    .reminder-list-note {
+      margin-top: -2px;
+      font-size: 12px;
     }
     .reminder-image-preview-panel {
       margin-top: 12px;
@@ -3425,6 +3504,9 @@
       .records-list,
       .version-list {
         max-height: none;
+      }
+      .reminder-summary-grid {
+        grid-template-columns: 1fr;
       }
       .today-reminders,
       .today-reminder-item.has-image,
@@ -5637,6 +5719,177 @@
       font-size: 13px;
       line-height: normal;
     }
+    #personnelSettings .patrol-team-groups-editor {
+      display: grid;
+      gap: 12px;
+      margin-top: 12px;
+    }
+    #personnelSettings .patrol-team-groups-toolbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border: 1px solid rgba(203, 213, 225, .82);
+      border-radius: 16px;
+      background: #f8fafc;
+    }
+    #personnelSettings .patrol-team-groups-toolbar strong {
+      display: block;
+      color: #172033;
+      font-size: 15px;
+      line-height: 1.2;
+    }
+    #personnelSettings .patrol-team-groups-toolbar small {
+      display: block;
+      margin-top: 4px;
+      color: #64748b;
+      line-height: 1.5;
+    }
+    #personnelSettings .patrol-team-groups-list {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      align-items: start;
+    }
+    #personnelSettings .patrol-team-group-card {
+      display: grid;
+      gap: 10px;
+      min-width: 0;
+      padding: 0;
+      overflow: visible;
+      color: #172033;
+    }
+    #personnelSettings .patrol-team-group-head {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    #personnelSettings .patrol-team-group-name-field {
+      flex: 1;
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+      color: transparent;
+      font-size: 0;
+      line-height: 0;
+    }
+    #personnelSettings .patrol-team-group-name-field span {
+      color: #64748b;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1;
+    }
+    #personnelSettings .patrol-team-group-name-field input {
+      width: 100%;
+      height: 40px;
+      padding: 0 12px;
+      border: 1px solid rgba(203, 213, 225, .92);
+      border-radius: 12px;
+      background: #fff;
+      color: #172033;
+      font-size: 14px;
+      font-weight: 700;
+      box-shadow: 0 1px 0 rgba(255, 255, 255, .9), 0 8px 18px rgba(24, 33, 47, .035);
+    }
+    #personnelSettings .patrol-team-group-title {
+      display: block;
+      color: #334155;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.3;
+    }
+    #personnelSettings .patrol-team-group-select {
+      position: relative;
+      z-index: 1;
+      min-width: 0;
+      color: #172033;
+      font-size: 13px;
+      line-height: normal;
+      overflow: visible;
+    }
+    #personnelSettings .patrol-team-group-select.is-open {
+      z-index: 30;
+    }
+    #personnelSettings .patrol-team-group-select .name-multi-select-head,
+    #personnelSettings .patrol-team-group-select .name-multi-select-summary {
+      display: none !important;
+    }
+    #personnelSettings .patrol-team-group-select .name-multi-select-control {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      min-height: 54px;
+      padding: 9px 10px;
+      border: 1px solid rgba(203, 213, 225, .92);
+      border-radius: 14px;
+      background: #fff;
+      box-shadow: 0 1px 0 rgba(255, 255, 255, .9), 0 8px 20px rgba(24, 33, 47, .045);
+      cursor: pointer;
+    }
+    #personnelSettings .patrol-team-group-select .name-multi-select-main {
+      display: grid;
+      gap: 7px;
+      min-width: 0;
+    }
+    #personnelSettings .patrol-team-group-select .name-multi-select-label-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+    }
+    #personnelSettings .patrol-team-group-select .name-multi-select-label-row strong {
+      min-width: 0;
+      color: #172033;
+      font-size: 14px;
+      font-weight: 800;
+      line-height: 1.2;
+    }
+    #personnelSettings .patrol-team-group-select .name-multi-select-label-row small {
+      flex: none;
+      color: #64748b;
+      font-size: 12px;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+    #personnelSettings .patrol-team-group-select .name-multi-select-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      min-height: 28px;
+    }
+    #personnelSettings .patrol-team-group-select .name-multi-select-placeholder {
+      color: #94a3b8;
+      font-size: 13px;
+      line-height: 28px;
+    }
+    #personnelSettings .patrol-team-group-select .name-multi-select-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: #64748b;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    #personnelSettings .patrol-team-group-select .name-multi-select-arrow {
+      display: inline-flex;
+      width: 16px;
+      height: 16px;
+      align-items: center;
+      justify-content: center;
+    }
+    #personnelSettings .patrol-team-group-select .name-multi-select-panel {
+      position: relative;
+      margin-top: 8px;
+      border-radius: 14px;
+      border: 1px solid rgba(203, 213, 225, .86);
+      background: #fff;
+      box-shadow: 0 14px 30px rgba(24, 33, 47, .08);
+    }
     .people-role-card .tag-editor {
       display: none !important;
     }
@@ -5721,6 +5974,37 @@
     }
     html[data-theme="dark"] .people-stat-row span strong {
       color: #eef4fb;
+    }
+    html[data-theme="dark"] #personnelSettings .patrol-team-groups-toolbar,
+    html[data-theme="dark"] #personnelSettings .patrol-team-group-name-field input {
+      border-color: rgba(255, 255, 255, .12);
+      background: rgba(255, 255, 255, .055);
+      color: #eef4fb;
+      box-shadow: none;
+    }
+    html[data-theme="dark"] #personnelSettings .patrol-team-groups-toolbar strong,
+    html[data-theme="dark"] #personnelSettings .patrol-team-group-title {
+      color: #eef4fb;
+    }
+    html[data-theme="dark"] #personnelSettings .patrol-team-groups-toolbar small,
+    html[data-theme="dark"] #personnelSettings .patrol-team-group-name-field span {
+      color: rgba(226, 232, 240, .72);
+    }
+    html[data-theme="dark"] #personnelSettings .patrol-team-group-select .name-multi-select-control,
+    html[data-theme="dark"] #personnelSettings .patrol-team-group-select .name-multi-select-panel {
+      border-color: rgba(255, 255, 255, .12);
+      background: rgba(255, 255, 255, .055);
+      color: #eef4fb;
+      box-shadow: none;
+    }
+    html[data-theme="dark"] #personnelSettings .patrol-team-group-select .name-multi-select-label-row strong,
+    html[data-theme="dark"] #personnelSettings .patrol-team-group-select .name-multi-select-option-name {
+      color: #eef4fb;
+    }
+    html[data-theme="dark"] #personnelSettings .patrol-team-group-select .name-multi-select-label-row small,
+    html[data-theme="dark"] #personnelSettings .patrol-team-group-select .name-multi-select-placeholder,
+    html[data-theme="dark"] #personnelSettings .patrol-team-group-select .name-multi-select-indicator {
+      color: rgba(226, 232, 240, .72);
     }
     /* 岗位分组：标准 Multi-Select，多选下拉 + Tag + 复选框 */
     #personnelSettings .people-role-card {
@@ -7133,7 +7417,7 @@
 
             <div class="side-block" data-subview-scope="people-groups">
               <h3>岗位分组</h3>
-              <p class="settings-panel-note">这里统一维护站管、办公室、班组，也把大车驾驶员和小车驾驶员并入岗位分组；休息班不需要单独配置，按排班表自动计算。</p>
+              <p class="settings-panel-note">这里统一维护站管、办公室、驾驶员和班组；班组可以新增、删除、改名，站管和办公室会自动去重，驾驶员可与其他岗位重叠；休息班不需要单独配置，按排班表自动计算。</p>
               <div class="stack">
                 <div id="personnelGroupsOverview" class="people-groups-overview"></div>
                 <div class="field-grid driver-tag-grid">
@@ -7145,18 +7429,6 @@
                     <div id="officeNamesMultiSelect" class="name-multi-select" data-target-input="officeNames" data-title="办公室" data-empty-label="暂无办公室人员"></div>
                     <textarea id="officeNames" class="hidden-field"></textarea>
                   </label>
-                  <label class="people-role-card">一班
-                    <div id="patrolTeamOneNamesMultiSelect" class="name-multi-select" data-target-input="patrolTeamOneNames" data-title="一班" data-empty-label="暂无一班人员"></div>
-                    <textarea id="patrolTeamOneNames" class="hidden-field"></textarea>
-                  </label>
-                  <label class="people-role-card">二班
-                    <div id="patrolTeamTwoNamesMultiSelect" class="name-multi-select" data-target-input="patrolTeamTwoNames" data-title="二班" data-empty-label="暂无二班人员"></div>
-                    <textarea id="patrolTeamTwoNames" class="hidden-field"></textarea>
-                  </label>
-                  <label class="people-role-card">三班
-                    <div id="patrolTeamThreeNamesMultiSelect" class="name-multi-select" data-target-input="patrolTeamThreeNames" data-title="三班" data-empty-label="暂无三班人员"></div>
-                    <textarea id="patrolTeamThreeNames" class="hidden-field"></textarea>
-                  </label>
                   <label class="people-role-card">大车驾驶员
                     <div id="bigDriverNamesMultiSelect" class="name-multi-select" data-target-input="bigDriverNames" data-title="大车驾驶员" data-empty-label="从人员名单中选择"></div>
                     <textarea id="bigDriverNames" class="hidden-field"></textarea>
@@ -7166,6 +7438,7 @@
                     <textarea id="smallDriverNames" class="hidden-field"></textarea>
                   </label>
                 </div>
+                <div id="patrolTeamGroupsEditor" class="patrol-team-groups-editor"></div>
                 <div class="settings-actions">
                   <button class="primary" id="savePersonnelGroupsBtn" type="button">保存岗位分组</button>
                 </div>
@@ -10292,21 +10565,43 @@
         .join("");
     }
 
-    const NAME_MULTI_SELECT_CONFIGS = [
-      { containerId: "personnelNamesMultiSelect", inputId: "personnelNames", title: "人员名单", mode: "directory", emptyLabel: "暂无人员，先导入排班或手动添加" },
-      { containerId: "stationNamesMultiSelect", inputId: "stationNames", title: "站管", emptyLabel: "暂无站管" },
-      { containerId: "officeNamesMultiSelect", inputId: "officeNames", title: "办公室", emptyLabel: "暂无办公室人员" },
-      { containerId: "patrolTeamOneNamesMultiSelect", inputId: "patrolTeamOneNames", title: "一班", emptyLabel: "暂无一班人员" },
-      { containerId: "patrolTeamTwoNamesMultiSelect", inputId: "patrolTeamTwoNames", title: "二班", emptyLabel: "暂无二班人员" },
-      { containerId: "patrolTeamThreeNamesMultiSelect", inputId: "patrolTeamThreeNames", title: "三班", emptyLabel: "暂无三班人员" },
-      { containerId: "bigDriverNamesMultiSelect", inputId: "bigDriverNames", title: "大车驾驶员", emptyLabel: "暂无大车驾驶员" },
-      { containerId: "smallDriverNamesMultiSelect", inputId: "smallDriverNames", title: "小车驾驶员", emptyLabel: "暂无小车驾驶员" },
+    const STATIC_NAME_MULTI_SELECT_CONFIGS = [
+      { containerId: "personnelNamesMultiSelect", inputId: "personnelNames", title: "人员名单", mode: "directory", emptyLabel: "暂无人员，先导入排班或手动添加", exclusive: false },
+      { containerId: "stationNamesMultiSelect", inputId: "stationNames", title: "站管", emptyLabel: "暂无站管", exclusive: true },
+      { containerId: "officeNamesMultiSelect", inputId: "officeNames", title: "办公室", emptyLabel: "暂无办公室人员", exclusive: true },
+      { containerId: "bigDriverNamesMultiSelect", inputId: "bigDriverNames", title: "大车驾驶员", emptyLabel: "暂无大车驾驶员", exclusive: false },
+      { containerId: "smallDriverNamesMultiSelect", inputId: "smallDriverNames", title: "小车驾驶员", emptyLabel: "暂无小车驾驶员", exclusive: false },
     ];
 
-    const PATROL_TEAM_GROUP_TITLES = ["一班", "二班", "三班"];
+    function defaultPatrolTeamGroupName(index) {
+      return ["一班", "二班", "三班"][index] || `班组${index + 1}`;
+    }
 
-    function roleSelectConfigs() {
-      return NAME_MULTI_SELECT_CONFIGS.filter((config) => config.mode !== "directory");
+    function currentPatrolTeamGroups() {
+      const dutyConfig = state.dailyDutyConfig || {};
+      return normalizePatrolTeamGroups(dutyConfig.patrol_team_groups || [], dutyConfig.patrol_team_names || []);
+    }
+
+    function patrolTeamGroupConfigs(groups = currentPatrolTeamGroups()) {
+      return groups.map((group, index) => {
+        const title = String(group.name || defaultPatrolTeamGroupName(index)).trim() || defaultPatrolTeamGroupName(index);
+        return {
+          containerId: `patrolTeamGroup${index}NamesMultiSelect`,
+          inputId: `patrolTeamGroup${index}Names`,
+          title,
+          emptyLabel: `暂无${title}人员`,
+          exclusive: true,
+          groupIndex: index,
+        };
+      });
+    }
+
+    function nameMultiSelectConfigs(groups = currentPatrolTeamGroups()) {
+      return [...STATIC_NAME_MULTI_SELECT_CONFIGS, ...patrolTeamGroupConfigs(groups)];
+    }
+
+    function roleSelectConfigs(groups = currentPatrolTeamGroups()) {
+      return nameMultiSelectConfigs(groups).filter((config) => config.mode !== "directory");
     }
 
     function personnelMultiSelectNames() {
@@ -10340,14 +10635,6 @@
       return map;
     }
 
-    function patrolTeamGroupConfigs() {
-      return PATROL_TEAM_GROUP_TITLES.map((title, index) => ({
-        title,
-        inputId: `patrolTeam${["One", "Two", "Three"][index]}Names`,
-        emptyLabel: `暂无${title}人员`,
-      }));
-    }
-
     function patrolTeamGroupMembers() {
       return patrolTeamGroupConfigs().map((config) => ({
         name: config.title,
@@ -10358,19 +10645,18 @@
     function normalizePatrolTeamGroups(groups = [], fallbackNames = []) {
       const groupList = Array.isArray(groups) ? groups : [];
       if (groupList.length) {
-        return PATROL_TEAM_GROUP_TITLES.map((title, index) => {
-          const group = groupList[index] || {};
+        return groupList.map((group, index) => {
           const members = Array.isArray(group.members) ? group.members : (Array.isArray(group.names) ? group.names : []);
           return {
-            name: String(group.name || title).trim() || title,
+            name: String(group.name || defaultPatrolTeamGroupName(index)).trim() || defaultPatrolTeamGroupName(index),
             members: parseNameList(members.join ? members.join("，") : String(members || "")),
           };
         });
       }
       return [
-        { name: "一班", members: parseNameList((fallbackNames || []).join ? (fallbackNames || []).join("，") : String(fallbackNames || "")) },
-        { name: "二班", members: [] },
-        { name: "三班", members: [] },
+        { name: defaultPatrolTeamGroupName(0), members: parseNameList((fallbackNames || []).join ? (fallbackNames || []).join("，") : String(fallbackNames || "")) },
+        { name: defaultPatrolTeamGroupName(1), members: [] },
+        { name: defaultPatrolTeamGroupName(2), members: [] },
       ];
     }
 
@@ -10446,7 +10732,10 @@
       const names = parseNameList($("personnelNames")?.value || "");
       const roleMap = roleMembershipByName();
       const unassigned = names.filter((name) => !(roleMap.get(name) || []).length);
-      const duplicated = Array.from(roleMap.entries()).filter(([, roles]) => roles.length > 1);
+      const duplicated = Array.from(roleMap.entries()).filter(([, roles]) => {
+        const nonDriverRoles = roles.filter((role) => !role.includes("驾驶员"));
+        return nonDriverRoles.length > 1;
+      });
       const roleStats = roleSelectConfigs().map((config) => {
         const count = nameMultiSelectValues(config.inputId).length;
         return `<span><strong>${escapeHtml(String(count))}</strong>${escapeHtml(config.title)}</span>`;
@@ -10462,22 +10751,114 @@
         </div>
         <div class="people-groups-check-card ${duplicated.length ? "warn" : "ok"}">
           <strong>${duplicated.length ? `重复分配 ${duplicated.length} 人` : "暂无重复分配"}</strong>
-          <small>${escapeHtml(duplicated.map(([name, roles]) => `${name}：${roles.join("/")}`).slice(0, 6).join("；") || "一个人只在一个岗位内时，这里会保持正常。")}</small>
+          <small>${escapeHtml(duplicated.map(([name, roles]) => `${name}：${roles.join("/")}`).slice(0, 6).join("；") || "站管、办公室、班组不重复时，这里会保持正常；驾驶员可与其他岗位重叠。")}</small>
         </div>
       `;
+    }
+
+    function patrolTeamGroupEditorInputId(index) {
+      return `patrolTeamGroup${index}Names`;
+    }
+
+    function patrolTeamGroupEditorContainerId(index) {
+      return `patrolTeamGroup${index}NamesMultiSelect`;
+    }
+
+    function collectPatrolTeamGroupsFromDOM() {
+      const cards = Array.from(document.querySelectorAll("#patrolTeamGroupsEditor .patrol-team-group-card"));
+      if (!cards.length) return currentPatrolTeamGroups();
+      return cards.map((card, index) => {
+        const titleInput = card.querySelector("[data-patrol-team-name]");
+        const title = String(titleInput?.value || "").trim() || defaultPatrolTeamGroupName(index);
+        const inputId = card.dataset.inputId || patrolTeamGroupEditorInputId(index);
+        return {
+          name: title,
+          members: nameMultiSelectValues(inputId),
+        };
+      });
+    }
+
+    function syncPatrolTeamGroupsFromDOM() {
+      const groups = collectPatrolTeamGroupsFromDOM();
+      state.dailyDutyConfig = {
+        ...(state.dailyDutyConfig || {}),
+        patrol_team_groups: groups,
+        patrol_team_names: Array.from(new Set(groups.flatMap((group) => group.members))).filter(Boolean),
+      };
+      return groups;
+    }
+
+    function renderPatrolTeamGroupsEditor() {
+      const target = $("patrolTeamGroupsEditor");
+      if (!target) return;
+      const groups = syncPatrolTeamGroupsFromDOM();
+      const cards = (groups.length ? groups : [{ name: defaultPatrolTeamGroupName(0), members: [] }]).map((group, index) => {
+        const title = String(group.name || defaultPatrolTeamGroupName(index)).trim() || defaultPatrolTeamGroupName(index);
+        const inputId = patrolTeamGroupEditorInputId(index);
+        const containerId = patrolTeamGroupEditorContainerId(index);
+        const members = Array.isArray(group.members) ? group.members : [];
+        return `
+          <article class="patrol-team-group-card" data-patrol-team-index="${index}" data-input-id="${escapeHtml(inputId)}">
+            <div class="patrol-team-group-head">
+              <label class="patrol-team-group-name-field">
+                <span>班组名称</span>
+                <input type="text" value="${escapeHtml(title)}" data-patrol-team-name placeholder="例如：一班 / 四班" />
+                <strong class="patrol-team-group-title">${escapeHtml(title)}</strong>
+              </label>
+              <button type="button" class="subtle danger patrol-team-group-remove" data-patrol-team-action="remove">删除</button>
+            </div>
+            <div id="${escapeHtml(containerId)}" class="name-multi-select patrol-team-group-select" data-target-input="${escapeHtml(inputId)}" data-title="${escapeHtml(title)}" data-empty-label="暂无${escapeHtml(title)}人员"></div>
+            <textarea id="${escapeHtml(inputId)}" class="hidden-field"></textarea>
+          </article>
+        `;
+      }).join("");
+      target.innerHTML = `
+        <div class="patrol-team-groups-toolbar">
+          <div>
+            <strong>班组</strong>
+            <small>可新增、重命名和删除班组；驾驶员可与其他岗位重叠，其余岗位会自动避免重复出现。</small>
+          </div>
+          <button type="button" id="addPatrolTeamGroupBtn" data-patrol-team-action="add">新增班组</button>
+        </div>
+        <div class="patrol-team-groups-list">${cards}</div>
+      `;
+      const normalizedGroups = groups.length ? groups : [{ name: defaultPatrolTeamGroupName(0), members: [] }];
+      normalizedGroups.forEach((group, index) => {
+        const title = String(group.name || defaultPatrolTeamGroupName(index)).trim() || defaultPatrolTeamGroupName(index);
+        const inputId = patrolTeamGroupEditorInputId(index);
+        const containerId = patrolTeamGroupEditorContainerId(index);
+        const input = $(inputId);
+        if (input) input.value = formatNameList(group.members || []);
+        const box = $(containerId);
+        if (box) {
+          box.dataset.open = box.dataset.open || "0";
+          box.dataset.title = title;
+          box.dataset.emptyLabel = `暂无${title}人员`;
+          setupNameMultiSelect(containerId);
+        }
+      });
+      renderPeopleGroupsOverview();
     }
 
     function filteredNameMultiSelectNames(box, selectedNames = [], config = {}) {
       const selected = selectedNames || [];
       const query = String(box?.dataset.search || "").trim().toLocaleLowerCase("zh-CN");
+      const exclusiveInUse = new Set(
+        roleSelectConfigs()
+          .filter((item) => item.exclusive && item.containerId !== box?.id)
+          .flatMap((item) => nameMultiSelectValues(item.inputId))
+          .filter(Boolean)
+      );
       return allKnownMultiSelectNames(selected).filter((name) => {
+        if (selected.includes(name)) return true;
+        if (config.exclusive !== false && exclusiveInUse.has(name)) return false;
         if (!query) return true;
-        return name.toLocaleLowerCase("zh-CN").includes(query) || selected.includes(name);
+        return name.toLocaleLowerCase("zh-CN").includes(query);
       });
     }
 
     function closeOtherNameMultiSelects(activeId = "") {
-      NAME_MULTI_SELECT_CONFIGS.forEach((config) => {
+      nameMultiSelectConfigs().forEach((config) => {
         if (config.mode === "directory" || config.containerId === activeId) return;
         const item = $(config.containerId);
         if (item && item.dataset.open === "1") {
@@ -10491,7 +10872,7 @@
       const box = $(containerId);
       if (!box) return;
       const inputId = box.dataset.targetInput || "";
-      const config = NAME_MULTI_SELECT_CONFIGS.find((item) => item.containerId === containerId) || {};
+      const config = nameMultiSelectConfigs().find((item) => item.containerId === containerId) || {};
       const selected = nameMultiSelectValues(inputId);
       const knownNames = personnelMultiSelectNames();
       if (config.mode === "directory") {
@@ -10548,7 +10929,8 @@
     }
 
     function renderNameMultiSelects() {
-      NAME_MULTI_SELECT_CONFIGS.forEach((config) => renderNameMultiSelect(config.containerId));
+      STATIC_NAME_MULTI_SELECT_CONFIGS.forEach((config) => renderNameMultiSelect(config.containerId));
+      renderPatrolTeamGroupsEditor();
       renderPeopleGroupsOverview();
     }
 
@@ -10569,6 +10951,42 @@
           const name = directoryRemove.dataset.nameMultiRemove || "";
           if (name && confirm(`确定从人员名单删除“${name}”吗？保存后会同步删除相关人员配置。`)) {
             setNameMultiSelectValues("personnelNames", nameMultiSelectValues("personnelNames").filter((item) => item !== name));
+          }
+          return;
+        }
+        const patrolAction = event.target.closest("[data-patrol-team-action]");
+        if (patrolAction) {
+          event.preventDefault();
+          event.stopPropagation();
+          const op = patrolAction.dataset.patrolTeamAction || "";
+          if (op === "add") {
+            const groups = collectPatrolTeamGroupsFromDOM();
+            groups.push({ name: defaultPatrolTeamGroupName(groups.length), members: [] });
+            state.dailyDutyConfig = {
+              ...(state.dailyDutyConfig || {}),
+              patrol_team_groups: groups,
+              patrol_team_names: Array.from(new Set(groups.flatMap((group) => group.members))).filter(Boolean),
+            };
+            renderNameMultiSelects();
+            return;
+          }
+          if (op === "remove") {
+            const card = patrolAction.closest(".patrol-team-group-card");
+            const index = Number(card?.dataset.patrolTeamIndex || -1);
+            const groups = collectPatrolTeamGroupsFromDOM();
+            if (groups.length <= 1) {
+              alert("至少保留 1 个班组。");
+              return;
+            }
+            if (Number.isInteger(index) && index >= 0 && index < groups.length) {
+              groups.splice(index, 1);
+              state.dailyDutyConfig = {
+                ...(state.dailyDutyConfig || {}),
+                patrol_team_groups: groups,
+                patrol_team_names: Array.from(new Set(groups.flatMap((group) => group.members))).filter(Boolean),
+              };
+              renderNameMultiSelects();
+            }
           }
           return;
         }
@@ -10652,6 +11070,30 @@
         const directorySearch = event.target.closest("#personnelDirectorySearch");
         if (directorySearch) {
           renderNameMultiSelect("personnelNamesMultiSelect");
+          return;
+        }
+        const patrolNameInput = event.target.closest(".patrol-team-group-name-field input[data-patrol-team-name]");
+        if (patrolNameInput) {
+          const card = patrolNameInput.closest(".patrol-team-group-card");
+          const index = Number(card?.dataset.patrolTeamIndex || -1);
+          const title = String(patrolNameInput.value || "").trim() || defaultPatrolTeamGroupName(index);
+          if (card) {
+            card.dataset.patrolTeamTitle = title;
+            const titleLabel = card.querySelector(".patrol-team-group-title");
+            if (titleLabel) titleLabel.textContent = title;
+            const box = card.querySelector(".name-multi-select");
+            if (box) {
+              box.dataset.title = title;
+              box.dataset.emptyLabel = `暂无${title}人员`;
+              renderNameMultiSelect(box.id);
+            }
+          }
+          state.dailyDutyConfig = {
+            ...(state.dailyDutyConfig || {}),
+            patrol_team_groups: collectPatrolTeamGroupsFromDOM(),
+            patrol_team_names: Array.from(new Set(collectPatrolTeamGroupsFromDOM().flatMap((group) => group.members))).filter(Boolean),
+          };
+          renderPeopleGroupsOverview();
           return;
         }
         const search = event.target.closest(".name-multi-select [data-name-multi-search]");
@@ -11208,7 +11650,7 @@
     if ($("addSmallDriverBtn")) $("addSmallDriverBtn").addEventListener("click", () => addDriverName("smallDriverNames"));
 
     function dailyDutyConfigPayload() {
-      const patrolGroups = patrolTeamGroupMembers();
+      const patrolGroups = collectPatrolTeamGroupsFromDOM();
       return {
         enabled: $("dailyDutyEnabled").checked,
         reminder_time: $("dailyDutyTime").value || "07:50",
@@ -11234,10 +11676,12 @@
       if ($("dailyDutySendContentMode")) $("dailyDutySendContentMode").value = config.send_content_mode || "both";
       setNameListValue("bigDriverNames", config.big_driver_names || []);
       setNameListValue("smallDriverNames", config.small_driver_names || []);
-      const patrolGroups = normalizePatrolTeamGroups(config.patrol_team_groups || [], config.patrol_team_names || []);
-      patrolTeamGroupConfigs().forEach((groupConfig, index) => {
-        setNameListValue(groupConfig.inputId, patrolGroups[index]?.members || []);
-      });
+      state.dailyDutyConfig = {
+        ...(state.dailyDutyConfig || {}),
+        ...config,
+        patrol_team_groups: normalizePatrolTeamGroups(config.patrol_team_groups || [], config.patrol_team_names || []),
+      };
+      renderPatrolTeamGroupsEditor();
       setNameListValue("stationNames", config.station_names || []);
       setNameListValue("officeNames", config.office_names || []);
       $("dailyDutyTemplate").value = config.message_template || "";
@@ -14985,14 +15429,7 @@
     setupNameTagEditor("bigDriverNames");
     setupNameTagEditor("smallDriverNames");
     bindNameMultiSelectDelegates();
-    setupNameMultiSelect("personnelNamesMultiSelect");
-    setupNameMultiSelect("stationNamesMultiSelect");
-    setupNameMultiSelect("officeNamesMultiSelect");
-    setupNameMultiSelect("patrolTeamOneNamesMultiSelect");
-    setupNameMultiSelect("patrolTeamTwoNamesMultiSelect");
-    setupNameMultiSelect("patrolTeamThreeNamesMultiSelect");
-    setupNameMultiSelect("bigDriverNamesMultiSelect");
-    setupNameMultiSelect("smallDriverNamesMultiSelect");
+    STATIC_NAME_MULTI_SELECT_CONFIGS.forEach((config) => setupNameMultiSelect(config.containerId));
     loadTodayReminders();
     loadDatabaseBackups().catch(() => null);
     loadSendRecords().catch(() => null);

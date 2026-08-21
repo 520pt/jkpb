@@ -141,10 +141,8 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'id="stationNamesMultiSelect"' in html
     assert 'id="bigDriverNamesMultiSelect"' in html
     assert 'id="smallDriverNamesMultiSelect"' in html
-    assert 'id="patrolTeamOneNamesMultiSelect"' in html
-    assert 'id="patrolTeamTwoNamesMultiSelect"' in html
-    assert 'id="patrolTeamThreeNamesMultiSelect"' in html
-    assert 'id="patrolTeamNamesMultiSelect"' not in html
+    assert 'id="patrolTeamGroupsEditor"' in html
+    assert 'data-patrol-team-action="add"' in html
     assert 'id="bigDriverNamesEditor"' not in html
     assert 'id="smallDriverNamesEditor"' not in html
     assert 'data-subnav-kind="main"' in html

@@ -104,25 +104,32 @@ def _clean_name_list(values: list[str] | None) -> list[str]:
     return seen
 
 
+def _patrol_team_group_default_name(index: int) -> str:
+    if index < len(DEFAULT_PATROL_TEAM_GROUP_NAMES):
+        return DEFAULT_PATROL_TEAM_GROUP_NAMES[index]
+    return f"班组{index + 1}"
+
+
 def _normalize_patrol_team_groups(groups: list[dict[str, Any]] | None, fallback_names: list[str] | None = None) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     raw_groups = list(groups or [])
     if raw_groups:
-        for index, group in enumerate(raw_groups[: len(DEFAULT_PATROL_TEAM_GROUP_NAMES)]):
+        for index, group in enumerate(raw_groups):
             members = group.get("members")
             if members is None:
                 members = group.get("names")
             normalized.append(
                 {
-                    "name": str(group.get("name") or DEFAULT_PATROL_TEAM_GROUP_NAMES[index]).strip() or DEFAULT_PATROL_TEAM_GROUP_NAMES[index],
+                    "name": str(group.get("name") or _patrol_team_group_default_name(index)).strip() or _patrol_team_group_default_name(index),
                     "members": _clean_name_list(list(members or [])),
                 }
             )
-    elif fallback_names is not None:
-        normalized.append({"name": DEFAULT_PATROL_TEAM_GROUP_NAMES[0], "members": _clean_name_list(list(fallback_names))})
+        return normalized
+    if fallback_names is not None:
+        normalized.append({"name": _patrol_team_group_default_name(0), "members": _clean_name_list(list(fallback_names))})
     while len(normalized) < len(DEFAULT_PATROL_TEAM_GROUP_NAMES):
-        normalized.append({"name": DEFAULT_PATROL_TEAM_GROUP_NAMES[len(normalized)], "members": []})
-    return normalized[: len(DEFAULT_PATROL_TEAM_GROUP_NAMES)]
+        normalized.append({"name": _patrol_team_group_default_name(len(normalized)), "members": []})
+    return normalized
 
 
 def _flatten_patrol_team_groups(groups: list[dict[str, Any]] | None, fallback_names: list[str] | None = None) -> list[str]:
