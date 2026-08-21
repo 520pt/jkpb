@@ -9751,7 +9751,11 @@
       $("restMessageTemplate").value = person.rest_message_template || "{name} {rest_status}";
       $("savePersonBtn").textContent = "保存修改";
       $("cancelPersonEditBtn").classList.remove("hidden");
+      $("monitorStatus").textContent = `正在编辑：${person.name || ""}`;
+      $("monitorStatus").className = "status";
       updateRestReminderFields();
+      $("monitorSettings").scrollIntoView?.({ behavior: "smooth", block: "start" });
+      $("personName").focus?.({ preventScroll: true });
       scheduleReminderImagePreviews();
     }
 
@@ -9829,6 +9833,10 @@
       return "企业微信群机器人 · @ 使用通知通道统一配置";
     }
 
+    function monitorNotificationSummary() {
+      return isWecomAppNotificationSelected() ? "企业微信单发" : "群机器人";
+    }
+
     function statusLevelForText(text, fallback = "ok") {
       const value = String(text || "");
       if (/失败|异常|缺失|未配置|未绑定|未设置|不可发送|错误/.test(value)) return "bad";
@@ -9845,22 +9853,43 @@
       return `<small><b>${escapeHtml(label)}：</b>${statusPill(text, level)}</small>`;
     }
 
+    function reminderSummaryItem(label, value, level = "", title = "") {
+      return `
+        <div class="reminder-summary-item ${escapeHtml(level)}">
+          <span>${escapeHtml(label)}</span>
+          <strong title="${escapeHtml(title || value || "-")}">${escapeHtml(value || "-")}</strong>
+        </div>
+      `;
+    }
+
     function renderMonitoredPeopleList() {
       if (!$("peopleList")) return;
       $("peopleList").innerHTML = state.monitoredPeople.map((person) => {
         const notification = monitorNotificationText(person);
+        const editing = state.editingPersonName === person.name;
         return `
-          <div class="item reminder-config-card">
-            <strong>${escapeHtml(person.name)}</strong>
-            <div class="people-center-fields">
-              ${peopleCenterField("启用状态", person.enabled === false ? "已停用" : "已启用", person.enabled === false ? "warn" : "ok")}
-              ${peopleCenterField("通知目标", notification, statusLevelForText(notification))}
-              ${peopleCenterField("发送方式", contentModeLabel(person.send_content_mode || "both"), "ok")}
-              ${peopleCenterField("每日提醒", person.daily_time || "未配置", person.daily_time ? "ok" : "bad")}
-              ${peopleCenterField("班前提醒", `${person.before_shift_minutes || 0} 分钟`, "ok")}
-              ${peopleCenterField("休息提醒", person.rest_reminder_enabled ? (person.rest_reminder_time || "已启用") : "未启用", person.rest_reminder_enabled ? "ok" : "warn")}
+          <div class="item reminder-config-card${editing ? " editing" : ""}" data-edit-person="${escapeHtml(person.name)}" tabindex="0">
+            <div class="reminder-card-head">
+              <div>
+                <strong>${escapeHtml(person.name)}</strong>
+                <div class="reminder-card-subtitle">
+                  <span>${escapeHtml(person.enabled === false ? "已停用" : "已启用")}</span>
+                  <span>·</span>
+                  <span title="${escapeHtml(notification)}">${escapeHtml(monitorNotificationSummary())}</span>
+                </div>
+              </div>
+              <span class="people-status-pill ${person.enabled === false ? "warn" : "ok"}">${escapeHtml(person.enabled === false ? "已停用" : "已启用")}</span>
             </div>
-            ${person.rest_reminder_enabled ? `<small>休息文案 ${escapeHtml(person.rest_message_template || "{name} {rest_status}")}</small>` : ""}
+            <div class="reminder-summary-grid">
+              ${reminderSummaryItem("通知目标", monitorNotificationSummary(), statusLevelForText(notification), notification)}
+              ${reminderSummaryItem("发送方式", contentModeLabel(person.send_content_mode || "both"), "ok")}
+              ${reminderSummaryItem("每日提醒", person.daily_time || "未配置", person.daily_time ? "ok" : "bad")}
+              ${reminderSummaryItem("班前提醒", `${person.before_shift_minutes || 0} 分钟`, "ok")}
+              ${reminderSummaryItem("休息提醒", person.rest_reminder_enabled ? (person.rest_reminder_time || "已启用") : "未启用", person.rest_reminder_enabled ? "ok" : "warn")}
+            </div>
+            <div class="reminder-card-message" title="${escapeHtml(person.rest_reminder_enabled ? (person.rest_message_template || "{name} {rest_status}") : "点击卡片可修改")}">
+              ${escapeHtml(person.rest_reminder_enabled ? `休息文案：${person.rest_message_template || "{name} {rest_status}"}` : "点击卡片或编辑按钮可修改")}
+            </div>
             <div class="settings-actions reminder-card-actions">
               <button type="button" data-edit-person="${escapeHtml(person.name)}">编辑</button>
               <button class="danger" type="button" data-delete-person="${escapeHtml(person.name)}">删除</button>
@@ -9871,22 +9900,22 @@
     }
 
     $("peopleList").addEventListener("click", async (event) => {
-      const editButton = event.target.closest("[data-edit-person]");
-      if (editButton) {
-        const person = state.monitoredPeople.find((item) => item.name === editButton.dataset.editPerson);
-        if (person) fillMonitorPersonForm(person);
+      const deleteButton = event.target.closest("[data-delete-person]");
+      if (deleteButton) {
+        if (!confirm(`确认删除 ${deleteButton.dataset.deletePerson} 的监控班？`)) return;
+        deleteButton.disabled = true;
+        const response = await fetch(`/api/people/${encodeURIComponent(deleteButton.dataset.deletePerson)}`, { method: "DELETE" });
+        const body = await response.json();
+        if (response.ok && body.success && state.editingPersonName === deleteButton.dataset.deletePerson) resetMonitorPersonForm();
+        $("monitorStatus").textContent = response.ok && body.success ? "已删除监控班" : body.detail || "删除失败";
+        $("monitorStatus").className = `status ${response.ok && body.success ? "ok" : "error"}`;
+        await loadPeople();
         return;
       }
-      const deleteButton = event.target.closest("[data-delete-person]");
-      if (!deleteButton) return;
-      if (!confirm(`确认删除 ${deleteButton.dataset.deletePerson} 的监控班？`)) return;
-      deleteButton.disabled = true;
-      const response = await fetch(`/api/people/${encodeURIComponent(deleteButton.dataset.deletePerson)}`, { method: "DELETE" });
-      const body = await response.json();
-      if (response.ok && body.success && state.editingPersonName === deleteButton.dataset.deletePerson) resetMonitorPersonForm();
-      $("monitorStatus").textContent = response.ok && body.success ? "已删除监控班" : body.detail || "删除失败";
-      $("monitorStatus").className = `status ${response.ok && body.success ? "ok" : "error"}`;
-      await loadPeople();
+      const editTarget = event.target.closest("[data-edit-person]");
+      if (!editTarget) return;
+      const person = state.monitoredPeople.find((item) => item.name === editTarget.dataset.editPerson);
+      if (person) fillMonitorPersonForm(person);
     });
 
     function customReminderShiftLabel(shiftCode) {
@@ -9947,6 +9976,10 @@
       $("customReminderMessage").value = reminder.message || "";
       $("customReminderEnabled").checked = reminder.enabled !== false;
       $("saveCustomReminderBtn").textContent = "保存修改";
+      $("customReminderStatus").textContent = `正在编辑：${reminder.name || ""}`;
+      $("customReminderStatus").className = "status";
+      $("customReminderSettings").scrollIntoView?.({ behavior: "smooth", block: "start" });
+      $("customReminderName").focus?.({ preventScroll: true });
       scheduleReminderImagePreviews();
     }
 
@@ -9965,19 +9998,35 @@
       return "企业微信群机器人 · @ 使用通知通道统一配置";
     }
 
+    function customReminderNotificationSummary() {
+      return isWecomAppNotificationSelected() ? "企业微信单发" : "群机器人";
+    }
+
     function renderCustomRemindersList() {
       if (!$("customReminderList")) return;
       $("customReminderList").innerHTML = state.customReminders.map((reminder) => {
         const notification = customReminderNotificationText(reminder);
+        const editing = state.editingCustomReminderId === reminder.id;
         return `
-          <div class="item reminder-config-card">
-            <strong>${escapeHtml(reminder.name)} · ${escapeHtml(customReminderShiftLabel(reminder.shift_code))} · ${escapeHtml(reminder.reminder_time)}</strong>
-            <div class="people-center-fields">
-              ${peopleCenterField("启用状态", reminder.enabled ? "已启用" : "已停用", reminder.enabled ? "ok" : "warn")}
-              ${peopleCenterField("通知目标", notification, statusLevelForText(notification))}
-              ${peopleCenterField("发送方式", contentModeLabel(reminder.send_content_mode || "both"), "ok")}
+          <div class="item reminder-config-card${editing ? " editing" : ""}" data-edit-custom-reminder="${reminder.id}" tabindex="0">
+            <div class="reminder-card-head">
+              <div>
+                <strong>${escapeHtml(reminder.name)} · ${escapeHtml(customReminderShiftLabel(reminder.shift_code))} · ${escapeHtml(reminder.reminder_time)}</strong>
+                <div class="reminder-card-subtitle">
+                  <span>${escapeHtml(reminder.enabled ? "已启用" : "已停用")}</span>
+                  <span>·</span>
+                  <span>${escapeHtml(customReminderNotificationSummary())}</span>
+                </div>
+              </div>
+              <span class="people-status-pill ${reminder.enabled ? "ok" : "warn"}">${escapeHtml(reminder.enabled ? "已启用" : "已停用")}</span>
             </div>
-            <div class="reminder-card-message">${escapeHtml(reminder.message || "").replace(/\n/g, "<br>")}</div>
+            <div class="reminder-summary-grid">
+              ${reminderSummaryItem("通知目标", customReminderNotificationSummary(), statusLevelForText(notification), notification)}
+              ${reminderSummaryItem("发送方式", contentModeLabel(reminder.send_content_mode || "both"), "ok")}
+              ${reminderSummaryItem("提醒时间", reminder.reminder_time || "-", reminder.reminder_time ? "ok" : "bad")}
+              ${reminderSummaryItem("匹配班次", customReminderShiftLabel(reminder.shift_code), "ok")}
+            </div>
+            <div class="reminder-card-message" title="${escapeHtml(reminder.message || "")}">${escapeHtml(reminder.message || "点击卡片或编辑按钮可修改").replace(/\n/g, "<br>")}</div>
             <div class="settings-actions reminder-card-actions">
               <button type="button" data-edit-custom-reminder="${reminder.id}">编辑</button>
               <button class="danger" type="button" data-delete-custom-reminder="${reminder.id}">删除</button>
@@ -10149,20 +10198,22 @@
     });
 
     $("customReminderList").addEventListener("click", async (event) => {
-      const editButton = event.target.closest("[data-edit-custom-reminder]");
-      if (editButton) {
-        const reminder = state.customReminders.find((item) => String(item.id) === String(editButton.dataset.editCustomReminder));
-        if (reminder) fillCustomReminderForm(reminder);
+      const deleteButton = event.target.closest("[data-delete-custom-reminder]");
+      if (deleteButton) {
+        if (!confirm("确认删除这条自定义提醒？")) return;
+        deleteButton.disabled = true;
+        const response = await fetch(`/api/custom-reminders/${deleteButton.dataset.deleteCustomReminder}`, { method: "DELETE" });
+        const body = await response.json();
+        if (response.ok && body.success && state.editingCustomReminderId === Number(deleteButton.dataset.deleteCustomReminder)) resetCustomReminderForm();
+        $("customReminderStatus").textContent = body.success ? "已删除自定义提醒" : body.detail || "删除失败";
+        $("customReminderStatus").className = `status ${body.success ? "ok" : "error"}`;
+        await loadCustomReminders();
         return;
       }
-      const deleteButton = event.target.closest("[data-delete-custom-reminder]");
-      if (!deleteButton) return;
-      deleteButton.disabled = true;
-      const response = await fetch(`/api/custom-reminders/${deleteButton.dataset.deleteCustomReminder}`, { method: "DELETE" });
-      const body = await response.json();
-      $("customReminderStatus").textContent = body.success ? "已删除自定义提醒" : body.detail || "删除失败";
-      $("customReminderStatus").className = `status ${body.success ? "ok" : "error"}`;
-      await loadCustomReminders();
+      const editTarget = event.target.closest("[data-edit-custom-reminder]");
+      if (!editTarget) return;
+      const reminder = state.customReminders.find((item) => String(item.id) === String(editTarget.dataset.editCustomReminder));
+      if (reminder) fillCustomReminderForm(reminder);
     });
 
     function parseNameList(value) {
