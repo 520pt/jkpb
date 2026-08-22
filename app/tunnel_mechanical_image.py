@@ -15,6 +15,45 @@ TOP = 22
 ROW_HEIGHT = 70
 
 
+def render_tunnel_mechanical_preview_image(
+    submissions: list[dict[str, Any]],
+    *,
+    title: str = "隧道机电录入预览",
+) -> bytes:
+    rows: list[dict[str, Any]] = []
+    check_time = date.today()
+    checker = ""
+    recorder = ""
+    for submission in submissions:
+      payload = submission.get("payload") if isinstance(submission, dict) else {}
+      if not isinstance(payload, dict):
+          continue
+      if not rows:
+          check_time = _submission_date(payload.get("checkTime")) or check_time
+          checker = str(payload.get("checker") or "")
+          recorder = str(payload.get("recorder") or "")
+      domain = payload.get("domains")
+      first_domain = domain[0] if isinstance(domain, list) and domain and isinstance(domain[0], dict) else {}
+      rows.append(
+          {
+              "routeCode": str(payload.get("routeCode") or ""),
+              "assetName": str(payload.get("assetName") or ""),
+              "deptName": str(payload.get("deptName") or ""),
+              "checkTime": str(payload.get("checkTime") or ""),
+              "weather": str(payload.get("weather") or ""),
+              "checker": str(payload.get("checker") or ""),
+              "recorder": str(payload.get("recorder") or ""),
+              "devName": str(first_domain.get("devName") or ""),
+              "location": str(first_domain.get("location") or ""),
+              "content": str(first_domain.get("content") or ""),
+              "resultText": _result_text(first_domain.get("result")),
+              "carLicense": str(first_domain.get("carLicense") or ""),
+              "nums": str(first_domain.get("nums") or ""),
+          }
+      )
+    return render_tunnel_mechanical_result_image(rows, check_time=check_time, checker=checker, recorder=recorder, title=title)
+
+
 def render_tunnel_mechanical_result_image(
     rows: list[dict[str, Any]],
     *,
@@ -95,6 +134,25 @@ def render_tunnel_mechanical_result_image(
     output = BytesIO()
     image.save(output, format="PNG", optimize=True)
     return output.getvalue()
+
+
+def _submission_date(value: Any) -> date | None:
+    text = str(value or "").strip()
+    if not text:
+      return None
+    try:
+      return date.fromisoformat(text[:10])
+    except ValueError:
+      return None
+
+
+def _result_text(value: Any) -> str:
+    text = str(value if value is not None else "").strip()
+    if text in {"1", "正常", "true", "True"}:
+        return "正常"
+    if text in {"0", "异常", "false", "False"}:
+        return "异常"
+    return text or "-"
 
 
 def _wrap_text(value: str, max_width: int, font: ImageFont.FreeTypeFont | ImageFont.ImageFont, *, max_lines: int) -> list[str]:

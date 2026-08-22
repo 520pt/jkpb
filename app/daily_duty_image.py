@@ -186,19 +186,14 @@ def _draw_patrol_panel(
 ) -> None:
     patrol_people = _detail(details, "patrol", _detail(details, "standby"))
     patrol_date = _detail(details, "patrol_date", _compact_date(date_text) or "今日")
-    countdown = str(details.get("patrol_countdown") or details.get("standby_countdown") or "").strip()
-    countdown_text = countdown if countdown.startswith("倒计时") else (f"倒计时：{countdown}" if countdown else "")
     _draw_card(draw, box, outline="#cfe6df")
-    _draw_panel_header(draw, box, "巡查", accent, fonts["section"], right_text=countdown_text)
+    _draw_panel_header(draw, box, "巡查", accent, fonts["section"], right_text=f"巡查日期 {patrol_date}")
     x1, y1, x2, _ = box
     content_x = x1 + 20
     content_w = x2 - x1 - 40
     y = y1 + 72
     draw.text((content_x, y), "巡查人员", font=fonts["label"], fill=accent)
     _draw_lines(draw, _wrap_text(patrol_people, content_w, fonts["body_small"]), content_x, y + 29, fonts["body_small"] if patrol_people != "无" else fonts["muted"], "#172033" if patrol_people != "无" else "#7794a8", 24)
-    draw.line((content_x, y + 68, x2 - 20, y + 68), fill="#d7e9df", width=2)
-    draw.text((content_x, y + 88), "巡查日期", font=fonts["label"], fill=accent)
-    draw.text((content_x, y + 116), patrol_date, font=fonts["body_small"], fill="#172033")
 
 
 def _draw_rest_panel(

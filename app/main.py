@@ -66,7 +66,7 @@ from app.storage import (
     DEFAULT_VACATION_START_TEMPLATES,
     DutyRepository,
 )
-from app.tunnel_mechanical_image import render_tunnel_mechanical_result_image
+from app.tunnel_mechanical_image import render_tunnel_mechanical_preview_image, render_tunnel_mechanical_result_image
 from app.wecom import LightAgentNotifyClient, WeComAppNotifyClient, WeComClient, WeComError, WeComWebhookClient
 from app.wecom_app import WeComAppCrypto, WeComAppCryptoError, encrypted_text_from_xml, parse_wecom_app_message
 from app.wecom_aibot import WeComAiBotManager
@@ -8004,7 +8004,19 @@ async def _submit_tunnel_mechanical(
         for row in rows
     ]
     if request.dry_run:
-        return {"success": True, "dry_run": True, "submissions": submissions}
+        response_body: dict[str, Any] = {"success": True, "dry_run": True, "submissions": submissions}
+        if result_upload_dir is not None:
+            try:
+                result_upload_dir.mkdir(parents=True, exist_ok=True)
+                _cleanup_old_uploads(result_upload_dir)
+                filename = f"tunnel-mechanical-preview-{request.checkTime.isoformat()}-{uuid.uuid4().hex}.png"
+                target = result_upload_dir / filename
+                target.write_bytes(render_tunnel_mechanical_preview_image(submissions))
+                response_body["preview_image_url"] = f"/api/uploads/{filename}"
+            except Exception as exc:
+                LOGGER.exception("生成隧道机电预览图片失败")
+                response_body["preview_image_error"] = str(exc)
+        return response_body
 
     base_url, headers, template = await _tunnel_mechanical_request_context(repo, request)
     submit_path = _tunnel_mechanical_api_path(str(template.get("submit_path") or ""), fallback="/prod-api/patrol/deviceCheck/add")
@@ -8621,6 +8633,7 @@ def _reminder_events_response(repo: DutyRepository, target: date, *, now: dateti
                 "content": event.content,
                 "notification_room_id": event.target_room_id,
                 "notification_room_name": event.target_room_name,
+                "send_content_mode": _event_send_content_mode(event, "both"),
                 "sent_state": "sent_or_due" if event.send_at <= now else "pending",
                 **_today_reminder_event_media(repo, event, target),
             }
@@ -10021,6 +10034,45 @@ def _build_reminder_image_preview_event(repo: DutyRepository, request: ReminderI
             content=content,
             send_content_mode=_normalize_send_content_mode(request.send_content_mode, "both"),
         )
+    if kind.startswith("vacation"):
+        rest_start = (now.date() + timedelta(days=1)).isoformat()
+        rest_end = (now.date() + timedelta(days=5)).isoformat()
+        content = _render_simple_template(
+            str(request.message or "").strip() or DEFAULT_VACATION_START_TEMPLATE,
+            {
+                "name": name,
+                "date": now.date().isoformat(),
+                "rest_start_date": rest_start,
+                "rest_end_date": rest_end,
+            },
+        )
+        return ReminderEvent(
+            kind="vacation_test",
+            person_name=name,
+            send_at=datetime.combine(now.date(), datetime.min.time(), tzinfo=TZ).replace(hour=send_hour, minute=send_minute),
+            content=content,
+            key_suffix=f"{rest_start}_{rest_end}",
+            send_content_mode=_normalize_send_content_mode(request.send_content_mode, "both"),
+        )
+    if kind.startswith("rest"):
+        rest_status = _rest_status_for_date(repo, name, now.date()) or {
+            "date": now.date().isoformat(),
+            "rest_start_date": now.date().isoformat(),
+            "rest_end_date": now.date().isoformat(),
+            "rest_status": "今日下午休息",
+        }
+        content = _render_simple_template(
+            str(request.message or "").strip() or DEFAULT_REST_MESSAGE_TEMPLATE,
+            {"name": name, **rest_status},
+        )
+        return ReminderEvent(
+            kind="rest_test",
+            person_name=name,
+            send_at=datetime.combine(now.date(), datetime.min.time(), tzinfo=TZ).replace(hour=send_hour, minute=send_minute),
+            content=content,
+            key_suffix=_rest_range_key_from_status(rest_status),
+            send_content_mode="text",
+        )
     template = str(request.message_template or "").strip() or str(repo.get_notification_config().get("message_template") or DEFAULT_MESSAGE_TEMPLATE)
     content = _render_message_template(
         template,
@@ -10983,4 +11035,3 @@ def _wecom_client_from_env() -> WeComClient | None:
 
 
 app = create_app()
-

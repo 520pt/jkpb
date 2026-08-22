@@ -19,7 +19,7 @@ EXPECTED_SUBNAV = {
     "schedule": ["导入/核对", "已导入排班", "今日在岗"],
     "reminder": ["监控班提醒", "自定义提醒", "休息提醒", "查询休息", "假期余额提醒"],
     "mech": ["隧道机电录入", "隧道模板", "修改模板", "施工图片", "施工点维护"],
-    "warning": ["公路巡查预警", "橙色预警查询", "巡查记录统计", "预警提醒"],
+    "warning": ["公路巡查预警", "橙色预警查询", "预警提醒"],
     "notify": ["通知通道", "通知接收人", "交互菜单", "发送测试", "手动模拟发送"],
     "people": ["人员名单", "岗位分组", "绑定状态"],
     "records": ["发送记录", "提醒诊断", "配置与维护", "系统状态"],
@@ -232,6 +232,33 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
         const style = getComputedStyle(el);
         return style.display !== 'none' && style.visibility !== 'hidden' && el.offsetParent !== null;
       }}).catch(() => false);
+      if (group === 'home' && label === '今日提醒') {{
+        const layout = await page.$eval('#todayRemindersList', (el) => {{
+          const columns = Array.from(el.querySelectorAll('.today-reminder-column')).map((column) => ({{
+            className: column.className,
+            titles: Array.from(column.querySelectorAll('.today-reminder-group h3 span')).map((node) => (node.textContent || '').trim()),
+            width: Math.round(column.getBoundingClientRect().width),
+          }}));
+          const firstItem = el.querySelector('.today-reminder-item');
+          return {{
+            columns,
+            childCount: el.children.length,
+            firstItem: firstItem ? {{
+              hasContentBlock: Boolean(firstItem.querySelector('.today-reminder-content')),
+              hasSummary: Boolean(firstItem.querySelector('.today-reminder-summary')),
+            }} : null,
+          }};
+        }});
+        if (layout.columns.length !== 2) {{
+          throw new Error(`今日提醒不应再是单列布局：${{JSON.stringify(layout)}}`);
+        }}
+        if (!layout.columns[0].titles.length || !layout.columns[1].titles.length) {{
+          throw new Error(`今日提醒左右两栏都应有内容：${{JSON.stringify(layout)}}`);
+        }}
+        if (!layout.firstItem || layout.firstItem.hasContentBlock || !layout.firstItem.hasSummary) {{
+          throw new Error(`今日提醒卡片内不应左右重复正文：${{JSON.stringify(layout)}}`);
+        }}
+      }}
       if (group === 'notify' && label === '通知通道') {{
         if (await visible('#wecomAppMenuPreview')) {{
           throw new Error('通知通道不应显示自定义菜单编辑器');
@@ -261,12 +288,62 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
           throw new Error('交互菜单页不应混入自建应用基础配置、接收人或绑定状态');
         }}
       }}
+      if (group === 'reminder' && label === '休息提醒') {{
+        const reminderTitle = await page.$eval('#monitorSettingsTitle', (el) => (el.innerText || el.textContent || '').trim());
+        const reminderListTitle = await page.$eval('#monitorListTitle', (el) => (el.innerText || el.textContent || '').trim());
+        if (reminderTitle !== '休息提醒') {{
+          throw new Error(`休息提醒页标题不正确：${{reminderTitle}}`);
+        }}
+        if (reminderListTitle !== '已配置休息提醒') {{
+          throw new Error(`休息提醒列表标题不正确：${{reminderListTitle}}`);
+        }}
+      }}
+      if (group === 'reminder' && label === '假期余额提醒') {{
+        const vacationTitle = await page.$eval('#vacationReminderTitle', (el) => (el.innerText || el.textContent || '').trim());
+        const vacationPreviewTitle = await page.$eval('#vacationImagePreviewPanel .reminder-preview-head strong', (el) => (el.innerText || el.textContent || '').trim());
+        const visibleBlocks = await page.$$eval('#vacationReminderSettings .side-block', (nodes) => nodes
+          .filter((node) => getComputedStyle(node).display !== 'none' && node.offsetParent !== null)
+          .map((node) => (node.querySelector('h3')?.innerText || '').trim()));
+        if (vacationTitle !== '假期余额提醒') {{
+          throw new Error(`假期余额提醒标题不正确：${{vacationTitle}}`);
+        }}
+        if (vacationPreviewTitle !== '图片效果预览') {{
+          throw new Error(`假期预览标题不正确：${{vacationPreviewTitle}}`);
+        }}
+        if (JSON.stringify(visibleBlocks) !== JSON.stringify(['假期余额提醒', '图片效果预览'])) {{
+          throw new Error(`假期余额提醒不应再是单列：${{JSON.stringify(visibleBlocks)}}`);
+        }}
+      }}
       if (group === 'mech' && label === '修改模板') {{
         if (!(await visible('#saveFeatureChannelBtn'))) {{
           throw new Error('修改模板页必须显示保存按钮');
         }}
         if (await visible('#featureChannelMenuPreviewField')) {{
           throw new Error('修改模板页不应显示交互菜单预览');
+        }}
+      }}
+      if (group === 'mech' && label === '隧道机电录入') {{
+        const previewTitle = await page.$eval('#tunnelMechanicalChannelPreview', (el) => {{
+          const title = el.closest('.reminder-image-preview-panel')?.querySelector('.reminder-preview-head strong');
+          return (title && (title.innerText || title.textContent) || '').trim();
+        }});
+        if (previewTitle !== '图文效果预览') {{
+          throw new Error(`隧道机电页图文预览标题不正确：${{previewTitle}}`);
+        }}
+        if (!(await visible('#tunnelMechanicalChannelPreview'))) {{
+          throw new Error('隧道机电页缺少图文效果预览容器');
+        }}
+      }}
+      if (group === 'mech' && label === '施工图片') {{
+        const previewTitle = await page.$eval('#constructionImageChannelPreview', (el) => {{
+          const title = el.closest('.reminder-image-preview-panel')?.querySelector('.reminder-preview-head strong');
+          return (title && (title.innerText || title.textContent) || '').trim();
+        }});
+        if (previewTitle !== '图文效果预览') {{
+          throw new Error(`施工图片页图文预览标题不正确：${{previewTitle}}`);
+        }}
+        if (!(await visible('#constructionImageChannelPreview'))) {{
+          throw new Error('施工图片页缺少图文效果预览容器');
         }}
       }}
       if (group === 'records' && label === '配置与维护') {{
@@ -287,6 +364,48 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
           if (!(await visible(selector))) {{
             throw new Error(`配置与维护缺少按钮：${{selector}}`);
           }}
+        }}
+      }}
+      if (group === 'records' && label === '发送记录') {{
+        const statusFilter = await page.$eval('#recordStatusFilter', (el) => {{
+          const options = Array.from(el.options).map((option) => ({{
+            value: option.value,
+            label: option.textContent.trim(),
+          }}));
+          return {{
+            value: el.value,
+            options,
+          }};
+        }});
+        if (statusFilter.value !== 'failed') {{
+          throw new Error(`发送记录默认状态不应是其他值：${{JSON.stringify(statusFilter)}}`);
+        }}
+        if (JSON.stringify(statusFilter.options) !== JSON.stringify([
+          {{ value: 'failed', label: '失败' }},
+          {{ value: 'success', label: '成功' }},
+        ])) {{
+          throw new Error(`发送记录状态选项不正确：${{JSON.stringify(statusFilter)}}`);
+        }}
+        const filterBox = await page.$eval('#recordTodayFailedFilter', (el) => {{
+          const label = el.closest('label');
+          const rect = label.getBoundingClientRect();
+          const inputRect = el.getBoundingClientRect();
+          return {{
+            labelWidth: Math.round(rect.width),
+            labelHeight: Math.round(rect.height),
+            inputWidth: Math.round(inputRect.width),
+            inputLeft: Math.round(inputRect.left - rect.left),
+          }};
+        }});
+        if (filterBox.labelWidth < 240 || filterBox.labelHeight < 34) {{
+          throw new Error(`今日失败筛选太窄：${{JSON.stringify(filterBox)}}`);
+        }}
+        if (filterBox.inputWidth < 36 || filterBox.inputWidth > 50 || filterBox.inputLeft < 0) {{
+          throw new Error(`今日失败开关样式异常：${{JSON.stringify(filterBox)}}`);
+        }}
+        const filterText = await page.$eval('#recordTodayFailedFilter', (el) => (el.closest('label')?.querySelector('span')?.textContent || '').trim());
+        if (filterText !== '只看今日') {{
+          throw new Error(`今日筛选文案不正确：${{filterText}}`);
         }}
       }}
     }}

@@ -1251,6 +1251,8 @@ def test_wecom_app_enabled_overrides_other_notification_channels(tmp_path: Path,
 
     assert public["effective_sender_type"] == "wecom_app"
     assert public["notification_configured"] is True
+    assert repo.get_notification_config()["webhook_url"] == "https://example.test/cgi-bin/webhook/send?key=stale-webhook"
+    assert public["webhook_configured"] is True
     assert response.status_code == 200
     assert raw_clients[-1].texts
     assert raw_clients[-1].texts[0][0] == "luofuyao"

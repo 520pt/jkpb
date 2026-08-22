@@ -369,6 +369,11 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert "image-viewer-image" in html
     assert "today-reminder-side" in html
     assert "today-reminder-image-card" in html
+    assert "reminderChannelPreviewHtml" in html
+    assert "dailyDutyPreviewMeta" in html
+    assert 'id="vacationChannelPreview"' in html
+    assert 'id="patrolWarningChannelPreview"' in html
+    assert "send_content_mode" in html
     assert "data-today-state-at" in html
     assert "已提醒" in html
     assert "已过预警结束巡查提醒" in html
@@ -825,6 +830,8 @@ def test_tunnel_mechanical_template_import_and_dry_run_payload(tmp_path):
     payload = body["submissions"][0]["payload"]
     assert body["success"] is True
     assert body["dry_run"] is True
+    assert body["preview_image_url"].startswith("/api/uploads/tunnel-mechanical-preview-")
+    assert (tmp_path / "uploads" / body["preview_image_url"].rsplit("/", 1)[-1]).exists()
     assert payload["assetId"] == "asset-1"
     assert payload["checker"] == "张三"
     assert payload["recorder"] == "李四"
@@ -6367,6 +6374,69 @@ def test_rest_reminder_distinguishes_rest_transition_statuses(tmp_path):
     assert all(event["person_name"] != "示例丁" for event in before_rest_events)
 
 
+def test_rest_reminder_preview_uses_rest_specific_branch(tmp_path, monkeypatch):
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2025, 9, 15, 8, 0, tzinfo=tz)
+
+    monkeypatch.setattr(main_module, "datetime", FixedDateTime)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    client.post(
+        "/api/people",
+        json={
+            "name": "示例甲",
+            "mention_mobile": "10000000000",
+            "daily_time": "07:50",
+            "before_shift_minutes": 10,
+            "rest_reminder_enabled": True,
+            "rest_reminder_time": "08:30",
+            "rest_message_template": "{name} {rest_status}",
+            "enabled": True,
+        },
+    )
+    client.post(
+        "/api/rosters/confirm",
+        json={
+            "year": 2025,
+            "month": 9,
+            "source_image_path": "uploads/month.png",
+            "grid": [
+                {"name": "示例甲", "days": {"16": "休"}},
+            ],
+        },
+    )
+
+    channel_response = client.post(
+        "/api/reminder-channel-preview",
+        json={
+            "preview_type": "rest",
+            "name": "示例甲",
+            "reminder_time": "08:30",
+            "message": "{name} {rest_status}",
+        },
+    )
+    image_response = client.post(
+        "/api/reminder-image-preview",
+        json={
+            "preview_type": "rest",
+            "name": "示例甲",
+            "reminder_time": "08:30",
+            "message": "{name} {rest_status}",
+        },
+    )
+
+    assert channel_response.status_code == 200
+    body = channel_response.json()
+    assert body["title"] == "示例甲 今日下午休息"
+    assert body["mode"] == "text"
+    assert body["content"] == "示例甲 今日下午休息"
+    assert image_response.status_code == 200
+    assert image_response.headers["content-type"] == "image/png"
+    assert image_response.content.startswith(b"\x89PNG")
+
+
 def test_daily_duty_preview_summarizes_on_duty_people_and_drivers(tmp_path):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
@@ -7917,4 +7987,3 @@ def test_resend_tunnel_mechanical_confirmation_record_sends_result_not_digit(tmp
     resend = repo.list_send_records()[0]
     assert resend["kind"] == "tunnel_mechanical_wechat_resend"
     assert resend["content"] != "1"
-

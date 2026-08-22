@@ -1556,7 +1556,7 @@ class DutyRepository:
                 """,
                 (
                     _normalize_notification_sender_type(sender_type),
-                    webhook_url,
+                    str(webhook_url or "").strip(),
                     int(bool(wecom_aibot_enabled)),
                     str(wecom_aibot_id or "").strip(),
                     str(wecom_aibot_secret or "").strip(),
