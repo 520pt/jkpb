@@ -8099,6 +8099,7 @@
       month: "",
       sourceImagePath: "",
       sourceImageUrl: "",
+      baselineGrid: [],
       imageZoom: 140,
       grid: [],
       activeCell: null,
@@ -8466,6 +8467,7 @@
         state.month = body.month;
         state.sourceImagePath = body.source_image_path;
         state.sourceImageUrl = body.source_image_url || "";
+        state.baselineGrid = JSON.parse(JSON.stringify(body.grid || []));
         state.imageZoom = 140;
         state.grid = body.grid || [];
         state.activeCell = null;
@@ -10041,7 +10043,8 @@
             source_image_path: state.sourceImagePath,
             year: Number(state.year) || null,
             month: Number(state.month) || null,
-            grid: state.grid
+            grid: state.grid,
+            baseline_grid: state.baselineGrid || []
           })
         });
         const body = await response.json();
@@ -10055,7 +10058,14 @@
         setRecheckIssues(body.issues || []);
         renderGrid();
         renderOverlays();
-        setStatus(`逐格核对完成：检查 ${cells.length} 个格子，修正 ${body.issues ? body.issues.length : 0} 个格子，黄框为已修正位置`, "ok");
+        const issueCount = body.issues ? body.issues.length : 0;
+        const manualConflictCount = (body.issues || []).filter((issue) => issue.kind === "manual_conflict").length;
+        setStatus(
+          `逐格核对完成：检查 ${cells.length} 个格子，发现 ${issueCount} 个需处理格子` +
+            (manualConflictCount ? `，其中 ${manualConflictCount} 个是人工修改与重新识别不一致` : "") +
+            "，黄框为需确认位置",
+          issueCount ? "error" : "ok",
+        );
       } catch (error) {
         setStatus(`自动核对失败：${error.message || error}`, "error");
       } finally {
@@ -12571,7 +12581,7 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          sender_type: useWecomApp ? "wecom_webhook" : senderType,
+          sender_type: senderType,
           webhook_url: useLightAgent || useWecomApp ? "" : $("webhookUrl").value.trim(),
           wecom_aibot_enabled: !useWecomApp && senderType === "wecom_webhook" && Boolean($("wecomAiBotEnabled").checked),
           wecom_aibot_id: $("wecomAiBotId").value.trim(),
@@ -12909,7 +12919,6 @@
       const senderType = value === "wecom_app" ? "wecom_app" : "wecom_webhook";
       $("notificationSenderType").value = senderType;
       state.notificationActivePanel = senderType;
-      if ($("wecomAppEnabled")) $("wecomAppEnabled").checked = senderType === "wecom_app";
       updateNotificationBackendFields();
       updateWechatInteractionChannelHints();
       renderNotificationChannelOverview();
@@ -13147,7 +13156,7 @@
       const body = await response.json();
       state.notificationConfig = body.config || {};
       state.wechatBridgeEnabled = Boolean(body.config && body.config.wechat_bridge_enabled);
-      $("notificationSenderType").value = body.config && body.config.wecom_app_enabled ? "wecom_app" : (body.config && body.config.sender_type === "wecom_app" ? "wecom_app" : "wecom_webhook");
+      $("notificationSenderType").value = body.config && body.config.sender_type === "wecom_app" ? "wecom_app" : "wecom_webhook";
       state.notificationActivePanel = $("notificationSenderType").value || "wecom_webhook";
       $("webhookUrl").value = "";
       $("webhookUrl").placeholder = body.config && body.config.webhook_configured ? "已配置，如需修改请输入新地址" : "未配置，保存时请输入机器人地址";

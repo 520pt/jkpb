@@ -211,6 +211,7 @@ class RosterConfirmRequest(BaseModel):
 class RosterRecheckRequest(BaseModel):
     source_image_path: str
     grid: list[dict[str, Any]]
+    baseline_grid: list[dict[str, Any]] = Field(default_factory=list)
     year: int | None = None
     month: int | None = None
 
@@ -806,13 +807,17 @@ def create_app(
                 raise HTTPException(status_code=422, detail="无法从原图重新核对")
             if request.year and request.month:
                 parsed["grid"] = _sanitize_roster_grid_for_month(list(parsed.get("grid", [])), request.year, request.month)
-            checked = _diff_rechecked_grid(list(request.grid or []), list(parsed.get("grid", [])))
+            checked = _merge_rechecked_grid(list(request.grid or []), list(parsed.get("grid", [])), list(request.baseline_grid or []))
 
         year = request.year or _today_in_tz().year
         month = request.month or _today_in_tz().month
         checked["grid"] = _sanitize_roster_grid_for_month(list(checked.get("grid", [])), year, month)
         checked = _apply_roster_role_semantics(repo, {"grid": checked["grid"], "issues": checked.get("issues", [])})
-        checked["issues"] = _diff_rechecked_grid(list(request.grid or []), list(checked.get("grid", [])))["issues"]
+        checked = _merge_rechecked_grid(
+            list(request.grid or []),
+            list(checked.get("grid", [])),
+            list(request.baseline_grid or []),
+        )
         max_day = calendar.monthrange(year, month)[1]
         checked["issues"] = [issue for issue in list(checked.get("issues", [])) if _is_valid_roster_day(str(issue.get("day") or ""), max_day)]
         return {
@@ -2094,14 +2099,27 @@ def _apply_roster_role_semantics(repo: DutyRepository, result: dict[str, Any]) -
     config = repo.get_daily_duty_config()
     station_names = _configured_name_set(config.get("station_names"))
     office_names = _configured_name_set(config.get("office_names"))
-    patrol_names = _configured_name_set(config.get("patrol_team_names"))
+    big_driver_names = _configured_name_set(config.get("big_driver_names"))
+    small_driver_names = _configured_name_set(config.get("small_driver_names"))
+    patrol_names = _configured_patrol_name_set(config)
+    inferred_patrol_rows: list[int] = []
+    if not patrol_names:
+        blocked_names = station_names | office_names
+        inferred_patrol_rows = _infer_patrol_rows_from_white_middle(grid, blocked_names)
+        patrol_names = {
+            str(grid[row_index].get("name") or "").strip()
+            for row_index in inferred_patrol_rows
+            if str(grid[row_index].get("name") or "").strip()
+        }
     if not (station_names or office_names or patrol_names):
         return {**result, "grid": grid}
 
     role_by_name = {name: "patrol" for name in patrol_names}
     role_by_name.update({name: "office" for name in office_names})
     role_by_name.update({name: "station" for name in station_names})
-    patrol_rows = [index for index, row in enumerate(grid) if role_by_name.get(str(row.get("name") or "").strip()) == "patrol"]
+    patrol_rows = inferred_patrol_rows or [
+        index for index, row in enumerate(grid) if role_by_name.get(str(row.get("name") or "").strip()) == "patrol"
+    ]
     patrol_modes = _infer_patrol_white_cell_modes(grid, patrol_rows)
     changed = False
     for row_index, row in enumerate(grid):
@@ -2128,6 +2146,27 @@ def _apply_roster_role_semantics(repo: DutyRepository, result: dict[str, Any]) -
 
 def _configured_name_set(values: Any) -> set[str]:
     return {str(value or "").strip() for value in list(values or []) if str(value or "").strip()}
+
+
+def _configured_patrol_name_set(config: dict[str, Any]) -> set[str]:
+    names = _configured_name_set(config.get("patrol_team_names"))
+    for group in list(config.get("patrol_team_groups") or []):
+        if not isinstance(group, dict):
+            continue
+        names.update(_configured_name_set(group.get("members") or group.get("names")))
+    return names
+
+
+def _infer_patrol_rows_from_white_middle(grid: list[dict[str, Any]], blocked_names: set[str]) -> list[int]:
+    inferred: list[int] = []
+    for row_index, row in enumerate(grid):
+        name = str(row.get("name") or "").strip()
+        if not name or name in blocked_names:
+            continue
+        cell_meta = dict(row.get("cell_meta", {}))
+        if any(isinstance(meta, dict) and meta.get("white_middle") for meta in cell_meta.values()):
+            inferred.append(row_index)
+    return inferred
 
 
 def _infer_patrol_white_cell_modes(
@@ -2532,7 +2571,7 @@ def _safe_next_url(next_url: str) -> str:
 def _normalize_notification_sender_type(value: str) -> str:
     normalized = str(value or "wecom_webhook").strip().lower()
     # 旧通知通道已停用，旧配置统一回落到企业微信群机器人。
-    return normalized if normalized in {"wecom_webhook"} else "wecom_webhook"
+    return normalized if normalized in {"wecom_webhook", "wecom_app"} else "wecom_webhook"
 
 
 def _normalize_notification_mention_mode(value: str) -> str:
@@ -2582,7 +2621,8 @@ def _notification_config_with_env_defaults(config: dict[str, Any]) -> dict[str, 
         else bool(lightagent_targets and (wechat_bridge_enabled() or str(merged.get("lightagent_url", "")).strip()))
     )
     env_sender_type = _normalize_notification_sender_type(env_config["sender_type"]) if env_config["sender_type"] else ""
-    env_can_select_sender = bool(env_sender_type and not has_active_config)
+    stored_sender_type = str(merged.get("sender_type") or "").strip()
+    env_can_select_sender = bool(env_sender_type and not stored_sender_type and not has_active_config)
     if env_can_select_sender:
         sender_type = env_sender_type
         merged["sender_type"] = sender_type
@@ -6999,7 +7039,7 @@ def _public_notification_config(config: dict[str, Any]) -> dict[str, Any]:
     effective_sender_type = "wecom_app" if wecom_app_active else sender_type
     webhook_active = not wecom_app_active and sender_type == "wecom_webhook"
     lightagent_active = False
-    active_configured = wecom_app_configured if wecom_app_active else bool(webhook_url)
+    active_configured = wecom_app_configured if effective_sender_type == "wecom_app" else bool(webhook_url)
     return {
         "sender_type": effective_sender_type if wecom_app_active else sender_type,
         "effective_sender_type": effective_sender_type,
@@ -9220,7 +9260,7 @@ def _build_daily_duty_preview(repo: DutyRepository, target: date) -> dict[str, A
             afternoon_return.append(row["name"])
     big_driver_set = set(config["big_driver_names"])
     small_driver_set = set(config["small_driver_names"])
-    patrol_team_set = set(config["patrol_team_names"])
+    patrol_team_set = _configured_patrol_name_set(config)
     patrol_names, patrol_semantics_seen = _patrol_team_summary_names(rows, patrol_team_set)
     station_set = set(config["station_names"])
     office_set = set(config["office_names"])
@@ -9278,9 +9318,18 @@ def _patrol_team_summary_names(rows: list[dict[str, str]], patrol_team_set: set[
     semantics_seen = False
     for row in rows:
         name = str(row.get("name") or "").strip()
-        if not name or name not in patrol_team_set:
+        if not name:
             continue
         code = str(row.get("code") or "").strip()
+        if patrol_team_set:
+            if name not in patrol_team_set:
+                continue
+            if code == "巡":
+                patrol_names.append(name)
+                semantics_seen = True
+            elif code in {"备", "早", "中", "晚", "夜"}:
+                semantics_seen = True
+            continue
         if code == "巡":
             patrol_names.append(name)
             semantics_seen = True
@@ -9312,31 +9361,69 @@ def _diff_roster_grids(existing_grid: list[dict[str, Any]], incoming_grid: list[
     return diffs
 
 
-def _diff_rechecked_grid(current_grid: list[dict[str, Any]], parsed_grid: list[dict[str, Any]]) -> dict[str, Any]:
+def _merge_rechecked_grid(
+    current_grid: list[dict[str, Any]],
+    parsed_grid: list[dict[str, Any]],
+    baseline_grid: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     corrected_grid: list[dict[str, Any]] = []
     issues: list[dict[str, Any]] = []
-    for row_index, parsed_row in enumerate(parsed_grid):
+    baseline_grid = list(baseline_grid or [])
+    has_baseline = bool(baseline_grid)
+    row_count = max(len(current_grid), len(parsed_grid))
+    for row_index in range(row_count):
         current_row = current_grid[row_index] if row_index < len(current_grid) else {}
+        parsed_row = parsed_grid[row_index] if row_index < len(parsed_grid) else {}
+        baseline_row = baseline_grid[row_index] if row_index < len(baseline_grid) else {}
+        if not parsed_row:
+            corrected_grid.append(
+                {
+                    **current_row,
+                    "name": str(current_row.get("name") or ""),
+                    "days": dict(current_row.get("days", {})),
+                    "boxes": dict(current_row.get("boxes", {})),
+                }
+            )
+            continue
         parsed_days = dict(parsed_row.get("days", {}))
         parsed_boxes = dict(parsed_row.get("boxes", {}))
         current_days = dict(current_row.get("days", {}))
+        baseline_days = dict(baseline_row.get("days", {}))
+        merged_days = dict(current_days)
         for day, parsed_value in parsed_days.items():
             current_value = str(current_days.get(day, ""))
-            if current_value != str(parsed_value):
+            baseline_value = str(baseline_days.get(day, ""))
+            manual_edit = has_baseline and current_value != baseline_value
+            parsed_text = str(parsed_value)
+            if manual_edit and current_value != parsed_text:
                 issues.append(
                     {
                         "row": row_index,
                         "day": day,
                         "before": current_value,
-                        "after": parsed_value,
+                        "after": parsed_text,
+                        "kind": "manual_conflict",
+                        "baseline": baseline_value,
                         "box": parsed_boxes.get(day),
                     }
                 )
+            elif current_value != parsed_text:
+                issues.append(
+                    {
+                        "row": row_index,
+                        "day": day,
+                        "before": current_value,
+                        "after": parsed_text,
+                        "kind": "ocr_mismatch",
+                        "box": parsed_boxes.get(day),
+                    }
+                )
+            merged_days[day] = current_value if manual_edit else parsed_text
         corrected_grid.append(
             {
                 **parsed_row,
                 "name": str(current_row.get("name") or parsed_row.get("name") or ""),
-                "days": parsed_days,
+                "days": merged_days,
                 "boxes": parsed_boxes,
             }
         )
@@ -11008,6 +11095,8 @@ def _notification_client_from_config(config: dict[str, Any], repo: DutyRepositor
     if bool(config.get("wecom_app_enabled")):
         return _wecom_app_notify_client_from_config(config, repo)
     sender_type = _normalize_notification_sender_type(str(config.get("sender_type") or "wecom_webhook"))
+    if sender_type != "wecom_webhook":
+        return None
     webhook_url = str(config.get("webhook_url", "")).strip()
     if not webhook_url:
         return None

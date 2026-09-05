@@ -136,7 +136,7 @@ def _flatten_patrol_team_groups(groups: list[dict[str, Any]] | None, fallback_na
     if groups:
         return _clean_name_list([name for group in groups for name in list(group.get("members") or group.get("names") or [])])
     return _clean_name_list(list(fallback_names or []))
-NOTIFICATION_SENDER_TYPES = {"wecom_webhook"}
+NOTIFICATION_SENDER_TYPES = {"wecom_webhook", "wecom_app"}
 NOTIFICATION_MENTION_MODES = {"none", "all", "person", "custom"}
 CONFIG_EXPORT_TABLES = [
     "roster_months",

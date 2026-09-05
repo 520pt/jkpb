@@ -4,6 +4,9 @@ services:
       context: .
       args:
         INSTALL_OCR: "${INSTALL_OCR:-false}"
+        APT_MIRROR: "${APT_MIRROR:-http://mirrors.aliyun.com/debian}"
+        PIP_INDEX_URL: "${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}"
+        PIP_TRUSTED_HOST: "${PIP_TRUSTED_HOST:-mirrors.aliyun.com}"
     image: duty-reminder:latest
     restart: unless-stopped
     environment:

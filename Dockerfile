@@ -1,10 +1,17 @@
 FROM python:3.11-slim
 
 ARG INSTALL_OCR=false
+ARG APT_MIRROR=http://mirrors.aliyun.com/debian
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV TZ=Asia/Shanghai
+ENV PIP_INDEX_URL=${PIP_INDEX_URL}
+ENV PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST}
+ENV PIP_DEFAULT_TIMEOUT=120
+ENV PIP_RETRIES=10
 ENV DATA_DIR=/app/data
 ENV UPLOAD_DIR=/app/uploads
 ENV WECHAT_BRIDGE_ENABLED=false
@@ -17,7 +24,8 @@ ENV TUNNEL_MECHANICAL_KEEPALIVE_REFRESH_BEFORE_MINUTES=30
 
 WORKDIR /app
 
-RUN apt-get update \
+RUN sed -i "s|http://deb.debian.org/debian|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
     && apt-get install -y --no-install-recommends curl fontconfig fonts-noto-cjk libgomp1 libgl1 libglib2.0-0 \
     && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*

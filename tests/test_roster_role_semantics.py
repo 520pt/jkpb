@@ -10,6 +10,32 @@ class FakeRepo:
         }
 
 
+class FakeGroupedRepo:
+    def get_daily_duty_config(self):
+        return {
+            "patrol_team_names": [],
+            "patrol_team_groups": [
+                {"name": "一班", "members": ["王德刚", "罗熙云"]},
+                {"name": "二班", "members": ["李文杰", "杞文江"]},
+                {"name": "三班", "members": ["商邱宏", "罗富耀", "沐春宇"]},
+            ],
+            "station_names": ["罗森", "李金雷"],
+            "office_names": ["杨伦", "刘显坤"],
+        }
+
+
+class FakeFallbackRepo:
+    def get_daily_duty_config(self):
+        return {
+            "patrol_team_names": [],
+            "patrol_team_groups": [],
+            "station_names": ["罗森"],
+            "office_names": ["杨伦"],
+            "big_driver_names": [],
+            "small_driver_names": [],
+        }
+
+
 def test_role_semantics_reads_patrol_standby_office_and_station_white_middle_cells():
     result = _apply_roster_role_semantics(
         FakeRepo(),
@@ -39,6 +65,44 @@ def test_role_semantics_reads_patrol_standby_office_and_station_white_middle_cel
     assert rows["商邱宏"]["6"] == "备"
     assert rows["商邱宏"]["11"] == "休"
     assert rows["罗森"]["3"] == "-"
+    assert rows["杨伦"]["1"] == "办"
+
+
+def test_role_semantics_reads_patrol_team_groups_without_flat_names():
+    result = _apply_roster_role_semantics(
+        FakeGroupedRepo(),
+        {
+            "grid": [
+                _row("罗森", [""]),
+                _row("王德刚", ["", "早"]),
+                _row("罗熙云", ["早", ""]),
+            ]
+        },
+    )
+
+    rows = {row["name"]: row["days"] for row in result["grid"]}
+    assert rows["罗森"]["1"] == "-"
+    assert rows["王德刚"]["1"] == "备"
+    assert rows["罗熙云"]["2"] == "备"
+
+
+def test_role_semantics_falls_back_to_white_middle_rows_when_patrol_config_missing():
+    result = _apply_roster_role_semantics(
+        FakeFallbackRepo(),
+        {
+            "grid": [
+                _row("罗森", ["", "", "", "", ""]),
+                _row("王德刚", ["", "", "早", "", ""]),
+                _row("沐春宇", ["", "", "", "", ""]),
+                _row("杨伦", ["", "", "", "", ""]),
+            ]
+        },
+    )
+
+    rows = {row["name"]: row["days"] for row in result["grid"]}
+    assert rows["罗森"]["1"] == "-"
+    assert rows["王德刚"]["1"] == "巡"
+    assert rows["沐春宇"]["3"] == "备"
     assert rows["杨伦"]["1"] == "办"
 
 

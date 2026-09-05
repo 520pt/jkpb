@@ -1,4 +1,5 @@
 import asyncio
+import copy
 from zoneinfo import ZoneInfo
 import os
 import re
@@ -2427,6 +2428,32 @@ def test_notification_config_and_people_mobile_are_saved(tmp_path):
 
     repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
     assert repo.get_notification_config()["webhook_url"].endswith("unit-test")
+
+
+def test_saved_webhook_url_is_not_used_when_selected_channel_is_wecom_app(tmp_path, monkeypatch):
+    monkeypatch.setenv("NOTIFICATION_SENDER_TYPE", "wecom_webhook")
+
+    class FailingWebhookClient:
+        def __init__(self, *, webhook_url: str):
+            raise AssertionError("未启用群机器人通道时不应使用 webhook_url")
+
+    monkeypatch.setattr("app.main.WeComWebhookClient", FailingWebhookClient)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    repo = DutyRepository(tmp_path / "data" / "duty-reminder.db")
+    repo.save_notification_config(
+        sender_type="wecom_app",
+        webhook_url="https://example.test/cgi-bin/webhook/send?key=old",
+        wecom_app_enabled=False,
+    )
+
+    public_config = TestClient(app).get("/api/notification-config").json()["config"]
+
+    assert public_config["sender_type"] == "wecom_app"
+    assert public_config["effective_sender_type"] == "wecom_app"
+    assert public_config["webhook_configured"] is True
+    assert public_config["webhook_active"] is False
+    assert public_config["notification_configured"] is False
+    assert main_module._notification_client_from_repo(repo) is None
 
 
 def test_notification_config_reports_wecom_app_as_active_sender_when_enabled(tmp_path):
@@ -6665,6 +6692,49 @@ def test_daily_duty_preview_keeps_monitor_shift_people_out_of_patrol_list(tmp_pa
     assert "备勤人员：沐春宇" in body["content"]
 
 
+def test_daily_duty_preview_uses_patrol_team_groups_without_flat_names(tmp_path):
+    repo = DutyRepository(tmp_path / "data" / "duty.db")
+    repo.save_roster_month(
+        2025,
+        9,
+        [
+            {"name": "商邱宏", "days": {"16": "早"}},
+            {"name": "罗富耀", "days": {"16": "中"}},
+            {"name": "王德刚", "days": {"16": "巡"}},
+            {"name": "沐春宇", "days": {"16": "备"}},
+        ],
+        "uploads/month.png",
+    )
+
+    class FakeRepo:
+        def get_roster_month(self, year, month):
+            return repo.get_roster_month(year, month)
+
+        def get_daily_duty_config(self):
+            return {
+                "enabled": True,
+                "reminder_time": "07:20",
+                "big_driver_names": [],
+                "small_driver_names": [],
+                "patrol_team_names": [],
+                "patrol_team_groups": [
+                    {"name": "一班", "members": ["商邱宏", "罗富耀", "王德刚", "沐春宇"]},
+                ],
+                "station_names": [],
+                "office_names": [],
+                "message_template": "今日在岗人员\n巡查班：{patrol}\n备勤人员：{standby}",
+                "notification_room_id": "",
+                "notification_room_name": "",
+                "send_content_mode": "both",
+            }
+
+    preview = main_module._build_daily_duty_preview(FakeRepo(), date(2025, 9, 16))
+
+    assert preview["details"]["patrol"] == "王德刚"
+    assert preview["details"]["standby"] == "沐春宇"
+    assert "巡查班：王德刚" in preview["content"]
+
+
 def test_daily_duty_test_sends_preview_image_to_webhook(tmp_path, monkeypatch):
     sent: dict[str, object] = {}
 
@@ -7667,9 +7737,80 @@ def test_recheck_roster_corrects_mismatched_cells_from_source_image(tmp_path):
             "day": "5",
             "before": "中",
             "after": "晚",
+            "kind": "ocr_mismatch",
             "box": {"x": 257, "y": 120, "width": 24, "height": 33},
         }
     ]
+
+
+def test_recheck_roster_preserves_manual_edits_when_baseline_is_supplied(tmp_path):
+    upload_dir = tmp_path / "uploads"
+    image_path = upload_dir / "roster.png"
+    upload_dir.mkdir()
+    _write_synthetic_roster(image_path)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=upload_dir, start_scheduler=False)
+    client = TestClient(app)
+
+    upload_response = client.post(
+        "/api/rosters/upload",
+        files={"file": ("roster.png", image_path.read_bytes(), "image/png")},
+    )
+    original_grid = copy.deepcopy(upload_response.json()["grid"])
+    grid = copy.deepcopy(original_grid)
+    grid[0]["days"]["5"] = "中"
+
+    response = client.post(
+        "/api/rosters/recheck",
+        json={
+            "source_image_path": upload_response.json()["source_image_path"],
+            "grid": grid,
+            "baseline_grid": original_grid,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["grid"][0]["days"]["5"] == "中"
+    assert any(
+        issue["row"] == 0 and str(issue["day"]) == "5" and issue["kind"] == "manual_conflict"
+        for issue in body["issues"]
+    )
+
+
+def test_recheck_roster_flags_manual_edits_that_still_disagree_with_ocr(tmp_path):
+    upload_dir = tmp_path / "uploads"
+    image_path = upload_dir / "roster.png"
+    upload_dir.mkdir()
+    _write_synthetic_roster(image_path)
+    app = create_app(data_dir=tmp_path / "data", upload_dir=upload_dir, start_scheduler=False)
+    client = TestClient(app)
+
+    upload_response = client.post(
+        "/api/rosters/upload",
+        files={"file": ("roster.png", image_path.read_bytes(), "image/png")},
+    )
+    original_grid = copy.deepcopy(upload_response.json()["grid"])
+    grid = copy.deepcopy(original_grid)
+    grid[0]["days"]["1"] = "中"
+
+    response = client.post(
+        "/api/rosters/recheck",
+        json={
+            "source_image_path": upload_response.json()["source_image_path"],
+            "grid": grid,
+            "baseline_grid": original_grid,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["grid"][0]["days"]["1"] == "中"
+    assert any(
+        issue["row"] == 0 and str(issue["day"]) == "1" and issue["kind"] == "manual_conflict"
+        for issue in body["issues"]
+    )
 
 
 

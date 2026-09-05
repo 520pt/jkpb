@@ -136,11 +136,13 @@ def _read_template_ocr_texts(path: Path, template_result: dict[str, Any]) -> lis
     if x_max <= x_min or y_max <= y_min:
         return []
 
+    header_crop = image[0:y_min, 0 : image.shape[1]]
+    header_texts = _read_rapidocr_crop_texts(header_crop, x_offset=0, y_offset=0, scale=2.0, preprocess=True)
     crop = image[y_min:y_max, x_min:x_max]
     texts = _read_rapidocr_crop_texts(crop, x_offset=x_min, y_offset=y_min, scale=2.0)
     initial_names = _detect_template_names(texts, min_day_x)
     if len(initial_names) >= len(grid):
-        return texts
+        return _merge_ocr_texts(header_texts, texts)
 
     # Some WeCom images are recompressed or downscaled enough that the first
     # OCR pass misses thin Chinese strokes. Retry even when the first pass
@@ -152,7 +154,7 @@ def _read_template_ocr_texts(path: Path, template_result: dict[str, Any]) -> lis
         scale=3.0,
         preprocess=True,
     )
-    return _merge_ocr_texts(texts, retry)
+    return _merge_ocr_texts(header_texts, texts, retry)
 
 
 def _template_name_column_left(image: Any, first_day_x: int, y_min: int, y_max: int) -> int:
@@ -796,8 +798,9 @@ def _measure_template_cell(cell: Any) -> CellMetrics:
     is_plain_white = blue > 200 and green > 200 and red > 200 and max(mean_bgr) - min(mean_bgr) < 30
     white_middle_like = False
     if is_plain_white:
-        white_middle_like = ink_fraction >= 0.035 and ink_height > 4 and not _looks_like_stacked_trip(ink)
-        fixed_label = "出差" if _looks_like_stacked_trip(ink) else ""
+        looks_like_trip = _looks_like_trip_text(ink)
+        white_middle_like = ink_fraction >= 0.035 and ink_height > 4 and not looks_like_trip
+        fixed_label = "出差" if looks_like_trip else ""
     return CellMetrics(
         cell=cell,
         fixed_label=fixed_label,
@@ -805,6 +808,49 @@ def _measure_template_cell(cell: Any) -> CellMetrics:
         ink_height=ink_height,
         white_middle_like=white_middle_like,
     )
+
+
+def _looks_like_trip_text(ink: Any) -> bool:
+    return _looks_like_stacked_trip(ink) or _looks_like_horizontal_trip(ink)
+
+
+def _looks_like_horizontal_trip(ink: Any) -> bool:
+    """Detect compact horizontal ``出差`` cells without matching single ``中``.
+
+    Some roster exports render ``出差`` as two small side-by-side characters in
+    one cell instead of the older stacked layout.  The reliable visual
+    difference from a normal white ``中`` is two separated, ink-heavy column
+    blocks spanning most of the cell width.
+    """
+
+    import numpy as np
+
+    projection = ink.sum(axis=0)
+    groups: list[tuple[int, int, int]] = []
+    start: int | None = None
+    for index, count in enumerate(projection):
+        if count >= 1 and start is None:
+            start = index
+        elif count < 1 and start is not None:
+            groups.append((start, index - 1, int(projection[start:index].sum())))
+            start = None
+    if start is not None:
+        groups.append((start, len(projection) - 1, int(projection[start:].sum())))
+
+    strong_groups = [(left, right, total) for left, right, total in groups if total >= 18 and right - left >= 5]
+    if len(strong_groups) < 2:
+        return False
+    left, right = strong_groups[0], strong_groups[-1]
+    ys, xs = np.where(ink)
+    if len(xs) == 0 or len(ys) == 0:
+        return False
+    ink_width = int(xs.max() - xs.min() + 1)
+    ink_height = int(ys.max() - ys.min() + 1)
+    cell_width = int(ink.shape[1])
+    cell_height = int(ink.shape[0])
+    if ink_width >= cell_width * 0.80 and ink_height <= cell_height * 0.45 and int(ink.sum()) >= 30:
+        return True
+    return ink_width >= cell_width * 0.75 and ink_height <= ink.shape[0] * 0.75 and left[1] < right[0]
 
 
 def _looks_like_stacked_trip(ink: Any) -> bool:
@@ -865,6 +911,8 @@ def _classify_template_cell_metrics(metrics: list[CellMetrics]) -> list[str]:
     for item in metrics:
         if item.fixed_label is not None:
             labels.append(item.fixed_label)
+        elif shape_label := _classify_work_shift_shape(item.cell):
+            labels.append(shape_label)
         elif item.ink_fraction < thresholds[0]:
             labels.append("中")
         elif item.ink_fraction < thresholds[1]:
@@ -872,6 +920,41 @@ def _classify_template_cell_metrics(metrics: list[CellMetrics]) -> list[str]:
         else:
             labels.append("晚")
     return labels
+
+
+def _classify_work_shift_shape(cell: Any) -> str | None:
+    import cv2
+    import numpy as np
+
+    gray = cv2.cvtColor(cell, cv2.COLOR_BGR2GRAY)
+    channel_max = np.max(cell, axis=2)
+    channel_min = np.min(cell, axis=2)
+    channel_range = channel_max - channel_min
+    ink = (gray < 120) & (channel_max < 150) & (channel_range < 45)
+    ys, _ = np.where(ink)
+    if len(ys) == 0:
+        return None
+
+    row_projection = ink.sum(axis=1)
+    long_row_threshold = max(10, int(round(ink.shape[1] * 0.55)))
+    long_row_count = int((row_projection >= long_row_threshold).sum())
+    lower_for_early = row_projection[int(ink.shape[0] * 0.48) :]
+    lower_early_max = int(lower_for_early.max()) if len(lower_for_early) else 0
+    lower = row_projection[int(ink.shape[0] * 0.62) :]
+    lower_total = int(lower.sum())
+    lower_max = int(lower.max()) if len(lower) else 0
+    ink_fraction = float(ink.sum()) / float(ink.size)
+    if ink_fraction >= 0.13 and long_row_count <= 4 and lower_total >= 20:
+        return "晚"
+    if lower_early_max >= max(13, int(round(ink.shape[1] * 0.70))) and lower_total <= 8:
+        return "早"
+    if long_row_count >= 3 and lower_early_max >= long_row_threshold:
+        return "早"
+    if ink_fraction >= 0.105:
+        return "晚"
+    if lower_total >= 12 and lower_max >= 10:
+        return "早"
+    return "中"
 
 
 def _work_shift_thresholds(fractions: list[float]) -> tuple[float, float]:

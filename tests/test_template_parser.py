@@ -4,7 +4,9 @@ import cv2
 import numpy as np
 
 from app.ocr import (
+    CellMetrics,
     OcrText,
+    _classify_template_cell_metrics,
     _classify_template_cell,
     _find_day_x_lines,
     _find_person_y_lines,
@@ -60,6 +62,17 @@ def test_template_cell_classifier_reads_sparse_stacked_trip_text():
     assert _classify_template_cell(cell) == "出差"
 
 
+def test_template_cell_classifier_reads_horizontal_trip_text():
+    cell = np.full((29, 20, 3), 255, dtype=np.uint8)
+    cv2.rectangle(cell, (0, 10), (9, 21), (0, 0, 0), 1)
+    cv2.line(cell, (4, 10), (4, 21), (0, 0, 0), 1)
+    cv2.rectangle(cell, (11, 10), (19, 21), (0, 0, 0), 1)
+    cv2.line(cell, (13, 14), (18, 14), (0, 0, 0), 1)
+    cv2.line(cell, (13, 18), (18, 18), (0, 0, 0), 1)
+
+    assert _classify_template_cell(cell) == "出差"
+
+
 def test_template_cell_classifier_reads_green_middle_cell():
     cell = np.full((29, 20, 3), (80, 170, 0), dtype=np.uint8)
     _draw_middle_strokes(cell, -2, -2)
@@ -72,6 +85,40 @@ def test_template_cell_classifier_reads_non_green_colored_middle_cell():
     _draw_middle_strokes(cell, -2, -2)
 
     assert _classify_template_cell(cell) == "中"
+
+
+def test_template_cell_classifier_prefers_shape_over_shift_thresholds():
+    middle = np.full((29, 20, 3), (80, 170, 0), dtype=np.uint8)
+    early = middle.copy()
+    late = middle.copy()
+    _draw_middle_strokes(middle, -2, -2)
+    _draw_early_strokes(early, -2, -2)
+    _draw_early_strokes(late, -2, -2)
+    _draw_late_extra_strokes(late, -2, -2)
+    fake_low = CellMetrics(cell=middle, fixed_label=None, ink_fraction=0.050, ink_height=14)
+
+    labels = _classify_template_cell_metrics(
+        [
+            fake_low,
+            fake_low,
+            fake_low,
+            CellMetrics(cell=middle, fixed_label=None, ink_fraction=0.078, ink_height=14),
+            CellMetrics(cell=early, fixed_label=None, ink_fraction=0.092, ink_height=14),
+            CellMetrics(cell=late, fixed_label=None, ink_fraction=0.119, ink_height=14),
+        ]
+    )
+
+    assert labels[-3:] == ["中", "早", "晚"]
+
+
+def test_template_cell_classifier_reads_bold_early_before_late_density():
+    cell = np.full((29, 20, 3), (80, 170, 0), dtype=np.uint8)
+    cv2.rectangle(cell, (5, 7), (15, 13), (0, 0, 0), 2)
+    cv2.line(cell, (6, 10), (14, 10), (0, 0, 0), 2)
+    cv2.line(cell, (3, 16), (17, 16), (0, 0, 0), 2)
+    cv2.line(cell, (10, 14), (10, 22), (0, 0, 0), 2)
+
+    assert _classify_template_cell(cell) == "早"
 
 
 def test_template_parser_reads_sixteen_person_roster_grid(tmp_path: Path):
@@ -264,6 +311,26 @@ def test_template_parser_merges_name_column_ocr_without_full_image_ocr(tmp_path:
     assert len(result["grid"]) == 15
     assert result["grid"][0]["name"] == "示例甲"
     assert result["grid"][1]["name"] == "示例乙"
+
+
+def test_template_parser_reads_month_from_header_crop(tmp_path: Path, monkeypatch):
+    image_path = tmp_path / "roster.png"
+    _write_synthetic_roster(image_path)
+
+    def fake_crop_ocr(crop, *, x_offset, y_offset, scale, preprocess=False):
+        if y_offset == 0:
+            return [OcrText(text="景东隧管站8月排班表", x=500, y=20)]
+        return [
+            OcrText(text="示例甲", x=105, y=136),
+            OcrText(text="示例乙", x=105, y=169),
+        ]
+
+    monkeypatch.setattr("app.ocr._read_rapidocr_crop_texts", fake_crop_ocr, raising=False)
+
+    result = extract_roster_image(image_path)
+
+    assert result["month"] == 8
+    assert result["grid"][0]["name"] == "示例甲"
 
 
 def test_template_parser_merges_split_name_column_ocr(tmp_path: Path, monkeypatch):
