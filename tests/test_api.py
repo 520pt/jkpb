@@ -2054,10 +2054,14 @@ def test_app_login_protects_pages_and_api_when_configured(tmp_path):
 
     assert client.get("/health").status_code == 200
     page_response = client.get("/")
+    admin_response = client.get("/admin")
     api_response = client.get("/api/rosters")
     assert page_response.status_code == 200
-    assert "监控班提醒登录" in page_response.text
-    assert 'autocomplete="current-password"' in page_response.text
+    assert "排班预览" in page_response.text
+    assert "监控班提醒登录" not in page_response.text
+    assert 'autocomplete="current-password"' not in page_response.text
+    assert admin_response.status_code == 200
+    assert "监控班提醒登录" in admin_response.text
     assert "www-authenticate" not in page_response.headers
     assert api_response.status_code == 401
     assert "www-authenticate" not in api_response.headers
@@ -2074,12 +2078,51 @@ def test_app_login_protects_pages_and_api_when_configured(tmp_path):
     assert login_response.status_code == 303
     assert "duty_session=" in login_response.headers["set-cookie"]
     assert "Max-Age=" in login_response.headers["set-cookie"]
-    assert client.get("/").status_code == 200
+    assert client.get("/").text.find("排班预览") >= 0
+    assert client.get("/admin").status_code == 200
     assert client.get("/api/rosters").status_code == 200
 
     logout_response = client.get("/logout", follow_redirects=False)
     assert logout_response.status_code == 303
     assert "duty_session=" in logout_response.headers["set-cookie"]
+    assert client.get("/api/rosters").status_code == 401
+
+
+def test_public_roster_preview_is_read_only_and_does_not_expose_source_paths(tmp_path):
+    app = create_app(
+        data_dir=tmp_path / "data",
+        upload_dir=tmp_path / "uploads",
+        start_scheduler=False,
+        admin_password="secret",
+    )
+    client = TestClient(app)
+    app.state.repo.save_roster_month(
+        2026,
+        9,
+        [{"name": "示例甲", "days": {"20": "中", "21": "巡"}}],
+        "uploads/private-source.png",
+    )
+
+    preview = client.get("/preview")
+    root = client.get("/")
+    public_rosters = client.get("/api/public/rosters")
+
+    assert preview.status_code == 200
+    assert root.status_code == 200
+    assert "排班预览" in preview.text
+    assert "排班预览" in root.text
+    assert "上传" not in preview.text
+    assert "编辑" not in preview.text
+    assert "private-source.png" not in preview.text
+    assert public_rosters.status_code == 200
+    public_roster = public_rosters.json()["rosters"][0]
+    assert public_roster == {
+        "year": 2026,
+        "month": 9,
+        "grid": [{"name": "示例甲", "days": {"20": "中", "21": "巡"}}],
+        "confirmed_at": public_roster["confirmed_at"],
+    }
+    assert "source_image_path" not in public_roster
     assert client.get("/api/rosters").status_code == 401
 
 

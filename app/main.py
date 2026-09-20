@@ -621,11 +621,14 @@ def create_app(
     configured_admin_password = admin_password if admin_password is not None else os.getenv("ADMIN_PASSWORD", "")
     admin_username = os.getenv("ADMIN_USERNAME", "admin")
     session_secret = os.getenv("ADMIN_SESSION_SECRET") or configured_admin_password
+    static_dir = Path(__file__).parent / "static"
 
     if configured_admin_password:
         @app.middleware("http")
         async def require_login(request: Request, call_next):
             if request.url.path == "/health":
+                return await call_next(request)
+            if request.url.path in {"/", "/preview", "/api/public/rosters"}:
                 return await call_next(request)
             if request.url.path in {"/login", "/logout"}:
                 return await call_next(request)
@@ -641,12 +644,26 @@ def create_app(
                 return JSONResponse({"detail": "未登录或登录已过期"}, status_code=401)
             return _login_page_response(static_dir, next_url=request.url.path)
 
-    static_dir = Path(__file__).parent / "static"
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
     @app.get("/")
     def index():
+        target = static_dir / ("preview.html" if configured_admin_password else "index.html")
+        return FileResponse(
+            target,
+            headers={"Cache-Control": "no-cache, max-age=0, must-revalidate"},
+        )
+
+    @app.get("/preview")
+    def public_preview():
+        return FileResponse(
+            static_dir / "preview.html",
+            headers={"Cache-Control": "no-cache, max-age=0, must-revalidate"},
+        )
+
+    @app.get("/admin")
+    def admin_page():
         return FileResponse(
             static_dir / "index.html",
             headers={"Cache-Control": "no-cache, max-age=0, must-revalidate"},
@@ -855,6 +872,10 @@ def create_app(
     @app.get("/api/rosters")
     def list_rosters():
         return {"rosters": repo.list_roster_months()}
+
+    @app.get("/api/public/rosters")
+    def list_public_rosters():
+        return {"rosters": [_public_roster_month(roster) for roster in repo.list_roster_months()]}
 
     @app.get("/api/rosters/{year}/{month}/versions")
     def list_roster_versions(year: int, month: int):
@@ -2508,6 +2529,24 @@ def _is_authorized(header: str, username: str, password: str) -> bool:
         and secrets.compare_digest(supplied_username, username)
         and secrets.compare_digest(supplied_password, password)
     )
+
+
+def _public_roster_month(roster: dict[str, Any]) -> dict[str, Any]:
+    """Return only the fields needed by the unauthenticated read-only viewer."""
+    public_grid = []
+    for row in list(roster.get("grid") or []):
+        days = {
+            str(day): str(value or "").strip()
+            for day, value in dict(row.get("days") or {}).items()
+            if str(day).strip()
+        }
+        public_grid.append({"name": str(row.get("name") or "").strip(), "days": days})
+    return {
+        "year": int(roster.get("year") or 0),
+        "month": int(roster.get("month") or 0),
+        "grid": public_grid,
+        "confirmed_at": str(roster.get("confirmed_at") or ""),
+    }
 
 
 def _is_request_authorized(request: Request, username: str, password: str, session_secret: str) -> bool:

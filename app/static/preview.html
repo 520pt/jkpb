@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>排班预览</title>
+  <style>
+    :root {
+      --bg: #eef2f7;
+      --panel: rgba(255, 255, 255, .96);
+      --ink: #172033;
+      --muted: #64748b;
+      --line: #cbd5e1;
+      --blue: #2563eb;
+      --orange: #f97316;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 20px;
+      color: var(--ink);
+      background: linear-gradient(180deg, rgba(15, 23, 42, .05), transparent 220px), var(--bg);
+      font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+    }
+    .preview-shell { width: min(1500px, 100%); margin: 0 auto; }
+    .preview-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 14px;
+    }
+    h1 { margin: 0; font-size: clamp(22px, 3vw, 30px); }
+    .subtitle, .status { color: var(--muted); font-size: 13px; }
+    .subtitle { margin: 6px 0 0; }
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    select, button {
+      min-height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 0 12px;
+      color: var(--ink);
+      background: #fff;
+      font: inherit;
+    }
+    button { cursor: pointer; }
+    button:hover { border-color: var(--blue); color: var(--blue); }
+    .preview-card {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel);
+      box-shadow: 0 14px 35px rgba(15, 23, 42, .08);
+    }
+    .card-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid var(--line);
+    }
+    .card-head strong { display: block; font-size: 16px; }
+    .card-head small { display: block; margin-top: 4px; color: var(--muted); }
+    .legend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+    .legend span { padding: 3px 8px; border-radius: 999px; background: #fff; }
+    .legend .monitor { border: 1px solid var(--orange); color: #c2410c; }
+    .legend .patrol { border: 1px solid var(--blue); color: #1d4ed8; }
+    .status { min-height: 18px; margin: 0; padding: 8px 16px 0; }
+    .status.error { color: #b91c1c; }
+    .table-wrap { overflow: auto; max-width: 100%; padding: 0 16px 16px; }
+    table { border-collapse: separate; border-spacing: 0; min-width: max-content; margin-top: 8px; font-size: 13px; }
+    th, td { height: 40px; min-width: 42px; padding: 6px 8px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); text-align: center; white-space: nowrap; }
+    tr:first-child th { border-top: 1px solid var(--line); }
+    th:first-child, td:first-child { border-left: 1px solid var(--line); }
+    th { position: sticky; top: 0; z-index: 2; background: #f8fafc; font-weight: 700; }
+    th.name, td.name { position: sticky; left: 0; z-index: 3; min-width: 92px; text-align: left; background: #fff; font-weight: 650; }
+    th.name { z-index: 4; background: #f8fafc; }
+    th.today { background: #dbeafe; color: #1d4ed8; box-shadow: inset 0 -3px 0 var(--blue); }
+    td.shift-cell { position: relative; background: #fff; }
+    td.shift-cell::after { content: ""; position: absolute; inset: 0; pointer-events: none; }
+    td.shift-cell.monitor-cell::after { border: 2px solid var(--orange); }
+    td.shift-cell.patrol-cell::after { border: 2px solid var(--blue); }
+    .empty { padding: 38px 16px; color: var(--muted); text-align: center; }
+    .footer { margin-top: 12px; color: var(--muted); font-size: 12px; }
+    @media (max-width: 680px) {
+      body { padding: 12px; }
+      .preview-header, .card-head { flex-direction: column; }
+      .toolbar, select, button { width: 100%; }
+      .toolbar { display: grid; grid-template-columns: 1fr 1fr; }
+      .toolbar select { grid-column: 1 / -1; }
+      .toolbar button { width: auto; }
+      th, td { min-width: 38px; padding: 5px 6px; }
+      th.name, td.name { min-width: 78px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="preview-shell">
+    <header class="preview-header">
+      <div>
+        <h1>排班预览</h1>
+        <p class="subtitle">公开只读查看，不需要登录；可直接分享当前网址给其他人。</p>
+      </div>
+      <div class="toolbar">
+        <select id="rosterSelect" aria-label="选择排班月份"></select>
+        <button id="refreshBtn" type="button">刷新排班</button>
+      </div>
+    </header>
+    <section class="preview-card">
+      <div class="card-head">
+        <div>
+          <strong id="rosterTitle">排班表</strong>
+          <small id="rosterSummary">正在加载排班...</small>
+          <div class="legend"><span class="monitor">橙框：监控班（早/中/晚）</span><span class="patrol">蓝框：巡查班</span></div>
+        </div>
+      </div>
+      <p id="status" class="status" role="status"></p>
+      <div id="tableWrap" class="table-wrap">
+        <div id="emptyState" class="empty">正在加载排班...</div>
+        <table id="rosterGrid" hidden></table>
+      </div>
+    </section>
+    <p class="footer">当天日期会自动居中；排班内容仅供查看，导入和修改请进入管理后台。</p>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const state = { rosters: [], selected: "" };
+    const monitorCodes = new Set(["早", "中", "晚"]);
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>'"]/g, (char) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
+      }[char]));
+    }
+
+    function todayParts() {
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit",
+      }).formatToParts(new Date());
+      return Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, Number(part.value)]));
+    }
+
+    function daysInMonth(year, month) {
+      return new Date(Date.UTC(Number(year), Number(month), 0)).getUTCDate();
+    }
+
+    function rosterKey(roster) {
+      return `${Number(roster.year)}-${String(Number(roster.month)).padStart(2, "0")}`;
+    }
+
+    function compareRoster(a, b) {
+      const confirmed = String(a.confirmed_at || "").localeCompare(String(b.confirmed_at || ""));
+      if (confirmed) return confirmed;
+      return Number(a.year) * 100 + Number(a.month) - Number(b.year) * 100 - Number(b.month);
+    }
+
+    function currentMonthRoster() {
+      const now = todayParts();
+      return state.rosters.find((roster) => Number(roster.year) === now.year && Number(roster.month) === now.month) || null;
+    }
+
+    function selectedRoster() {
+      return state.rosters.find((roster) => rosterKey(roster) === state.selected) || null;
+    }
+
+    function renderSelector() {
+      const select = $("rosterSelect");
+      select.innerHTML = "";
+      if (!state.rosters.length) {
+        select.appendChild(new Option("暂无排班", ""));
+        select.disabled = true;
+        return;
+      }
+      select.disabled = false;
+      [...state.rosters].sort((a, b) => compareRoster(b, a)).forEach((roster) => {
+        const option = new Option(`${roster.year}年${roster.month}月`, rosterKey(roster));
+        option.selected = option.value === state.selected;
+        select.appendChild(option);
+      });
+    }
+
+    function centerToday(table, roster) {
+      const now = todayParts();
+      if (Number(roster.year) !== now.year || Number(roster.month) !== now.month) return;
+      const cell = table.querySelector(`th[data-day="${now.day}"]`);
+      const wrapper = table.closest(".table-wrap");
+      if (!cell || !wrapper) return;
+      wrapper.scrollLeft = Math.max(0, cell.offsetLeft - (wrapper.clientWidth - cell.offsetWidth) / 2);
+      requestAnimationFrame(() => {
+        const wrapperRect = wrapper.getBoundingClientRect();
+        const cellRect = cell.getBoundingClientRect();
+        wrapper.scrollLeft += ((cellRect.left + cellRect.right) - (wrapperRect.left + wrapperRect.right)) / 2;
+      });
+    }
+
+    function renderRoster() {
+      const roster = selectedRoster();
+      const table = $("rosterGrid");
+      const empty = $("emptyState");
+      if (!roster) {
+        table.hidden = true;
+        empty.hidden = false;
+        empty.textContent = "暂无已确认导入的排班表";
+        $("rosterTitle").textContent = "排班表";
+        $("rosterSummary").textContent = "请联系管理员先导入排班。";
+        return;
+      }
+      const now = todayParts();
+      const todayDay = Number(roster.year) === now.year && Number(roster.month) === now.month ? String(now.day) : "";
+      const dayCount = daysInMonth(roster.year, roster.month);
+      const rows = Array.isArray(roster.grid) ? roster.grid : [];
+      table.innerHTML = `<tr><th class="name">姓名</th>${Array.from({ length: dayCount }, (_, index) => {
+        const day = String(index + 1);
+        return `<th data-day="${day}" class="${day === todayDay ? "today" : ""}">${day}</th>`;
+      }).join("")}</tr>`;
+      rows.forEach((row) => {
+        const cells = [`<td class="name">${escapeHtml(row.name || "")}</td>`];
+        for (let day = 1; day <= dayCount; day += 1) {
+          const value = String((row.days || {})[String(day)] || "").trim();
+          const roleClass = monitorCodes.has(value) ? "monitor-cell" : (value === "巡" ? "patrol-cell" : "");
+          cells.push(`<td class="shift-cell ${roleClass}">${escapeHtml(value || "-")}</td>`);
+        }
+        table.insertAdjacentHTML("beforeend", `<tr>${cells.join("")}</tr>`);
+      });
+      table.hidden = false;
+      empty.hidden = true;
+      $("rosterTitle").textContent = `${roster.year}年${roster.month}月排班`;
+      $("rosterSummary").textContent = `${rows.length} 人 × ${dayCount} 天${todayDay ? " · 当天日期已居中" : ""}`;
+      $("status").textContent = roster.confirmed_at ? `最近导入：${roster.confirmed_at}` : "";
+      requestAnimationFrame(() => centerToday(table, roster));
+    }
+
+    async function loadRosters() {
+      $("status").textContent = "正在加载排班...";
+      $("status").className = "status";
+      try {
+        const response = await fetch("/api/public/rosters", { cache: "no-store" });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.detail || "排班加载失败");
+        state.rosters = Array.isArray(body.rosters) ? body.rosters : [];
+        const preferred = currentMonthRoster() || [...state.rosters].sort((a, b) => compareRoster(b, a))[0];
+        state.selected = preferred ? rosterKey(preferred) : "";
+        renderSelector();
+        renderRoster();
+      } catch (error) {
+        $("status").textContent = error.message || "排班加载失败";
+        $("status").className = "status error";
+        $("emptyState").hidden = false;
+        $("emptyState").textContent = "排班加载失败，请稍后刷新。";
+      }
+    }
+
+    $("rosterSelect").addEventListener("change", () => {
+      state.selected = $("rosterSelect").value;
+      renderRoster();
+    });
+    $("refreshBtn").addEventListener("click", loadRosters);
+    loadRosters();
+  </script>
+</body>
+</html>
