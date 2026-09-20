@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PLAYWRIGHT_DIR = ROOT / "node_modules" / "playwright"
 
 EXPECTED_SUBNAV = {
-    "home": ["今日提醒", "下次提醒", "今日在岗摘要", "最近发送情况", "配置总览"],
+    "home": ["排班查看", "今日提醒", "下次提醒", "今日在岗摘要", "最近发送情况", "配置总览"],
     "schedule": ["导入/核对", "已导入排班", "今日在岗"],
     "reminder": ["监控班提醒", "自定义提醒", "休息提醒", "查询休息", "假期余额提醒"],
     "mech": ["隧道机电录入", "隧道模板", "修改模板", "施工图片", "施工点维护"],
@@ -420,6 +420,112 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
 }});
 """
         js_path = tmp_path / "desktop_nav_check.js"
+        js_path.write_text(script, encoding="utf-8")
+        result = subprocess.run(
+            ["node", str(js_path)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr or result.stdout
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=10)
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node not available")
+@pytest.mark.skipif(not PLAYWRIGHT_DIR.exists(), reason="playwright not installed")
+def test_home_schedule_view_centers_today_and_marks_shift_roles(tmp_path):
+    env = os.environ.copy()
+    env["DATA_DIR"] = str(tmp_path / "data")
+    env["UPLOAD_DIR"] = str(tmp_path / "uploads")
+    env["PYTHONUTF8"] = "1"
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "18082"],
+        cwd=ROOT,
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        _wait_for_http("http://127.0.0.1:18082/health")
+        script = f"""
+const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
+
+(async() => {{
+  const browser = await chromium.launch({{ headless: true }});
+  const page = await browser.newPage({{ viewport: {{ width: 700, height: 900 }} }});
+  const nowParts = new Intl.DateTimeFormat('en-CA', {{
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }}).formatToParts(new Date()).reduce((result, part) => {{
+    if (part.type !== 'literal') result[part.type] = part.value;
+    return result;
+  }}, {{}});
+  const year = Number(nowParts.year);
+  const month = Number(nowParts.month);
+  const day = Number(nowParts.day);
+  const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const grid = [
+    {{ name: '监控测试', days: {{ [String(day)]: '中' }} }},
+    {{ name: '巡查测试', days: {{ [String(day)]: '巡' }} }},
+  ];
+  await page.route('**/api/rosters', async (route) => {{
+    await route.fulfill({{
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({{ rosters: [{{ year, month, confirmed_at: '2026-09-20T00:00:00', grid }}] }}),
+    }});
+  }});
+  await page.goto('http://127.0.0.1:18082/', {{ waitUntil: 'networkidle' }});
+  await page.waitForSelector('#homeScheduleGrid tr:nth-child(3)');
+
+  const activeHomeTab = await page.$eval('#mainSubnav .tab-button.active', (el) => (el.innerText || el.textContent || '').trim());
+  if (activeHomeTab !== '排班查看') throw new Error(`首页默认子页错误：${{activeHomeTab}}`);
+  const selectedMonth = await page.$eval('#homeRosterSelect', (el) => el.value);
+  if (selectedMonth !== `${{year}}-${{String(month).padStart(2, '0')}}`) {{
+    throw new Error(`首页默认月份错误：${{selectedMonth}}`);
+  }}
+  const view = await page.$eval('#homeScheduleView .saved-wrap', (el, currentDay) => {{
+    const todayCell = el.querySelector(`th[data-saved-day="${{currentDay}}"]`);
+    const wrapperRect = el.getBoundingClientRect();
+    const cellRect = todayCell.getBoundingClientRect();
+    const monitorCell = el.querySelector('td.saved-monitor-cell');
+    const patrolCell = el.querySelector('td.saved-patrol-cell');
+    return {{
+      scrollLeft: Math.round(el.scrollLeft),
+      expectedScrollLeft: Math.round(todayCell.offsetLeft - (el.clientWidth - todayCell.offsetWidth) / 2),
+      todayCenter: Math.round((cellRect.left + cellRect.right) / 2),
+      wrapperCenter: Math.round((wrapperRect.left + wrapperRect.right) / 2),
+      monitorBorder: getComputedStyle(monitorCell, '::after').borderTopColor,
+      patrolBorder: getComputedStyle(patrolCell, '::after').borderTopColor,
+    }};
+  }}, day);
+  if (Math.abs(view.todayCenter - view.wrapperCenter) > 2) {{
+    throw new Error(`当天日期没有居中：${{JSON.stringify(view)}}`);
+  }}
+  if (view.monitorBorder !== 'rgb(249, 115, 22)') {{
+    throw new Error(`监控班颜色错误：${{JSON.stringify(view)}}`);
+  }}
+  if (view.patrolBorder !== 'rgb(37, 99, 235)') {{
+    throw new Error(`巡查班颜色错误：${{JSON.stringify(view)}}`);
+  }}
+  await browser.close();
+}})().catch((error) => {{
+  console.error(error);
+  process.exit(1);
+}});
+"""
+        js_path = tmp_path / "home_schedule_check.js"
         js_path.write_text(script, encoding="utf-8")
         result = subprocess.run(
             ["node", str(js_path)],

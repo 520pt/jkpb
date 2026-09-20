@@ -305,6 +305,11 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'id="wechatTunnelModifyTemplate"' in html
     assert 'function latestSavedRoster(rosters)' in html
     assert 'state.selectedSavedRoster = latest ? savedRosterKey(latest) : "";' in html
+    assert 'label: "排班查看"' in html
+    assert 'id="homeScheduleGrid"' in html
+    assert 'function centerSavedRosterToday(table, roster)' in html
+    assert 'saved-monitor-cell' in html
+    assert 'saved-patrol-cell' in html
     assert 'saved-today-monitor-cell' in html
     assert 'saved-today-monitor-name' in html
     assert 'saved-today-monitor-row-path' in html

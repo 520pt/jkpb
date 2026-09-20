@@ -1113,6 +1113,83 @@
       color: #0f172a;
       font-weight: 800;
     }
+    .saved-roster-grid td.shift-cell.saved-monitor-cell,
+    .saved-roster-grid td.shift-cell.saved-patrol-cell {
+      position: relative;
+    }
+    .saved-roster-grid th:not(.name),
+    .saved-roster-grid td.shift-cell {
+      min-width: 40px;
+    }
+    .saved-roster-grid td.shift-cell.saved-monitor-cell::after,
+    .saved-roster-grid td.shift-cell.saved-patrol-cell::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+    .saved-roster-grid td.shift-cell.saved-monitor-cell::after {
+      border: 2px solid #f97316;
+    }
+    .saved-roster-grid td.shift-cell.saved-patrol-cell::after {
+      border: 2px solid #2563eb;
+    }
+    .saved-roster-grid td.shift-cell.saved-today-monitor-cell::after {
+      border-width: 3px;
+    }
+    .home-schedule-view {
+      min-width: 0;
+    }
+    .home-schedule-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .home-schedule-head strong {
+      display: block;
+      font-size: 15px;
+    }
+    .home-schedule-head small {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .home-schedule-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .home-schedule-legend span {
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: white;
+    }
+    .home-schedule-legend .monitor {
+      border: 1px solid #f97316;
+      color: #c2410c;
+    }
+    .home-schedule-legend .patrol {
+      border: 1px solid #2563eb;
+      color: #1d4ed8;
+    }
+    .home-schedule-wrap {
+      height: calc(100vh - 220px);
+      min-height: 260px;
+    }
+    #homeScheduleGrid {
+      min-width: max-content;
+    }
+    #homeScheduleGrid th.saved-today-col {
+      background: #fef3c7;
+      color: #b45309;
+      font-weight: 800;
+    }
     .saved-summary {
       color: var(--muted);
       font-size: 13px;
@@ -6874,6 +6951,23 @@
         </div>
       </div>
       <div class="body">
+        <div id="homeScheduleView" class="home-schedule-view" data-subview-scope="home-schedule">
+          <div class="home-schedule-head">
+            <div>
+              <strong>排班查看</strong>
+              <small id="homeScheduleSummary">打开后自动定位到当天日期</small>
+              <div class="home-schedule-legend"><span class="monitor">橙框：监控班</span><span class="patrol">蓝框：巡查班</span></div>
+            </div>
+            <div class="toolbar">
+              <select id="homeRosterSelect"></select>
+              <button id="homeScheduleRefreshBtn">刷新</button>
+            </div>
+          </div>
+          <p id="homeScheduleStatus" class="status"></p>
+          <div class="saved-wrap home-schedule-wrap">
+            <table id="homeScheduleGrid" class="saved-roster-grid"></table>
+          </div>
+        </div>
         <div class="home-summary-grid" id="homeSummaryGrid" data-subview-scope="home-today home-next home-duty home-records">
           <div class="home-summary-card" id="homeTodayReminderCard" data-home-summary-card data-subview-scope="home-today">
             <h3><span>今日提醒</span><span class="pill ok">实时</span></h3>
@@ -7006,7 +7100,7 @@
       <div class="body">
         <p id="savedStatus" class="status"></p>
         <div class="saved-wrap">
-          <table id="savedGrid"></table>
+          <table id="savedGrid" class="saved-roster-grid"></table>
           <div class="saved-duty-inline">
             <div class="saved-duty-head">
               <span>在岗状态信息</span>
@@ -8107,6 +8201,7 @@
       recheckIssues: new Set(),
       savedRosters: [],
       selectedSavedRoster: "",
+      homeSelectedRoster: "",
       savedActiveCell: null,
       savedEditMode: false,
       savedDraft: null,
@@ -8542,6 +8637,7 @@
     };
     const MAIN_SUBNAV_SCHEMA = {
       home: [
+        { label: "排班查看", mobileLabel: "排班", kind: "main", tab: "today", view: "home-schedule" },
         { label: "今日提醒", mobileLabel: "今日", kind: "main", tab: "today", view: "home-today" },
         { label: "下次提醒", mobileLabel: "下次", kind: "main", tab: "today", view: "home-next" },
         { label: "今日在岗摘要", mobileLabel: "在岗", kind: "main", tab: "today", view: "home-duty" },
@@ -8617,6 +8713,7 @@
       home: {
         title: "首页",
         items: [
+          { label: "排班查看", panel: "settingsOverview", view: "home-schedule" },
           { label: "今日提醒", panel: "settingsOverview", view: "home-today" },
           { label: "下次提醒", panel: "settingsOverview", view: "home-next" },
           { label: "今日在岗摘要", panel: "settingsOverview", view: "home-duty" },
@@ -8692,6 +8789,7 @@
     const currentMainSubviewByGroup = {};
     const MAIN_SUBVIEW_TITLE_MAP = {
       home: {
+        "home-schedule": "排班查看",
         "home-today": "今日提醒",
         "home-next": "下次提醒",
         "home-duty": "今日在岗摘要",
@@ -9154,7 +9252,7 @@
           const tab = button.dataset.subnavTab;
           const groupForTab = tab ? getSidebarGroupForTab(tab) : group;
           if (tab) activateMainTab(tab, { sidebarGroup: getSidebarGroupForTab(tab) });
-          if (viewKey) requestAnimationFrame(() => setMainSubview(groupForTab, viewKey));
+          if (viewKey) setMainSubview(groupForTab, viewKey);
           return;
         }
         if (kind === "settings") {
@@ -9700,11 +9798,15 @@
       state.savedRosters = body.rosters || [];
       const latest = latestSavedRoster(state.savedRosters);
       state.selectedSavedRoster = latest ? savedRosterKey(latest) : "";
+      const todayRoster = rosterForToday(state.savedRosters);
+      state.homeSelectedRoster = todayRoster ? savedRosterKey(todayRoster) : (latest ? savedRosterKey(latest) : "");
       state.savedActiveCell = null;
       state.savedEditMode = false;
       state.savedDraft = null;
       renderSavedRosterSelector();
+      renderHomeRosterSelector();
       renderSavedRoster();
+      renderHomeRoster();
     }
 
     function savedRosterKey(roster) {
@@ -9730,6 +9832,11 @@
       return String(day);
     }
 
+    function rosterForToday(rosters) {
+      const [year, month] = beijingDateInputValue().split("-").map((value) => Number(value));
+      return (rosters || []).find((roster) => Number(roster.year) === year && Number(roster.month) === month) || null;
+    }
+
     function isSavedTodayMonitorCell(roster, row, day) {
       const todayDay = savedRosterTodayDay(roster);
       if (!todayDay || String(day) !== todayDay) return false;
@@ -9739,6 +9846,90 @@
     function isSavedTodayMonitorRow(roster, row) {
       const todayDay = savedRosterTodayDay(roster);
       return Boolean(todayDay && monitorShiftCodes.has(String((row.days || {})[todayDay] || "").trim()));
+    }
+
+    function centerSavedRosterToday(table, roster) {
+      const todayDay = savedRosterTodayDay(roster);
+      if (!todayDay) return;
+      const wrapper = table.closest(".saved-wrap");
+      const dayCell = table.querySelector(`th[data-saved-day="${todayDay}"]`);
+      if (!wrapper || !dayCell) return;
+      const targetLeft = dayCell.offsetLeft - (wrapper.clientWidth - dayCell.offsetWidth) / 2;
+      wrapper.scrollLeft = Math.max(0, targetLeft);
+    }
+
+    function renderRosterTable(table, roster, { editMode = false, draft = null } = {}) {
+      table.innerHTML = "";
+      if (!roster) return;
+      const dayCount = daysInMonth(Number(roster.year), Number(roster.month));
+      const grid = editMode && draft ? draft.grid : roster.grid;
+      const todayDay = savedRosterTodayDay(roster);
+      const todayMonitorRowIndexes = new Set();
+      grid.forEach((row, rowIndex) => {
+        if (isSavedTodayMonitorRow(roster, row)) todayMonitorRowIndexes.add(rowIndex);
+      });
+      const lastTodayMonitorRowIndex = Math.max(-1, ...todayMonitorRowIndexes);
+      const head = document.createElement("tr");
+      head.innerHTML = `<th class="name">姓名</th>${Array.from({ length: dayCount }, (_, i) => {
+        const day = String(i + 1);
+        const todayClass = day === todayDay ? ' class="saved-today-col"' : "";
+        return `<th data-saved-day="${day}"${todayClass}>${day}</th>`;
+      }).join("")}${editMode ? "<th>操作</th>" : ""}`;
+      table.appendChild(head);
+      grid.forEach((row, rowIndex) => {
+        const tr = document.createElement("tr");
+        const name = document.createElement("td");
+        name.className = "name";
+        if (isSavedTodayMonitorRow(roster, row)) name.classList.add("saved-today-monitor-name");
+        name.dataset.savedRow = String(rowIndex);
+        if (editMode) {
+          name.innerHTML = `<input list="personnelNameOptions" value="${escapeHtml(row.name || "")}" data-saved-row="${rowIndex}" data-saved-name="1" />`;
+        } else {
+          name.textContent = row.name || "";
+        }
+        tr.appendChild(name);
+        for (let day = 1; day <= dayCount; day++) {
+          const dayText = String(day);
+          const value = (row.days || {})[dayText] || "";
+          const td = document.createElement("td");
+          td.className = `shift-cell shift-${shiftClass[value] || "blank"}`;
+          if (monitorShiftCodes.has(String(value).trim())) td.classList.add("saved-monitor-cell");
+          if (String(value).trim() === "巡") td.classList.add("saved-patrol-cell");
+          if (todayMonitorRowIndexes.has(rowIndex) && todayDay && day <= Number(todayDay)) td.classList.add("saved-today-monitor-row-path");
+          if (todayDay && dayText === todayDay && rowIndex <= lastTodayMonitorRowIndex) td.classList.add("saved-today-monitor-col-path");
+          if (isSavedTodayMonitorCell(roster, row, dayText)) {
+            td.classList.add("saved-today-monitor-cell");
+            if (rowIndex > 0 && isSavedTodayMonitorCell(roster, grid[rowIndex - 1], dayText)) {
+              td.classList.add("saved-today-monitor-join-prev");
+            }
+          }
+          td.dataset.savedRow = String(rowIndex);
+          td.dataset.savedDay = dayText;
+          applySavedCellHighlight(td, rowIndex, dayText);
+          if (editMode) {
+            const select = document.createElement("select");
+            select.dataset.savedRow = String(rowIndex);
+            select.dataset.savedDay = dayText;
+            shiftOptions.forEach((optionValue) => {
+              const option = document.createElement("option");
+              option.value = optionValue;
+              option.textContent = optionValue || "-";
+              if (value === optionValue) option.selected = true;
+              select.appendChild(option);
+            });
+            td.appendChild(select);
+          } else {
+            td.textContent = value || "-";
+          }
+          tr.appendChild(td);
+        }
+        if (editMode) {
+          const action = document.createElement("td");
+          action.innerHTML = `<button class="danger" data-saved-remove="${rowIndex}">删除</button>`;
+          tr.appendChild(action);
+        }
+        table.appendChild(tr);
+      });
     }
 
     function renderSavedRosterSelector() {
@@ -9758,6 +9949,43 @@
         if (option.value === state.selectedSavedRoster) option.selected = true;
         select.appendChild(option);
       });
+    }
+
+    function renderHomeRosterSelector() {
+      const select = $("homeRosterSelect");
+      if (!select) return;
+      select.innerHTML = "";
+      if (!state.savedRosters.length) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "暂无已导入排班";
+        select.appendChild(option);
+        return;
+      }
+      [...state.savedRosters].sort((a, b) => compareSavedRosterImport(b, a)).forEach((roster) => {
+        const option = document.createElement("option");
+        option.value = savedRosterKey(roster);
+        option.textContent = `${roster.year}年${roster.month}月`;
+        option.selected = option.value === state.homeSelectedRoster;
+        select.appendChild(option);
+      });
+    }
+
+    function renderHomeRoster() {
+      const table = $("homeScheduleGrid");
+      const roster = state.savedRosters.find((item) => savedRosterKey(item) === state.homeSelectedRoster);
+      if (!table) return;
+      renderRosterTable(table, roster);
+      if (!roster) {
+        $("homeScheduleStatus").textContent = "暂无已确认导入的排班表";
+        $("homeScheduleStatus").className = "status";
+        $("homeScheduleSummary").textContent = "请先在“排班与在岗 → 导入/核对”中确认导入";
+        return;
+      }
+      $("homeScheduleStatus").textContent = roster.confirmed_at ? `导入时间：${roster.confirmed_at}` : "";
+      $("homeScheduleStatus").className = "status ok";
+      $("homeScheduleSummary").textContent = `${roster.year}年${roster.month}月 · ${roster.grid.length} 人 · 当天日期已居中`;
+      requestAnimationFrame(() => centerSavedRosterToday(table, roster));
     }
 
     function renderSavedRoster() {
@@ -9780,74 +10008,11 @@
       $("savedStatus").className = "status ok";
       const dayCount = daysInMonth(Number(roster.year), Number(roster.month));
       const grid = state.savedEditMode && state.savedDraft ? state.savedDraft.grid : roster.grid;
-      const todayDay = savedRosterTodayDay(roster);
-      const todayMonitorRowIndexes = new Set();
-      grid.forEach((row, rowIndex) => {
-        if (isSavedTodayMonitorRow(roster, row)) todayMonitorRowIndexes.add(rowIndex);
-      });
-      const lastTodayMonitorRowIndex = Math.max(-1, ...todayMonitorRowIndexes);
       $("savedSummary").textContent = `${grid.length} 人 × ${dayCount} 天`;
       loadRosterVersions(roster);
-      const head = document.createElement("tr");
-      head.innerHTML = `<th class="name">姓名</th>${Array.from({ length: dayCount }, (_, i) => {
-        const day = String(i + 1);
-        const todayClass = day === todayDay ? ' class="saved-today-col"' : "";
-        return `<th data-saved-day="${day}"${todayClass}>${day}</th>`;
-      }).join("")}${state.savedEditMode ? "<th>操作</th>" : ""}`;
-      table.appendChild(head);
-      grid.forEach((row, rowIndex) => {
-        const tr = document.createElement("tr");
-        const name = document.createElement("td");
-        name.className = "name";
-        if (isSavedTodayMonitorRow(roster, row)) name.classList.add("saved-today-monitor-name");
-        name.dataset.savedRow = String(rowIndex);
-        if (state.savedEditMode) {
-          name.innerHTML = `<input list="personnelNameOptions" value="${escapeHtml(row.name || "")}" data-saved-row="${rowIndex}" data-saved-name="1" />`;
-        } else {
-          name.textContent = row.name || "";
-        }
-        tr.appendChild(name);
-        for (let day = 1; day <= dayCount; day++) {
-          const dayText = String(day);
-          const value = (row.days || {})[dayText] || "";
-          const td = document.createElement("td");
-          td.className = `shift-cell shift-${shiftClass[value] || "blank"}`;
-          if (todayMonitorRowIndexes.has(rowIndex) && todayDay && day <= Number(todayDay)) td.classList.add("saved-today-monitor-row-path");
-          if (todayDay && dayText === todayDay && rowIndex <= lastTodayMonitorRowIndex) td.classList.add("saved-today-monitor-col-path");
-          if (isSavedTodayMonitorCell(roster, row, dayText)) {
-            td.classList.add("saved-today-monitor-cell");
-            if (rowIndex > 0 && isSavedTodayMonitorCell(roster, grid[rowIndex - 1], dayText)) {
-              td.classList.add("saved-today-monitor-join-prev");
-            }
-          }
-          td.dataset.savedRow = String(rowIndex);
-          td.dataset.savedDay = dayText;
-          applySavedCellHighlight(td, rowIndex, dayText);
-          if (state.savedEditMode) {
-            const select = document.createElement("select");
-            select.dataset.savedRow = String(rowIndex);
-            select.dataset.savedDay = dayText;
-            shiftOptions.forEach((optionValue) => {
-              const option = document.createElement("option");
-              option.value = optionValue;
-              option.textContent = optionValue || "-";
-              if (value === optionValue) option.selected = true;
-              select.appendChild(option);
-            });
-            td.appendChild(select);
-          } else {
-            td.textContent = value || "-";
-          }
-          tr.appendChild(td);
-        }
-        if (state.savedEditMode) {
-          const action = document.createElement("td");
-          action.innerHTML = `<button class="danger" data-saved-remove="${rowIndex}">删除</button>`;
-          tr.appendChild(action);
-        }
-        table.appendChild(tr);
-      });
+      renderRosterTable(table, roster, { editMode: state.savedEditMode, draft: state.savedDraft });
       updateSavedSelectionHighlights();
+      requestAnimationFrame(() => centerSavedRosterToday(table, roster));
     }
 
     function isSavedActiveCell(rowIndex, day) {
@@ -9885,7 +10050,12 @@
       state.savedDraft = null;
       renderSavedRoster();
     });
+    $("homeRosterSelect").addEventListener("change", () => {
+      state.homeSelectedRoster = $("homeRosterSelect").value;
+      renderHomeRoster();
+    });
     $("refreshSavedBtn").addEventListener("click", loadSavedRosters);
+    $("homeScheduleRefreshBtn").addEventListener("click", loadSavedRosters);
     $("refreshVersionsBtn").addEventListener("click", () => {
       const roster = state.savedRosters.find((item) => savedRosterKey(item) === state.selectedSavedRoster);
       if (roster) loadRosterVersions(roster);
