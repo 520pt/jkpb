@@ -9957,8 +9957,8 @@
           const value = (row.days || {})[dayText] || "";
           const td = document.createElement("td");
           td.className = `shift-cell shift-${shiftClass[value] || "blank"}`;
-          if (monitorShiftCodes.has(String(value).trim())) td.classList.add("saved-monitor-cell");
-          if (String(value).trim() === "巡") td.classList.add("saved-patrol-cell");
+          if (todayDay && dayText === todayDay && monitorShiftCodes.has(String(value).trim())) td.classList.add("saved-monitor-cell");
+          if (todayDay && dayText === todayDay && String(value).trim() === "巡") td.classList.add("saved-patrol-cell");
           if (todayMonitorRowIndexes.has(rowIndex) && todayDay && day <= Number(todayDay)) td.classList.add("saved-today-monitor-row-path");
           if (todayDay && dayText === todayDay && rowIndex <= lastTodayMonitorRowIndex) td.classList.add("saved-today-monitor-col-path");
           if (isSavedTodayMonitorCell(roster, row, dayText)) {

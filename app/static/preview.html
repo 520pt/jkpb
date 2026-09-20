@@ -218,8 +218,9 @@
       rows.forEach((row) => {
         const cells = [`<td class="name">${escapeHtml(row.name || "")}</td>`];
         for (let day = 1; day <= dayCount; day += 1) {
-          const value = String((row.days || {})[String(day)] || "").trim();
-          const roleClass = monitorCodes.has(value) ? "monitor-cell" : (value === "巡" ? "patrol-cell" : "");
+          const dayText = String(day);
+          const value = String((row.days || {})[dayText] || "").trim();
+          const roleClass = dayText === todayDay && monitorCodes.has(value) ? "monitor-cell" : (dayText === todayDay && value === "巡" ? "patrol-cell" : "");
           cells.push(`<td class="shift-cell ${roleClass}">${escapeHtml(value || "-")}</td>`);
         }
         table.insertAdjacentHTML("beforeend", `<tr>${cells.join("")}</tr>`);

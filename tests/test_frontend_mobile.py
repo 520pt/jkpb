@@ -475,9 +475,11 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
   const month = Number(nowParts.month);
   const day = Number(nowParts.day);
   const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const prevDay = String(Math.max(1, day - 1));
+  const nextDay = String(Math.min(days, day + 1));
   const grid = [
-    {{ name: '监控测试', days: {{ [String(day)]: '中' }} }},
-    {{ name: '巡查测试', days: {{ [String(day)]: '巡' }} }},
+    {{ name: '监控班员', days: {{ [prevDay]: '早', [String(day)]: '中', [nextDay]: '晚' }} }},
+    {{ name: '巡查班员', days: {{ [prevDay]: '巡', [String(day)]: '巡', [nextDay]: '巡' }} }},
   ];
   await page.route('**/api/rosters', async (route) => {{
     await route.fulfill({{
@@ -508,6 +510,8 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
       wrapperCenter: Math.round((wrapperRect.left + wrapperRect.right) / 2),
       monitorBorder: getComputedStyle(monitorCell, '::after').borderTopColor,
       patrolBorder: getComputedStyle(patrolCell, '::after').borderTopColor,
+      monitorCount: el.querySelectorAll('td.saved-monitor-cell').length,
+      patrolCount: el.querySelectorAll('td.saved-patrol-cell').length,
     }};
   }}, day);
   if (Math.abs(view.todayCenter - view.wrapperCenter) > 2) {{
@@ -519,6 +523,7 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
   if (view.patrolBorder !== 'rgb(37, 99, 235)') {{
     throw new Error(`巡查班颜色错误：${{JSON.stringify(view)}}`);
   }}
+  if (view.monitorCount !== 1 || view.patrolCount !== 1) throw new Error(`不应标注非当天班次：${{JSON.stringify(view)}}`);
   await browser.close();
 }})().catch((error) => {{
   console.error(error);
@@ -579,9 +584,11 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
   const month = Number(nowParts.month);
   const day = Number(nowParts.day);
   const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const prevDay = String(Math.max(1, day - 1));
+  const nextDay = String(Math.min(days, day + 1));
   const grid = [
-    {{ name: '监控测试', days: {{ [String(day)]: '中' }} }},
-    {{ name: '巡查测试', days: {{ [String(day)]: '巡' }} }},
+    {{ name: '监控班员', days: {{ [prevDay]: '早', [String(day)]: '中', [nextDay]: '晚' }} }},
+    {{ name: '巡查班员', days: {{ [prevDay]: '巡', [String(day)]: '巡', [nextDay]: '巡' }} }},
   ];
   await page.route('**/api/public/rosters', async (route) => {{
     await route.fulfill({{
@@ -606,11 +613,14 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
       wrapperCenter: Math.round((wrapperRect.left + wrapperRect.right) / 2),
       monitorBorder: getComputedStyle(monitorCell, '::after').borderTopColor,
       patrolBorder: getComputedStyle(patrolCell, '::after').borderTopColor,
+      monitorCount: el.querySelectorAll('td.monitor-cell').length,
+      patrolCount: el.querySelectorAll('td.patrol-cell').length,
     }};
   }}, day);
   if (Math.abs(view.todayCenter - view.wrapperCenter) > 2) throw new Error(`当天日期没有居中：${{JSON.stringify(view)}}`);
   if (view.monitorBorder !== 'rgb(249, 115, 22)') throw new Error(`监控班颜色错误：${{JSON.stringify(view)}}`);
   if (view.patrolBorder !== 'rgb(37, 99, 235)') throw new Error(`巡查班颜色错误：${{JSON.stringify(view)}}`);
+  if (view.monitorCount !== 1 || view.patrolCount !== 1) throw new Error(`不应标注非当天班次：${{JSON.stringify(view)}}`);
   await page.goto('http://127.0.0.1:18083/admin', {{ waitUntil: 'networkidle' }});
   if (!(await page.locator('input[type="password"]').count())) throw new Error('管理后台未保持登录保护');
   await browser.close();
