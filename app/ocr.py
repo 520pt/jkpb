@@ -952,7 +952,10 @@ def _classify_work_shift_shape(cell: Any) -> str | None:
         return "早"
     if ink_fraction >= 0.105:
         return "晚"
-    if lower_total >= 12 and lower_max >= 10:
+    # A normal ``中`` also has a vertical stroke and a lower half of ink.
+    # Require a genuinely long lower horizontal stroke before calling it ``早``.
+    lower_horizontal_threshold = max(12, int(round(ink.shape[1] * 0.5)))
+    if lower_total >= 12 and lower_max >= lower_horizontal_threshold:
         return "早"
     return "中"
 

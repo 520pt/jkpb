@@ -87,6 +87,16 @@ def test_template_cell_classifier_reads_non_green_colored_middle_cell():
     assert _classify_template_cell(cell) == "中"
 
 
+def test_template_cell_classifier_keeps_real_middle_shape_out_of_early():
+    # This is the font shape from the reported roster image: the middle cell
+    # has a central box, but no separate long lower stroke like ``早``.
+    cell = np.full((32, 24, 3), (71, 173, 112), dtype=np.uint8)
+    cv2.rectangle(cell, (7, 11), (17, 20), (0, 0, 0), 1)
+    cv2.line(cell, (11, 7), (11, 23), (0, 0, 0), 1)
+
+    assert _classify_template_cell(cell) == "中"
+
+
 def test_template_cell_classifier_prefers_shape_over_shift_thresholds():
     middle = np.full((29, 20, 3), (80, 170, 0), dtype=np.uint8)
     early = middle.copy()
