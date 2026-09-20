@@ -9,6 +9,10 @@ permissions:
   contents: read
   packages: write
 
+concurrency:
+  group: docker-image-main
+  cancel-in-progress: true
+
 env:
   IMAGE_NAME: ghcr.io/520pt/jkpb
 
@@ -60,6 +64,8 @@ jobs:
           push: true
           build-args: |
             INSTALL_OCR=false
+            APT_MIRROR=http://deb.debian.org/debian
+            PIP_INDEX_URL=https://pypi.org/simple/
           tags: ${{ steps.meta-duty.outputs.tags }}
           labels: ${{ steps.meta-duty.outputs.labels }}
           cache-from: type=gha,scope=duty-reminder
