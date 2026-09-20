@@ -497,6 +497,8 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
   if (selectedMonth !== `${{year}}-${{String(month).padStart(2, '0')}}`) {{
     throw new Error(`首页默认月份错误：${{selectedMonth}}`);
   }}
+  const homeSummary = await page.$eval('#homeScheduleSummary', (el) => (el.innerText || el.textContent || '').trim());
+  if (homeSummary.includes('当天日期已居中')) throw new Error(`首页不应显示居中提示：${{homeSummary}}`);
   const view = await page.$eval('#homeScheduleView .saved-wrap', (el, currentDay) => {{
     const todayCell = el.querySelector(`th[data-saved-day="${{currentDay}}"]`);
     const wrapperRect = el.getBoundingClientRect();
@@ -602,6 +604,11 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
   const title = await page.title();
   if (title !== '排班预览') throw new Error(`默认标题错误：${{title}}`);
   if (await page.locator('input[type="password"]').count()) throw new Error('默认页面仍显示登录框');
+  const bodyText = await page.locator('body').innerText();
+  for (const phrase of ['公开只读查看', '当天日期会自动居中', '排班内容仅供查看', '当天日期已居中']) {{
+    if (bodyText.includes(phrase)) throw new Error(`公开页不应显示提示文字：${{phrase}}`);
+  }}
+  if (/[0-9]+.*人.*×.*[0-9]+.*天/.test(bodyText)) throw new Error('公开页不应显示人数天数摘要');
   const view = await page.$eval('#tableWrap', (el, currentDay) => {{
     const todayCell = el.querySelector(`th[data-day="${{currentDay}}"]`);
     const wrapperRect = el.getBoundingClientRect();

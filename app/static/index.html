@@ -10048,7 +10048,7 @@
       }
       $("homeScheduleStatus").textContent = roster.confirmed_at ? `导入时间：${roster.confirmed_at}` : "";
       $("homeScheduleStatus").className = "status ok";
-      $("homeScheduleSummary").textContent = `${roster.year}年${roster.month}月 · ${roster.grid.length} 人 · 当天日期已居中`;
+      $("homeScheduleSummary").textContent = `${roster.year}年${roster.month}月 · ${roster.grid.length} 人`;
       requestAnimationFrame(() => centerSavedRosterToday(table, roster));
     }
 
