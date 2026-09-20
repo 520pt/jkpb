@@ -612,7 +612,7 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
   await page.waitForFunction(() => document.querySelectorAll('#rosterGrid tr').length >= 3);
   const title = await page.title();
   if (title !== '排班预览') throw new Error(`默认标题错误：${{title}}`);
-  if (await page.locator('input[type="password"]').count()) throw new Error('默认页面仍显示登录框');
+  if (await page.locator('form[action="/login"] input[type="password"]').count()) throw new Error('默认页面仍显示登录框');
   const bodyText = await page.locator('body').innerText();
   for (const phrase of ['公开只读查看', '当天日期会自动居中', '排班内容仅供查看', '当天日期已居中']) {{
     if (bodyText.includes(phrase)) throw new Error(`公开页不应显示提示文字：${{phrase}}`);
@@ -627,6 +627,22 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
   if (focus.active !== 1 || focus.row !== 31 || focus.column !== 3) {{
     throw new Error(`公开排班点击后焦点错误：${{JSON.stringify(focus)}}`);
   }}
+  await page.locator('#previewTitle').click({{ clickCount: 3 }});
+  await page.waitForLoadState('networkidle');
+  if (!page.url().endsWith('/admin')) throw new Error(`未登录三击标题未跳转到后台：${{page.url()}}`);
+  if (!(await page.locator('form[action="/login"] input[type="password"]').count())) throw new Error('未登录三击标题后未进入登录界面');
+  await page.locator('input[name="username"]').fill('admin');
+  await page.locator('input[name="password"]').fill('secret');
+  await page.locator('button[type="submit"]').click();
+  await page.waitForLoadState('networkidle');
+  if (!page.url().endsWith('/admin')) throw new Error(`登录后未进入后台：${{page.url()}}`);
+  if (await page.locator('form[action="/login"] input[type="password"]').count()) throw new Error('登录后仍停留在登录界面');
+  await page.goto('http://127.0.0.1:18083/preview', {{ waitUntil: 'networkidle' }});
+  await page.locator('#previewTitle').click({{ clickCount: 3 }});
+  await page.waitForLoadState('networkidle');
+  if (!page.url().endsWith('/admin')) throw new Error(`已登录三击标题未进入后台：${{page.url()}}`);
+  if (await page.locator('form[action="/login"] input[type="password"]').count()) throw new Error('已登录三击标题错误地进入登录界面');
+  await page.goto('http://127.0.0.1:18083/preview', {{ waitUntil: 'networkidle' }});
   const view = await page.$eval('#tableWrap', (el, currentDay) => {{
     const todayCell = el.querySelector(`th[data-day="${{currentDay}}"]`);
     const wrapperRect = el.getBoundingClientRect();
@@ -646,8 +662,9 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
   if (view.monitorBorder !== 'rgb(249, 115, 22)') throw new Error(`监控班颜色错误：${{JSON.stringify(view)}}`);
   if (view.patrolBorder !== 'rgb(37, 99, 235)') throw new Error(`巡查班颜色错误：${{JSON.stringify(view)}}`);
   if (view.monitorCount !== 1 || view.patrolCount !== 1) throw new Error(`不应标注非当天班次：${{JSON.stringify(view)}}`);
+  await page.goto('http://127.0.0.1:18083/logout', {{ waitUntil: 'networkidle' }});
   await page.goto('http://127.0.0.1:18083/admin', {{ waitUntil: 'networkidle' }});
-  if (!(await page.locator('input[type="password"]').count())) throw new Error('管理后台未保持登录保护');
+  if (!(await page.locator('form[action="/login"] input[type="password"]').count())) throw new Error('管理后台未保持登录保护');
   await browser.close();
 }})().catch((error) => {{
   console.error(error);

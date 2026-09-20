@@ -69,6 +69,7 @@
     .legend .patrol { border: 1px solid var(--blue); color: #1d4ed8; }
     .status { min-height: 18px; margin: 0; padding: 8px 16px 0; }
     .status.error { color: #b91c1c; }
+    #previewTitle { cursor: pointer; user-select: none; }
     .table-wrap { overflow: auto; max-width: 100%; padding: 0 16px 16px; }
     table { border-collapse: separate; border-spacing: 0; min-width: max-content; margin-top: 8px; font-size: 13px; }
     th, td { height: 40px; min-width: 42px; padding: 6px 8px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); text-align: center; white-space: nowrap; }
@@ -111,7 +112,7 @@
   <main class="preview-shell">
     <header class="preview-header">
       <div>
-        <h1>排班预览</h1>
+        <h1 id="previewTitle">排班预览</h1>
       </div>
       <div class="toolbar">
         <select id="rosterSelect" aria-label="选择排班月份"></select>
@@ -282,6 +283,9 @@
       renderRoster();
     });
     $("refreshBtn").addEventListener("click", loadRosters);
+    $("previewTitle").addEventListener("click", (event) => {
+      if (event.detail === 3) window.location.assign("/admin");
+    });
     $("rosterGrid").addEventListener("click", (event) => {
       const cell = event.target.closest("td.shift-cell");
       if (!cell || !cell.dataset.row || !cell.dataset.day) return;
