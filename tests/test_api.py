@@ -2098,14 +2098,17 @@ def test_app_login_protects_pages_and_api_when_configured(tmp_path):
 
     assert client.get("/health").status_code == 200
     page_response = client.get("/")
-    admin_response = client.get("/admin")
+    lufei_response = client.get("/lufei")
+    old_admin_response = client.get("/admin")
     api_response = client.get("/api/rosters")
     assert page_response.status_code == 200
     assert "排班预览" in page_response.text
     assert "监控班提醒登录" not in page_response.text
     assert 'autocomplete="current-password"' not in page_response.text
-    assert admin_response.status_code == 200
-    assert "监控班提醒登录" in admin_response.text
+    assert lufei_response.status_code == 200
+    assert "监控班提醒登录" in lufei_response.text
+    assert old_admin_response.status_code == 200
+    assert "监控班提醒登录" in old_admin_response.text
     assert "www-authenticate" not in page_response.headers
     assert api_response.status_code == 401
     assert "www-authenticate" not in api_response.headers
@@ -2123,7 +2126,8 @@ def test_app_login_protects_pages_and_api_when_configured(tmp_path):
     assert "duty_session=" in login_response.headers["set-cookie"]
     assert "Max-Age=" in login_response.headers["set-cookie"]
     assert client.get("/").text.find("排班预览") >= 0
-    assert client.get("/admin").status_code == 200
+    assert client.get("/lufei").status_code == 200
+    assert client.get("/admin").status_code == 404
     assert client.get("/api/rosters").status_code == 200
 
     logout_response = client.get("/logout", follow_redirects=False)

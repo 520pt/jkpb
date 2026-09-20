@@ -667,8 +667,8 @@ def create_app(
             headers={"Cache-Control": "no-cache, max-age=0, must-revalidate"},
         )
 
-    @app.get("/admin")
-    def admin_page():
+    @app.get("/lufei")
+    def lufei_page():
         return FileResponse(
             static_dir / "index.html",
             headers={"Cache-Control": "no-cache, max-age=0, must-revalidate"},

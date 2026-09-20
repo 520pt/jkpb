@@ -629,18 +629,18 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
   }}
   await page.locator('#previewTitle').click({{ clickCount: 3 }});
   await page.waitForLoadState('networkidle');
-  if (!page.url().endsWith('/admin')) throw new Error(`未登录三击标题未跳转到后台：${{page.url()}}`);
+  if (!page.url().endsWith('/lufei')) throw new Error(`未登录三击标题未跳转到后台：${{page.url()}}`);
   if (!(await page.locator('form[action="/login"] input[type="password"]').count())) throw new Error('未登录三击标题后未进入登录界面');
   await page.locator('input[name="username"]').fill('admin');
   await page.locator('input[name="password"]').fill('secret');
   await page.locator('button[type="submit"]').click();
   await page.waitForLoadState('networkidle');
-  if (!page.url().endsWith('/admin')) throw new Error(`登录后未进入后台：${{page.url()}}`);
+  if (!page.url().endsWith('/lufei')) throw new Error(`登录后未进入后台：${{page.url()}}`);
   if (await page.locator('form[action="/login"] input[type="password"]').count()) throw new Error('登录后仍停留在登录界面');
   await page.goto('http://127.0.0.1:18083/preview', {{ waitUntil: 'networkidle' }});
   await page.locator('#previewTitle').click({{ clickCount: 3 }});
   await page.waitForLoadState('networkidle');
-  if (!page.url().endsWith('/admin')) throw new Error(`已登录三击标题未进入后台：${{page.url()}}`);
+  if (!page.url().endsWith('/lufei')) throw new Error(`已登录三击标题未进入后台：${{page.url()}}`);
   if (await page.locator('form[action="/login"] input[type="password"]').count()) throw new Error('已登录三击标题错误地进入登录界面');
   await page.goto('http://127.0.0.1:18083/preview', {{ waitUntil: 'networkidle' }});
   const view = await page.$eval('#tableWrap', (el, currentDay) => {{
@@ -663,7 +663,7 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
   if (view.patrolBorder !== 'rgb(37, 99, 235)') throw new Error(`巡查班颜色错误：${{JSON.stringify(view)}}`);
   if (view.monitorCount !== 1 || view.patrolCount !== 1) throw new Error(`不应标注非当天班次：${{JSON.stringify(view)}}`);
   await page.goto('http://127.0.0.1:18083/logout', {{ waitUntil: 'networkidle' }});
-  await page.goto('http://127.0.0.1:18083/admin', {{ waitUntil: 'networkidle' }});
+  await page.goto('http://127.0.0.1:18083/lufei', {{ waitUntil: 'networkidle' }});
   if (!(await page.locator('form[action="/login"] input[type="password"]').count())) throw new Error('管理后台未保持登录保护');
   await browser.close();
 }})().catch((error) => {{
