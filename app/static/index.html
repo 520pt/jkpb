@@ -12694,6 +12694,7 @@
       const isLightAgent = false;
       const isWecomApp = activePanel === "wecom_app";
       const wecomAppEnabled = Boolean($("wecomAppEnabled") && $("wecomAppEnabled").checked);
+      const isTargetsSubview = document.documentElement.dataset.mainSubview === "notify-targets";
       document.querySelectorAll("[data-notification-sender]").forEach((button) => {
         const active = button.dataset.notificationSender === activePanel;
         button.classList.toggle("active", active);
@@ -12702,7 +12703,7 @@
       $("notificationCommonFields").classList.toggle("hidden", isWecomApp);
       $("wecomNotificationFields").classList.toggle("hidden", activePanel !== "wecom_webhook");
       if ($("lightAgentNotificationFields")) $("lightAgentNotificationFields").classList.add("hidden");
-      if ($("wecomAppTargetsEditor")) $("wecomAppTargetsEditor").classList.toggle("hidden", !isWecomApp || !wecomAppEnabled);
+      if ($("wecomAppTargetsEditor")) $("wecomAppTargetsEditor").classList.toggle("hidden", !isWecomApp || (!wecomAppEnabled && !isTargetsSubview));
       if ($("wecomAppConfigBody")) $("wecomAppConfigBody").classList.toggle("hidden", !isWecomApp || !wecomAppEnabled);
       $("wecomAppNotificationFields").classList.toggle("hidden", !isWecomApp);
       if ($("lightAgentUrlField")) $("lightAgentUrlField").classList.add("hidden");
