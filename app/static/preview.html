@@ -82,6 +82,17 @@
     td.shift-cell::after { content: ""; position: absolute; inset: 0; pointer-events: none; }
     td.shift-cell.monitor-cell::after { border: 2px solid var(--orange); }
     td.shift-cell.patrol-cell::after { border: 2px solid var(--blue); }
+    th.focus-col, td.name.focus-row { background: #bfdbfe; color: #1d4ed8; }
+    td.shift-cell.focus-row, td.shift-cell.focus-col { box-shadow: inset 0 0 0 999px rgba(37, 99, 235, 0.20); }
+    td.shift-cell.focus-cell {
+      outline: 3px solid var(--blue);
+      outline-offset: -3px;
+      box-shadow: inset 0 0 0 999px rgba(37, 99, 235, 0.34);
+      color: #0f172a;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    td.shift-cell { cursor: pointer; }
     .empty { padding: 38px 16px; color: var(--muted); text-align: center; }
     .footer { margin-top: 12px; color: var(--muted); font-size: 12px; }
     @media (max-width: 680px) {
@@ -124,7 +135,7 @@
   </main>
   <script>
     const $ = (id) => document.getElementById(id);
-    const state = { rosters: [], selected: "" };
+    const state = { rosters: [], selected: "", focusedCell: null };
     const monitorCodes = new Set(["早", "中", "晚"]);
 
     function escapeHtml(value) {
@@ -198,6 +209,7 @@
       const table = $("rosterGrid");
       const empty = $("emptyState");
       if (!roster) {
+        state.focusedCell = null;
         table.hidden = true;
         empty.hidden = false;
         empty.textContent = "暂无已确认导入的排班表";
@@ -213,13 +225,13 @@
         const day = String(index + 1);
         return `<th data-day="${day}" class="${day === todayDay ? "today" : ""}">${day}</th>`;
       }).join("")}</tr>`;
-      rows.forEach((row) => {
-        const cells = [`<td class="name">${escapeHtml(row.name || "")}</td>`];
+      rows.forEach((row, rowIndex) => {
+        const cells = [`<td class="name" data-row="${rowIndex}">${escapeHtml(row.name || "")}</td>`];
         for (let day = 1; day <= dayCount; day += 1) {
           const dayText = String(day);
           const value = String((row.days || {})[dayText] || "").trim();
           const roleClass = dayText === todayDay && monitorCodes.has(value) ? "monitor-cell" : (dayText === todayDay && value === "巡" ? "patrol-cell" : "");
-          cells.push(`<td class="shift-cell ${roleClass}">${escapeHtml(value || "-")}</td>`);
+          cells.push(`<td class="shift-cell ${roleClass}" data-row="${rowIndex}" data-day="${dayText}">${escapeHtml(value || "-")}</td>`);
         }
         table.insertAdjacentHTML("beforeend", `<tr>${cells.join("")}</tr>`);
       });
@@ -228,7 +240,20 @@
       $("rosterTitle").textContent = `${roster.year}年${roster.month}月排班`;
       $("rosterSummary").textContent = "";
       $("status").textContent = roster.confirmed_at ? `最近导入：${roster.confirmed_at}` : "";
+      updateFocusedCell();
       requestAnimationFrame(() => centerToday(table, roster));
+    }
+
+    function updateFocusedCell() {
+      const table = $("rosterGrid");
+      table.querySelectorAll(".focus-row, .focus-col, .focus-cell").forEach((cell) => {
+        cell.classList.remove("focus-row", "focus-col", "focus-cell");
+      });
+      if (!state.focusedCell) return;
+      table.querySelectorAll(`[data-row="${state.focusedCell.row}"]`).forEach((cell) => cell.classList.add("focus-row"));
+      table.querySelectorAll(`[data-day="${state.focusedCell.day}"]`).forEach((cell) => cell.classList.add("focus-col"));
+      const activeCell = table.querySelector(`td.shift-cell[data-row="${state.focusedCell.row}"][data-day="${state.focusedCell.day}"]`);
+      if (activeCell) activeCell.classList.add("focus-cell");
     }
 
     async function loadRosters() {
@@ -253,9 +278,16 @@
 
     $("rosterSelect").addEventListener("change", () => {
       state.selected = $("rosterSelect").value;
+      state.focusedCell = null;
       renderRoster();
     });
     $("refreshBtn").addEventListener("click", loadRosters);
+    $("rosterGrid").addEventListener("click", (event) => {
+      const cell = event.target.closest("td.shift-cell");
+      if (!cell || !cell.dataset.row || !cell.dataset.day) return;
+      state.focusedCell = { row: Number(cell.dataset.row), day: String(cell.dataset.day) };
+      updateFocusedCell();
+    });
     loadRosters();
   </script>
 </body>

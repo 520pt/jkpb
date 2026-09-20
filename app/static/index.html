@@ -1102,15 +1102,26 @@
       border-top-width: 0;
     }
     #savedGrid th.saved-col-highlight,
-    #savedGrid td.name.saved-row-highlight {
+    #savedGrid td.name.saved-row-highlight,
+    #homeScheduleGrid th.saved-col-highlight,
+    #homeScheduleGrid td.name.saved-row-highlight {
       background: #bfdbfe;
       color: #1d4ed8;
     }
     #savedGrid td.shift-cell.saved-row-highlight,
-    #savedGrid td.shift-cell.saved-col-highlight {
+    #savedGrid td.shift-cell.saved-col-highlight,
+    #homeScheduleGrid td.shift-cell.saved-row-highlight,
+    #homeScheduleGrid td.shift-cell.saved-col-highlight {
       box-shadow: inset 0 0 0 999px rgba(37, 99, 235, 0.20);
     }
     #savedGrid td.shift-cell.saved-active-cell {
+      outline: 3px solid #1d4ed8;
+      outline-offset: -3px;
+      box-shadow: inset 0 0 0 999px rgba(37, 99, 235, 0.34);
+      color: #0f172a;
+      font-weight: 800;
+    }
+    #homeScheduleGrid td.shift-cell.saved-active-cell {
       outline: 3px solid #1d4ed8;
       outline-offset: -3px;
       box-shadow: inset 0 0 0 999px rgba(37, 99, 235, 0.34);
@@ -1124,6 +1135,9 @@
     .saved-roster-grid th:not(.name),
     .saved-roster-grid td.shift-cell {
       min-width: 40px;
+    }
+    #homeScheduleGrid td.shift-cell {
+      cursor: pointer;
     }
     .saved-roster-grid td.shift-cell.saved-monitor-cell::after,
     .saved-roster-grid td.shift-cell.saved-patrol-cell::after {
@@ -8211,6 +8225,7 @@
       selectedSavedRoster: "",
       homeSelectedRoster: "",
       savedActiveCell: null,
+      homeActiveCell: null,
       savedEditMode: false,
       savedDraft: null,
       pendingImport: null,
@@ -9865,6 +9880,7 @@
       const todayRoster = rosterForToday(state.savedRosters);
       state.homeSelectedRoster = todayRoster ? savedRosterKey(todayRoster) : (latest ? savedRosterKey(latest) : "");
       state.savedActiveCell = null;
+      state.homeActiveCell = null;
       state.savedEditMode = false;
       state.savedDraft = null;
       renderSavedRosterSelector();
@@ -9922,7 +9938,7 @@
       wrapper.scrollLeft = Math.max(0, targetLeft);
     }
 
-    function renderRosterTable(table, roster, { editMode = false, draft = null } = {}) {
+    function renderRosterTable(table, roster, { editMode = false, draft = null, activeCell = null } = {}) {
       table.innerHTML = "";
       if (!roster) return;
       const dayCount = daysInMonth(Number(roster.year), Number(roster.month));
@@ -9969,7 +9985,7 @@
           }
           td.dataset.savedRow = String(rowIndex);
           td.dataset.savedDay = dayText;
-          applySavedCellHighlight(td, rowIndex, dayText);
+          applySavedCellHighlight(td, rowIndex, dayText, activeCell);
           if (editMode) {
             const select = document.createElement("select");
             select.dataset.savedRow = String(rowIndex);
@@ -10039,8 +10055,9 @@
       const table = $("homeScheduleGrid");
       const roster = state.savedRosters.find((item) => savedRosterKey(item) === state.homeSelectedRoster);
       if (!table) return;
-      renderRosterTable(table, roster);
+      renderRosterTable(table, roster, { activeCell: state.homeActiveCell });
       if (!roster) {
+        state.homeActiveCell = null;
         $("homeScheduleStatus").textContent = "暂无已确认导入的排班表";
         $("homeScheduleStatus").className = "status";
         $("homeScheduleSummary").textContent = "请先在“排班与在岗 → 导入/核对”中确认导入";
@@ -10049,6 +10066,7 @@
       $("homeScheduleStatus").textContent = roster.confirmed_at ? `导入时间：${roster.confirmed_at}` : "";
       $("homeScheduleStatus").className = "status ok";
       $("homeScheduleSummary").textContent = `${roster.year}年${roster.month}月 · ${roster.grid.length} 人`;
+      updateRosterSelectionHighlights(table, state.homeActiveCell);
       requestAnimationFrame(() => centerSavedRosterToday(table, roster));
     }
 
@@ -10074,20 +10092,24 @@
       const grid = state.savedEditMode && state.savedDraft ? state.savedDraft.grid : roster.grid;
       $("savedSummary").textContent = `${grid.length} 人 × ${dayCount} 天`;
       loadRosterVersions(roster);
-      renderRosterTable(table, roster, { editMode: state.savedEditMode, draft: state.savedDraft });
+      renderRosterTable(table, roster, {
+        editMode: state.savedEditMode,
+        draft: state.savedDraft,
+        activeCell: state.savedActiveCell,
+      });
       updateSavedSelectionHighlights();
       requestAnimationFrame(() => centerSavedRosterToday(table, roster));
     }
 
-    function isSavedActiveCell(rowIndex, day) {
-      return state.savedActiveCell && state.savedActiveCell.row === Number(rowIndex) && state.savedActiveCell.day === String(day);
+    function isSavedActiveCell(rowIndex, day, activeCell = state.savedActiveCell) {
+      return activeCell && activeCell.row === Number(rowIndex) && activeCell.day === String(day);
     }
 
-    function applySavedCellHighlight(cell, rowIndex, day) {
-      if (!state.savedActiveCell) return;
-      if (state.savedActiveCell.row === Number(rowIndex)) cell.classList.add("saved-row-highlight");
-      if (state.savedActiveCell.day === String(day)) cell.classList.add("saved-col-highlight");
-      if (isSavedActiveCell(rowIndex, day)) cell.classList.add("saved-active-cell");
+    function applySavedCellHighlight(cell, rowIndex, day, activeCell = state.savedActiveCell) {
+      if (!activeCell) return;
+      if (activeCell.row === Number(rowIndex)) cell.classList.add("saved-row-highlight");
+      if (activeCell.day === String(day)) cell.classList.add("saved-col-highlight");
+      if (isSavedActiveCell(rowIndex, day, activeCell)) cell.classList.add("saved-active-cell");
     }
 
     function setSavedActiveCell(rowIndex, day) {
@@ -10095,16 +10117,25 @@
       updateSavedSelectionHighlights();
     }
 
-    function updateSavedSelectionHighlights() {
-      const table = $("savedGrid");
+    function setHomeActiveCell(rowIndex, day) {
+      state.homeActiveCell = { row: Number(rowIndex), day: String(day) };
+      updateRosterSelectionHighlights($("homeScheduleGrid"), state.homeActiveCell);
+    }
+
+    function updateRosterSelectionHighlights(table, activeCell) {
+      if (!table) return;
       table.querySelectorAll(".saved-row-highlight, .saved-col-highlight, .saved-active-cell").forEach((cell) => {
         cell.classList.remove("saved-row-highlight", "saved-col-highlight", "saved-active-cell");
       });
-      if (!state.savedActiveCell) return;
-      table.querySelectorAll(`[data-saved-row="${state.savedActiveCell.row}"]`).forEach((cell) => cell.classList.add("saved-row-highlight"));
-      table.querySelectorAll(`[data-saved-day="${state.savedActiveCell.day}"]`).forEach((cell) => cell.classList.add("saved-col-highlight"));
-      const activeCell = table.querySelector(`td.shift-cell[data-saved-row="${state.savedActiveCell.row}"][data-saved-day="${state.savedActiveCell.day}"]`);
-      if (activeCell) activeCell.classList.add("saved-active-cell");
+      if (!activeCell) return;
+      table.querySelectorAll(`[data-saved-row="${activeCell.row}"]`).forEach((cell) => cell.classList.add("saved-row-highlight"));
+      table.querySelectorAll(`[data-saved-day="${activeCell.day}"]`).forEach((cell) => cell.classList.add("saved-col-highlight"));
+      const activeTableCell = table.querySelector(`td.shift-cell[data-saved-row="${activeCell.row}"][data-saved-day="${activeCell.day}"]`);
+      if (activeTableCell) activeTableCell.classList.add("saved-active-cell");
+    }
+
+    function updateSavedSelectionHighlights() {
+      updateRosterSelectionHighlights($("savedGrid"), state.savedActiveCell);
     }
 
     $("savedRosterSelect").addEventListener("change", () => {
@@ -10116,6 +10147,7 @@
     });
     $("homeRosterSelect").addEventListener("change", () => {
       state.homeSelectedRoster = $("homeRosterSelect").value;
+      state.homeActiveCell = null;
       renderHomeRoster();
     });
     $("refreshSavedBtn").addEventListener("click", loadSavedRosters);
@@ -10155,6 +10187,11 @@
       const cell = event.target.closest("td.shift-cell");
       if (!cell || !cell.dataset.savedRow || !cell.dataset.savedDay) return;
       setSavedActiveCell(cell.dataset.savedRow, cell.dataset.savedDay);
+    });
+    $("homeScheduleGrid").addEventListener("click", (event) => {
+      const cell = event.target.closest("td.shift-cell");
+      if (!cell || !cell.dataset.savedRow || !cell.dataset.savedDay) return;
+      setHomeActiveCell(cell.dataset.savedRow, cell.dataset.savedDay);
     });
     $("savedGrid").addEventListener("input", (event) => {
       const input = event.target;

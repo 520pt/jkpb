@@ -526,6 +526,15 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
     throw new Error(`巡查班颜色错误：${{JSON.stringify(view)}}`);
   }}
   if (view.monitorCount !== 1 || view.patrolCount !== 1) throw new Error(`不应标注非当天班次：${{JSON.stringify(view)}}`);
+  await page.click('#homeScheduleGrid td.shift-cell[data-saved-row="0"][data-saved-day="25"]');
+  const homeFocus = await page.evaluate(() => ({{
+    active: document.querySelectorAll('#homeScheduleGrid td.saved-active-cell').length,
+    row: document.querySelectorAll('#homeScheduleGrid td.saved-row-highlight').length,
+    column: document.querySelectorAll('#homeScheduleGrid .saved-col-highlight').length,
+  }}));
+  if (homeFocus.active !== 1 || homeFocus.row !== 31 || homeFocus.column !== 3) {{
+    throw new Error(`首页点击排班后焦点错误：${{JSON.stringify(homeFocus)}}`);
+  }}
   await browser.close();
 }})().catch((error) => {{
   console.error(error);
@@ -609,6 +618,15 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
     if (bodyText.includes(phrase)) throw new Error(`公开页不应显示提示文字：${{phrase}}`);
   }}
   if (/[0-9]+.*人.*×.*[0-9]+.*天/.test(bodyText)) throw new Error('公开页不应显示人数天数摘要');
+  await page.click('td.shift-cell[data-row="0"][data-day="25"]');
+  const focus = await page.evaluate(() => ({{
+    active: document.querySelectorAll('#rosterGrid td.focus-cell').length,
+    row: document.querySelectorAll('#rosterGrid td.focus-row').length,
+    column: document.querySelectorAll('#rosterGrid .focus-col').length,
+  }}));
+  if (focus.active !== 1 || focus.row !== 31 || focus.column !== 3) {{
+    throw new Error(`公开排班点击后焦点错误：${{JSON.stringify(focus)}}`);
+  }}
   const view = await page.$eval('#tableWrap', (el, currentDay) => {{
     const todayCell = el.querySelector(`th[data-day="${{currentDay}}"]`);
     const wrapperRect = el.getBoundingClientRect();
