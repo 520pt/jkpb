@@ -54,6 +54,7 @@ from app.patrol_record_image import render_patrol_record_image
 from app.reminders import DEFAULT_MESSAGE_TEMPLATE, ReminderEvent, ReminderSettings, plan_reminders_for_day
 from app.roster import Shift, ShiftAssignment, normalize_shift_code
 from app.roster_import_image import render_roster_import_image
+from app.roster_workbook import extract_roster_workbook
 from app.shift_reminder_image import render_shift_reminder_image
 from app.storage import (
     DEFAULT_DAILY_DUTY_TEMPLATE,
@@ -82,8 +83,12 @@ HHMM_PATTERN = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 SESSION_COOKIE_NAME = "duty_session"
 SESSION_DURATION_SECONDS = 12 * 60 * 60
 REMEMBER_SESSION_SECONDS = 30 * 24 * 60 * 60
-ALLOWED_UPLOAD_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
-ALLOWED_UPLOAD_TYPES = {"image/jpeg", "image/png", "image/webp", "image/bmp"}
+ALLOWED_IMAGE_UPLOAD_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+ALLOWED_WORKBOOK_UPLOAD_SUFFIXES = {".xlsx"}
+ALLOWED_UPLOAD_SUFFIXES = ALLOWED_IMAGE_UPLOAD_SUFFIXES | ALLOWED_WORKBOOK_UPLOAD_SUFFIXES
+ALLOWED_IMAGE_UPLOAD_TYPES = {"image/jpeg", "image/png", "image/webp", "image/bmp"}
+ALLOWED_WORKBOOK_UPLOAD_TYPES = {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
+ALLOWED_UPLOAD_TYPES = ALLOWED_IMAGE_UPLOAD_TYPES | ALLOWED_WORKBOOK_UPLOAD_TYPES
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_MB", "10")) * 1024 * 1024
 UPLOAD_KEEP_DAYS = int(os.getenv("UPLOAD_KEEP_DAYS", "90"))
 GENERATED_UPLOAD_KEEP_DAYS = int(os.getenv("GENERATED_UPLOAD_KEEP_DAYS", "1"))
@@ -804,15 +809,35 @@ def create_app(
     def upload_roster(file: UploadFile = File(...)):
         target = _save_roster_upload(file, uploads)
         try:
+            if target.suffix.lower() == ".xlsx":
+                result = extract_roster_workbook(target, default_year=_today_in_tz().year)
+                months = list(result.get("months") or [])
+                selected_index = _select_workbook_month_index(months)
+                selected = months[selected_index] if months else {}
+                return {
+                    **result,
+                    "upload_kind": "workbook",
+                    "selected_month_index": selected_index,
+                    "year": selected.get("year"),
+                    "month": selected.get("month"),
+                    "source_image_path": str(target),
+                    "source_image_url": "",
+                    "grid": selected.get("grid", []),
+                }
             result = extract_roster_image(str(target))
             result = _normalize_roster_ocr_names(repo, result)
             result = _apply_roster_role_semantics(repo, result)
+            result["upload_kind"] = "image"
             result["source_image_url"] = f"/api/uploads/{Path(result.get('source_image_path') or target).name}"
             return result
         except HTTPException:
             if target.exists():
                 target.unlink(missing_ok=True)
             raise
+        except ValueError as exc:
+            if target.exists():
+                target.unlink(missing_ok=True)
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.post("/api/rosters/recheck")
     def recheck_roster(request: RosterRecheckRequest):
@@ -2041,6 +2066,16 @@ def create_app(
     return app
 
 
+def _select_workbook_month_index(months: list[dict[str, Any]]) -> int:
+    if not months:
+        return 0
+    today = _today_in_tz()
+    for index, item in enumerate(months):
+        if int(item.get("year") or 0) == today.year and int(item.get("month") or 0) == today.month:
+            return index
+    return max(range(len(months)), key=lambda index: (int(months[index].get("year") or 0), int(months[index].get("month") or 0)))
+
+
 def _resolve_upload_path(source_image_path: str, uploads: Path) -> Path:
     safe_name = Path(source_image_path).name
     target = (uploads / safe_name).resolve()
@@ -2364,16 +2399,19 @@ def _save_upload_file(file: UploadFile, target: Path) -> None:
                 break
             bytes_written += len(chunk)
             if bytes_written > MAX_UPLOAD_BYTES:
-                raise HTTPException(status_code=413, detail=f"图片不能超过 {MAX_UPLOAD_BYTES // 1024 // 1024}MB")
+                raise HTTPException(status_code=413, detail=f"文件不能超过 {MAX_UPLOAD_BYTES // 1024 // 1024}MB")
             output.write(chunk)
 
 
 def _save_roster_upload(file: UploadFile, uploads: Path) -> Path:
     suffix = Path(file.filename or "roster.png").suffix.lower() or ".png"
+    content_type = (file.content_type or "").lower()
     if suffix not in ALLOWED_UPLOAD_SUFFIXES:
-        raise HTTPException(status_code=400, detail="仅支持 jpg、png、webp、bmp 图片")
-    if file.content_type and file.content_type.lower() not in ALLOWED_UPLOAD_TYPES:
+        raise HTTPException(status_code=400, detail="只支持 jpg、png、webp、bmp 图片或 xlsx 排班表")
+    if suffix in ALLOWED_IMAGE_UPLOAD_SUFFIXES and content_type and content_type not in ALLOWED_IMAGE_UPLOAD_TYPES:
         raise HTTPException(status_code=400, detail="上传文件类型不是图片")
+    if suffix in ALLOWED_WORKBOOK_UPLOAD_SUFFIXES and content_type and content_type not in ALLOWED_WORKBOOK_UPLOAD_TYPES:
+        raise HTTPException(status_code=400, detail="上传文件类型不是 xlsx 表格")
     target = uploads / f"{uuid.uuid4().hex}{suffix}"
     try:
         _save_upload_file(file, target)
@@ -2386,12 +2424,12 @@ def _save_roster_upload(file: UploadFile, uploads: Path) -> Path:
 
 def _save_roster_upload_bytes(filename: str, content_type: str, content: bytes, uploads: Path) -> Path:
     suffix = Path(filename or "roster.png").suffix.lower() or ".png"
-    if suffix not in ALLOWED_UPLOAD_SUFFIXES:
+    if suffix not in ALLOWED_IMAGE_UPLOAD_SUFFIXES:
         suffix = ".png"
-    if content_type and content_type.lower() not in ALLOWED_UPLOAD_TYPES:
+    if content_type and content_type.lower() not in ALLOWED_IMAGE_UPLOAD_TYPES:
         raise HTTPException(status_code=400, detail="上传文件类型不是图片")
     if len(content) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail=f"图片不能超过 {MAX_UPLOAD_BYTES // 1024 // 1024}MB")
+        raise HTTPException(status_code=413, detail=f"文件不能超过 {MAX_UPLOAD_BYTES // 1024 // 1024}MB")
     target = uploads / f"{uuid.uuid4().hex}{suffix}"
     try:
         uploads.mkdir(parents=True, exist_ok=True)

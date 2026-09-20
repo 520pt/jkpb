@@ -677,6 +677,10 @@
       color: #dbeafe;
     }
     #file { width: 300px; }
+    .workbook-month-select {
+      min-width: 150px;
+      height: 36px;
+    }
     .selected-file-name {
       min-width: 126px;
       max-width: 220px;
@@ -7014,11 +7018,12 @@
           </div>
         </div>
         <div class="toolbar">
-          <input id="file" type="file" accept="image/*" class="hidden" />
-          <button type="button" id="pickFileBtn">选择图片</button>
+          <input id="file" type="file" accept="image/*,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden" />
+          <button type="button" id="pickFileBtn">选择图片/表格</button>
           <span id="selectedFileName" class="selected-file-name">未选择文件</span>
-          <div id="dropZone" class="drop-zone">拖入图片到任意位置</div>
-          <button class="primary" id="uploadBtn">重新识别</button>
+          <select id="workbookMonthSelect" class="workbook-month-select hidden"></select>
+          <div id="dropZone" class="drop-zone">拖入图片或 xlsx 表格到任意位置</div>
+          <button class="primary" id="uploadBtn">重新识别/导入</button>
           <button id="recheckBtn">自动核对</button>
           <button id="addRowBtn">新增人员</button>
           <button class="green" id="confirmBtn">确认导入</button>
@@ -7040,7 +7045,7 @@
         <div class="review-layout">
           <div class="image-panel">
             <div class="panel-head">
-              <span>原图</span>
+              <span id="sourcePanelTitle">原图</span>
               <span id="imageContext" class="image-context"></span>
               <div class="toolbar">
                 <button id="zoomOutBtn">-</button>
@@ -8193,6 +8198,9 @@
       month: "",
       sourceImagePath: "",
       sourceImageUrl: "",
+      uploadKind: "image",
+      workbookMonths: [],
+      selectedWorkbookMonthIndex: -1,
       baselineGrid: [],
       imageZoom: 140,
       grid: [],
@@ -8309,7 +8317,7 @@
       overlay.hidden = !active;
       $("reviewBusyText").textContent = text;
       $("reviewPage").setAttribute("aria-busy", active ? "true" : "false");
-      ["file", "uploadBtn", "recheckBtn", "addRowBtn", "confirmBtn", "year", "month"].forEach((id) => {
+      ["file", "uploadBtn", "recheckBtn", "addRowBtn", "confirmBtn", "year", "month", "workbookMonthSelect"].forEach((id) => {
         const element = $(id);
         if (element) element.disabled = active;
       });
@@ -8329,6 +8337,7 @@
       $("month").value = state.month;
       const dayCount = reviewDayCount();
       $("gridSummary").textContent = state.grid.length && dayCount ? `${state.grid.length} 人 × ${dayCount} 天` : "";
+      renderWorkbookMonthSelect();
       updateImageContext();
       renderImage();
     }
@@ -8342,11 +8351,14 @@
         image.removeAttribute("src");
         $("imageCanvas").hidden = true;
         empty.hidden = false;
+        empty.textContent = state.uploadKind === "workbook" ? "表格导入不需要原图核对" : "上传后显示原图";
+        $("sourcePanelTitle").textContent = state.uploadKind === "workbook" ? "源表格" : "原图";
         frame.classList.add("empty");
         $("overlayLayer").innerHTML = "";
         $("imageContext").textContent = "";
         return;
       }
+      $("sourcePanelTitle").textContent = "原图";
       $("imageCanvas").hidden = false;
       image.src = state.sourceImageUrl;
       image.hidden = false;
@@ -8541,9 +8553,9 @@
     }
 
     async function uploadSelectedFile(file) {
-      if (!file) return setStatus("请选择图片", "error");
+      if (!file) return setStatus("请先选择图片或 xlsx 表格", "error");
       setReviewBusy(true);
-      setStatus("正在上传识别...");
+      setStatus("正在上传导入...");
       try {
         const form = new FormData();
         form.append("file", file);
@@ -8558,32 +8570,79 @@
           }
         }
         if (!response.ok) return setStatus(body.detail || "上传失败", "error");
+        state.imageZoom = 140;
+        state.activeCell = null;
+        state.filter = "全部";
+        state.pendingImport = null;
+        hideConflictPanel();
+        if (body.upload_kind === "workbook" && Array.isArray(body.months)) {
+          state.uploadKind = "workbook";
+          state.workbookMonths = body.months || [];
+          state.sourceImagePath = body.source_image_path || body.source_file_path || "";
+          selectWorkbookMonth(Number(body.selected_month_index || 0), { render: false });
+          setRecheckIssues([]);
+          setFilterButtons();
+          renderGrid();
+          const total = state.workbookMonths.length;
+          setStatus(`表格解析完成：共 ${total} 个月，当前显示 ${state.year}年${state.month}月，校对后点击确认导入`, "ok");
+          return;
+        }
+        state.uploadKind = "image";
+        state.workbookMonths = [];
+        state.selectedWorkbookMonthIndex = -1;
         state.year = body.year;
         state.month = body.month;
         state.sourceImagePath = body.source_image_path;
         state.sourceImageUrl = body.source_image_url || "";
         state.baselineGrid = JSON.parse(JSON.stringify(body.grid || []));
-        state.imageZoom = 140;
         state.grid = body.grid || [];
-        state.activeCell = null;
-        state.filter = "全部";
-        state.pendingImport = null;
-        hideConflictPanel();
         setRecheckIssues([]);
         setFilterButtons();
         renderGrid();
         if (body.ocr_status === "template_ok" && hasPlaceholderNames(state.grid)) {
-          setStatus(`班次识别完成：${state.grid.length} 行 × ${daysInMonth(Number(state.year), Number(state.month))} 天，请先补全姓名再确认导入`, "error");
+          setStatus(`模板识别完成：${state.grid.length} 人 × ${daysInMonth(Number(state.year), Number(state.month))} 天，请先补全姓名再确认导入`, "error");
         } else if (body.ocr_status === "ok" || body.ocr_status === "template_ok") {
           setStatus(`识别完成：${state.grid.length} 人 × ${daysInMonth(Number(state.year), Number(state.month))} 天，请校对后确认导入`, "ok");
         } else {
           setStatus("识别失败，请检查图片格式或手动补全表格", "error");
         }
       } catch (error) {
-        setStatus(`上传识别失败：${error.message || error}`, "error");
+        setStatus(`上传导入失败：${error.message || error}`, "error");
       } finally {
         setReviewBusy(false);
       }
+    }
+
+    function selectWorkbookMonth(index, options = {}) {
+      const months = state.workbookMonths || [];
+      const safeIndex = Math.max(0, Math.min(Number(index) || 0, months.length - 1));
+      const item = months[safeIndex];
+      if (!item) return;
+      state.selectedWorkbookMonthIndex = safeIndex;
+      state.year = item.year;
+      state.month = item.month;
+      state.sourceImagePath = item.source_image_path || state.sourceImagePath;
+      state.sourceImageUrl = "";
+      state.baselineGrid = JSON.parse(JSON.stringify(item.grid || []));
+      state.grid = JSON.parse(JSON.stringify(item.grid || []));
+      state.activeCell = null;
+      if (options.render !== false) renderGrid();
+    }
+
+    function renderWorkbookMonthSelect() {
+      const select = $("workbookMonthSelect");
+      if (!select) return;
+      const months = state.workbookMonths || [];
+      select.classList.toggle("hidden", state.uploadKind !== "workbook" || !months.length);
+      if (state.uploadKind !== "workbook" || !months.length) {
+        select.innerHTML = "";
+        return;
+      }
+      select.innerHTML = months.map((item, index) => {
+        const sheet = item.sheet_name ? `（${escapeHtml(item.sheet_name)}）` : "";
+        const selected = index === state.selectedWorkbookMonthIndex ? "selected" : "";
+        return `<option value="${index}" ${selected}>${escapeHtml(item.year)}年${escapeHtml(item.month)}月${sheet}</option>`;
+      }).join("");
     }
 
     function hasPlaceholderNames(grid) {
@@ -9695,6 +9754,11 @@
       uploadSelectedFile(selected);
     });
     $("uploadBtn").addEventListener("click", () => uploadSelectedFile($("file").files[0]));
+    $("workbookMonthSelect").addEventListener("change", () => {
+      selectWorkbookMonth($("workbookMonthSelect").value);
+      hideConflictPanel();
+      setStatus(`已切换到 ${state.year}年${state.month}月，校对后点击确认导入`, "ok");
+    });
     $("recheckBtn").addEventListener("click", autoRecheck);
     $("dropZone").addEventListener("click", () => $("file").click());
 
@@ -10200,6 +10264,7 @@
     }
 
     async function autoRecheck() {
+      if (state.uploadKind === "workbook") return setStatus("表格导入已直接读取文字，不需要自动核对原图", "error");
       if (!state.sourceImagePath || !state.grid.length) return setStatus("请先上传排班图片", "error");
       const button = $("recheckBtn");
       const cells = reviewCells();

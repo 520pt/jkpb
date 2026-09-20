@@ -68,6 +68,48 @@ def json_bytes(value: dict) -> bytes:
     return json.dumps(value, ensure_ascii=False).encode("utf-8")
 
 
+def _write_test_roster_workbook(path: Path) -> None:
+    from html import escape
+    from zipfile import ZipFile
+
+    def cell(ref: str, value):
+        if isinstance(value, int):
+            return f'<c r="{ref}"><v>{value}</v></c>'
+        return f'<c r="{ref}" t="inlineStr"><is><t>{escape(str(value))}</t></is></c>'
+
+    def sheet_xml(cells: dict[str, object]) -> str:
+        rows: dict[int, list[str]] = {}
+        for ref, value in cells.items():
+            row = int("".join(ch for ch in ref if ch.isdigit()))
+            rows.setdefault(row, []).append(cell(ref, value))
+        body = "".join(f'<row r="{row}">{"".join(values)}</row>' for row, values in sorted(rows.items()))
+        return f'<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>{body}</sheetData></worksheet>'
+
+    base_cells = {
+        "A1": "\u666f\u4e1c\u96a7\u7ba1\u7ad92026\u5e748\u6708\u6392\u73ed\u8868",
+        "A2": "\u65f6\u95f4",
+        "B2": "\u5e8f\u53f7",
+        "C2": "\u59d3\u540d",
+        "D2": 1,
+        "E2": 2,
+        "F2": "\u5de5\u4f5c\u65e5\u5929\u6570",
+        "D3": "\u4e00",
+        "E3": "\u4e8c",
+    }
+    hidden = {**base_cells, "A1": "\u9690\u85cf\u6a21\u677f2026\u5e741\u6708", "C4": "Hidden", "D4": "\u4e2d", "E4": "\u4f11"}
+    july = {**base_cells, "A1": "\u666f\u4e1c\u96a7\u7ba1\u7ad92026\u5e747\u6708\u6392\u73ed\u8868", "A4": "2026\u5e74\n5\u6708", "C4": "Alice", "D4": "\u65e9", "E4": "\u4f11"}
+    august = {**base_cells, "C4": "Alice", "D4": "\u4e2d", "E4": "\u51fa\n\u5dee", "C5": "Bob", "D5": "\u5de1", "E5": "\u5907"}
+    with ZipFile(path, "w") as z:
+        z.writestr("[Content_Types].xml", """<?xml version=\"1.0\" encoding=\"UTF-8\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/></Types>""")
+        z.writestr("_rels/.rels", """<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>""")
+        z.writestr("xl/workbook.xml", """<?xml version=\"1.0\" encoding=\"UTF-8\"?><workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets><sheet name=\"一月份排班表\" sheetId=\"1\" state=\"hidden\" r:id=\"rId1\"/><sheet name=\"7月\" sheetId=\"2\" r:id=\"rId2\"/><sheet name=\"8月\" sheetId=\"3\" r:id=\"rId3\"/></sheets></workbook>""")
+        z.writestr("xl/_rels/workbook.xml.rels", """<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet2.xml\"/><Relationship Id=\"rId3\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet3.xml\"/></Relationships>""")
+        z.writestr("xl/worksheets/sheet1.xml", sheet_xml(hidden))
+        z.writestr("xl/worksheets/sheet2.xml", sheet_xml(july))
+        z.writestr("xl/worksheets/sheet3.xml", sheet_xml(august))
+
+
+
 def test_static_page_uses_synthetic_placeholders(tmp_path):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)
@@ -84,6 +126,8 @@ def test_static_page_uses_synthetic_placeholders(tmp_path):
     assert 'homeRecentRecordsCard' in html
     assert '<section id="todayPage" class="tab-page">' in html
     assert '<section id="reviewPage" class="tab-page hidden">' in html
+    assert 'accept="image/*,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"' in html
+    assert 'id="workbookMonthSelect"' in html
     assert 'id="personName" list="personnelNameOptions" placeholder="选择或输入姓名"' in html
     assert 'id="customReminderName" list="personnelNameOptions" placeholder="选择或输入姓名"' in html
     assert "customReminderTimeRules" in html
@@ -2145,6 +2189,56 @@ def test_notification_detail_page_is_public_and_embeds_full_image(tmp_path, monk
     assert client.get("/api/rosters").status_code == 401
 
 
+def test_upload_xlsx_workbook_returns_month_choices_and_can_confirm(tmp_path, monkeypatch):
+    workbook = tmp_path / "roster.xlsx"
+    _write_test_roster_workbook(workbook)
+    monkeypatch.setattr(main_module, "_today_in_tz", lambda: datetime(2026, 8, 20, tzinfo=TZ))
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/rosters/upload",
+        files={
+            "file": (
+                "\u666f\u4e1c\u96a7\u7ba1\u7ad92026\u5e74\u6392\u73ed\u8868.xlsx",
+                workbook.read_bytes(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["upload_kind"] == "workbook"
+    assert [item["month"] for item in body["months"]] == [7, 8]
+    assert body["selected_month_index"] == 1
+    assert body["year"] == 2026
+    assert body["month"] == 8
+    assert body["grid"] == [
+        {"name": "Alice", "days": {"1": "\u4e2d", "2": "\u51fa\u5dee"}},
+        {"name": "Bob", "days": {"1": "\u5de1", "2": "\u5907"}},
+    ]
+    assert body["months"][0]["month"] == 7
+    assert body["months"][0]["grid"][0]["days"]["1"] == "\u65e9"
+    assert "3" not in body["grid"][0]["days"]
+
+    confirm_response = client.post(
+        "/api/rosters/confirm",
+        json={
+            "year": body["year"],
+            "month": body["month"],
+            "source_image_path": body["source_image_path"],
+            "grid": body["grid"],
+        },
+    )
+
+    assert confirm_response.status_code == 200
+    assert confirm_response.json()["success"] is True
+    saved = app.state.repo.get_roster_month(2026, 8)
+    assert saved["grid"] == body["grid"]
+
+
+
 def test_upload_image_returns_review_grid(tmp_path, monkeypatch):
     def fake_extract(path):
         return {
@@ -2210,9 +2304,11 @@ def test_upload_rejects_non_image_and_oversized_file(tmp_path, monkeypatch):
     client = TestClient(app)
 
     bad_type = client.post("/api/rosters/upload", files={"file": ("roster.txt", b"fake", "text/plain")})
+    bad_xls = client.post("/api/rosters/upload", files={"file": ("roster.xls", b"fake", "application/vnd.ms-excel")})
     too_large = client.post("/api/rosters/upload", files={"file": ("roster.png", b"12345", "image/png")})
 
     assert bad_type.status_code == 400
+    assert bad_xls.status_code == 400
     assert too_large.status_code == 413
 
 
