@@ -513,10 +513,11 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
           wrapperCenter: Math.round((wrapperRect.left + wrapperRect.right) / 2),
           weekday: todayCell.querySelector('.saved-weekday').textContent,
           tipText: tipCell?.dataset.weekdayTip || '',
-          tipBubble: tipCell ? getComputedStyle(tipCell, '::after').content : '',
+          tipBubble: tipCell?.querySelector('.weekday-tip-bubble')?.textContent || '',
           monitorBorder: getComputedStyle(monitorCell, '::after').borderTopColor,
           patrolBorder: getComputedStyle(patrolCell, '::after').borderTopColor,
           patrolWheels: getComputedStyle(patrolCell, '::before').backgroundImage,
+          patrolWheelHeight: getComputedStyle(patrolCell, '::before').height,
           monitorCount: el.querySelectorAll('td.saved-monitor-cell').length,
           patrolCount: el.querySelectorAll('td.saved-patrol-cell').length,
         }};
@@ -529,13 +530,20 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
       if (!['需夜间巡查', '需检查隐患点', '需检查服务区'].includes(view.tipText) || view.tipBubble === 'none') {{
         throw new Error(`周几提示气泡缺失：${{JSON.stringify(view)}}`);
       }}
+      const weekdayTip = page.locator('#homeScheduleGrid th[data-weekday-tip]').first();
+      await weekdayTip.click();
+      const tipShown = await weekdayTip.evaluate((el) => {{ const bubble = el.querySelector('.weekday-tip-bubble'); return {{ open: el.classList.contains('weekday-tip-open'), opacity: getComputedStyle(bubble).opacity, visibility: getComputedStyle(bubble).visibility }}; }});
+      if (!tipShown.open || tipShown.opacity !== '1' || tipShown.visibility !== 'visible') throw new Error(`提示气泡点击显示失败：${{JSON.stringify(tipShown)}}`);
+      await weekdayTip.click();
+      const tipHidden = await weekdayTip.evaluate((el) => {{ const bubble = el.querySelector('.weekday-tip-bubble'); return {{ open: el.classList.contains('weekday-tip-open'), opacity: getComputedStyle(bubble).opacity, visibility: getComputedStyle(bubble).visibility }}; }});
+      if (tipHidden.open || tipHidden.opacity !== '0' || tipHidden.visibility !== 'hidden') throw new Error(`提示气泡点击隐藏失败：${{JSON.stringify(tipHidden)}}`);
       if (view.monitorBorder !== 'rgb(249, 115, 22)') {{
         throw new Error(`监控班颜色错误：${{JSON.stringify(view)}}`);
       }}
       if (view.patrolBorder !== 'rgb(37, 99, 235)') {{
         throw new Error(`巡查班颜色错误：${{JSON.stringify(view)}}`);
       }}
-      if (!view.patrolWheels.includes('radial-gradient')) throw new Error(`巡查班立体轮子缺失：${{JSON.stringify(view)}}`);
+      if (!view.patrolWheels.includes('radial-gradient') || view.patrolWheelHeight !== '8px') throw new Error(`巡查班立体轮子尺寸错误：${{JSON.stringify(view)}}`);
       if (view.monitorCount !== 1 || view.patrolCount !== 1) throw new Error(`不应标注非当天班次：${{JSON.stringify(view)}}`);
   await page.click('#homeScheduleGrid td.shift-cell[data-saved-row="0"][data-saved-day="25"]');
   const homeFocus = await page.evaluate(() => ({{
@@ -666,10 +674,11 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
       wrapperCenter: Math.round((wrapperRect.left + wrapperRect.right) / 2),
       weekday: todayCell.querySelector('.weekday').textContent,
       tipText: tipCell?.dataset.weekdayTip || '',
-      tipBubble: tipCell ? getComputedStyle(tipCell, '::after').content : '',
+      tipBubble: tipCell?.querySelector('.weekday-tip-bubble')?.textContent || '',
       monitorBorder: getComputedStyle(monitorCell, '::after').borderTopColor,
       patrolBorder: getComputedStyle(patrolCell, '::after').borderTopColor,
       patrolWheels: getComputedStyle(patrolCell, '::before').backgroundImage,
+      patrolWheelHeight: getComputedStyle(patrolCell, '::before').height,
       monitorCount: el.querySelectorAll('td.monitor-cell').length,
       patrolCount: el.querySelectorAll('td.patrol-cell').length,
     }};
@@ -680,9 +689,16 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
   if (!['需夜间巡查', '需检查隐患点', '需检查服务区'].includes(view.tipText) || view.tipBubble === 'none') {{
     throw new Error(`周几提示气泡缺失：${{JSON.stringify(view)}}`);
   }}
+  const weekdayTip = page.locator('#rosterGrid th[data-weekday-tip]').first();
+  await weekdayTip.click();
+  const tipShown = await weekdayTip.evaluate((el) => {{ const bubble = el.querySelector('.weekday-tip-bubble'); return {{ open: el.classList.contains('weekday-tip-open'), opacity: getComputedStyle(bubble).opacity, visibility: getComputedStyle(bubble).visibility }}; }});
+  if (!tipShown.open || tipShown.opacity !== '1' || tipShown.visibility !== 'visible') throw new Error(`提示气泡点击显示失败：${{JSON.stringify(tipShown)}}`);
+  await weekdayTip.click();
+  const tipHidden = await weekdayTip.evaluate((el) => {{ const bubble = el.querySelector('.weekday-tip-bubble'); return {{ open: el.classList.contains('weekday-tip-open'), opacity: getComputedStyle(bubble).opacity, visibility: getComputedStyle(bubble).visibility }}; }});
+  if (tipHidden.open || tipHidden.opacity !== '0' || tipHidden.visibility !== 'hidden') throw new Error(`提示气泡点击隐藏失败：${{JSON.stringify(tipHidden)}}`);
   if (view.monitorBorder !== 'rgb(249, 115, 22)') throw new Error(`监控班颜色错误：${{JSON.stringify(view)}}`);
   if (view.patrolBorder !== 'rgb(37, 99, 235)') throw new Error(`巡查班颜色错误：${{JSON.stringify(view)}}`);
-  if (!view.patrolWheels.includes('radial-gradient')) throw new Error(`巡查班立体轮子缺失：${{JSON.stringify(view)}}`);
+  if (!view.patrolWheels.includes('radial-gradient') || view.patrolWheelHeight !== '8px') throw new Error(`巡查班立体轮子尺寸错误：${{JSON.stringify(view)}}`);
   if (view.monitorCount !== 1 || view.patrolCount !== 1) throw new Error(`不应标注非当天班次：${{JSON.stringify(view)}}`);
   await page.goto('http://127.0.0.1:18083/logout', {{ waitUntil: 'networkidle' }});
   await page.goto('http://127.0.0.1:18083/lufei', {{ waitUntil: 'networkidle' }});

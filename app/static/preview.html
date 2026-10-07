@@ -79,14 +79,14 @@
     .day-number, .weekday { display: block; }
     .day-number { font-size: 13px; font-weight: 800; }
     .weekday { margin-top: 2px; color: #475569; font-size: 12px; font-weight: 700; }
-    th.weekday-cell[data-weekday-tip]::after {
-      content: attr(data-weekday-tip);
+    th.weekday-cell { overflow: visible; }
+    .weekday-tip-bubble {
       position: absolute;
       z-index: 5;
       left: 50%;
       top: calc(100% + 5px);
       width: max-content;
-      max-width: 112px;
+      max-width: min(260px, calc(100vw - 24px));
       padding: 5px 7px;
       border: 1px solid #fbbf24;
       border-radius: 7px;
@@ -95,15 +95,22 @@
       color: #92400e;
       font-size: 11px;
       font-weight: 700;
-      line-height: 1.2;
+      line-height: 1.35;
+      white-space: normal;
       opacity: 0;
+      visibility: hidden;
       pointer-events: none;
       transform: translate(-50%, -2px);
-      transition: opacity 120ms ease, transform 120ms ease;
+      transition: transform 120ms ease;
     }
-    th.weekday-cell[data-weekday-tip]:hover::after,
-    th.weekday-cell[data-weekday-tip]:focus-visible::after {
-      opacity: 1;
+    th.weekday-cell.weekday-tip-open .weekday-tip-bubble {
+      opacity: 1 !important;
+      visibility: visible;
+      pointer-events: auto;
+      transform: translate(-50%, 0);
+    }
+    th.weekday-cell[aria-expanded="true"]::after {
+      opacity: 1 !important;
       transform: translate(-50%, 0);
     }
     th.name, td.name { position: sticky; left: 0; z-index: 3; min-width: 92px; text-align: left; background: #fff; font-weight: 650; }
@@ -121,14 +128,14 @@
       content: "";
       position: absolute;
       z-index: 1;
-      left: 4px;
-      right: 4px;
-      bottom: -3px;
-      height: 6px;
+      left: 3px;
+      right: 3px;
+      bottom: -4px;
+      height: 8px;
       pointer-events: none;
       background:
-        radial-gradient(circle at 6px 50%, #1e3a8a 0 2.5px, #93c5fd 2.5px 3.5px, transparent 3.6px),
-        radial-gradient(circle at calc(100% - 6px) 50%, #1e3a8a 0 2.5px, #93c5fd 2.5px 3.5px, transparent 3.6px);
+        radial-gradient(circle at 8px 50%, #1e3a8a 0 3.5px, #93c5fd 3.5px 4.5px, transparent 4.6px),
+        radial-gradient(circle at calc(100% - 8px) 50%, #1e3a8a 0 3.5px, #93c5fd 3.5px 4.5px, transparent 4.6px);
     }
     th.focus-col, td.name.focus-row { background: #bfdbfe; color: #1d4ed8; }
     td.shift-cell.focus-row, td.shift-cell.focus-col { box-shadow: inset 0 0 0 999px rgba(37, 99, 235, 0.20); }
@@ -274,8 +281,9 @@
         const weekdayIndex = new Date(Date.UTC(Number(roster.year), Number(roster.month) - 1, Number(day))).getUTCDay();
         const weekday = "日一二三四五六"[weekdayIndex];
         const weekdayTip = ({ 0: "需夜间巡查", 1: "需检查隐患点", 2: "需检查服务区", 3: "需夜间巡查", 5: "需检查服务区" })[weekdayIndex] || "";
-        const tip = weekdayTip ? ` data-weekday-tip="${weekdayTip}" tabindex="0"` : "";
-        return `<th data-day="${day}" class="weekday-cell${day === todayDay ? " today" : ""}"${tip}><span class="day-number">${day}</span><span class="weekday">${weekday}</span></th>`;
+        const tip = weekdayTip ? ` data-weekday-tip="${weekdayTip}" aria-expanded="false" tabindex="0"` : "";
+        const bubble = weekdayTip ? `<span class="weekday-tip-bubble" role="status">${weekdayTip}</span>` : "";
+        return `<th data-day="${day}" class="weekday-cell${day === todayDay ? " today" : ""}"${tip}><span class="day-number">${day}</span><span class="weekday">${weekday}</span>${bubble}</th>`;
       }).join("")}</tr>`;
       rows.forEach((row, rowIndex) => {
         const cells = [`<td class="name" data-row="${rowIndex}">${escapeHtml(row.name || "")}</td>`];
@@ -338,10 +346,25 @@
       if (event.detail === 3) window.location.assign("/lufei");
     });
     $("rosterGrid").addEventListener("click", (event) => {
+      const weekdayHeader = event.target.closest("th[data-weekday-tip]");
+      if (weekdayHeader) {
+        const open = !weekdayHeader.classList.contains("weekday-tip-open");
+        weekdayHeader.classList.toggle("weekday-tip-open", open);
+        weekdayHeader.setAttribute("aria-expanded", String(open));
+        return;
+      }
       const cell = event.target.closest("td.shift-cell");
       if (!cell || !cell.dataset.row || !cell.dataset.day) return;
       state.focusedCell = { row: Number(cell.dataset.row), day: String(cell.dataset.day) };
       updateFocusedCell();
+    });
+    $("rosterGrid").addEventListener("keydown", (event) => {
+      const weekdayHeader = event.target.closest("th[data-weekday-tip]");
+      if (!weekdayHeader || !["Enter", " "].includes(event.key)) return;
+      event.preventDefault();
+      const open = !weekdayHeader.classList.contains("weekday-tip-open");
+      weekdayHeader.classList.toggle("weekday-tip-open", open);
+      weekdayHeader.setAttribute("aria-expanded", String(open));
     });
     loadRosters();
   </script>
