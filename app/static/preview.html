@@ -281,9 +281,11 @@
         const weekdayIndex = new Date(Date.UTC(Number(roster.year), Number(roster.month) - 1, Number(day))).getUTCDay();
         const weekday = "日一二三四五六"[weekdayIndex];
         const weekdayTip = ({ 0: "需夜间巡查", 1: "需检查隐患点", 2: "需检查服务区", 3: "需夜间巡查", 5: "需检查服务区" })[weekdayIndex] || "";
-        const tip = weekdayTip ? ` data-weekday-tip="${weekdayTip}" aria-expanded="false" tabindex="0"` : "";
+        const tipOpen = Boolean(weekdayTip && day === todayDay);
+        const tip = weekdayTip ? ` data-weekday-tip="${weekdayTip}" aria-expanded="${tipOpen}" tabindex="0"` : "";
         const bubble = weekdayTip ? `<span class="weekday-tip-bubble" role="status">${weekdayTip}</span>` : "";
-        return `<th data-day="${day}" class="weekday-cell${day === todayDay ? " today" : ""}"${tip}><span class="day-number">${day}</span><span class="weekday">${weekday}</span>${bubble}</th>`;
+        const openClass = tipOpen ? " weekday-tip-open" : "";
+        return `<th data-day="${day}" class="weekday-cell${day === todayDay ? " today" : ""}${openClass}"${tip}><span class="day-number">${day}</span><span class="weekday">${weekday}</span>${bubble}</th>`;
       }).join("")}</tr>`;
       rows.forEach((row, rowIndex) => {
         const cells = [`<td class="name" data-row="${rowIndex}">${escapeHtml(row.name || "")}</td>`];

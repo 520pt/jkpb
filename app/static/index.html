@@ -10023,9 +10023,11 @@
         const weekday = "日一二三四五六"[weekdayIndex];
         const weekdayTip = ({ 0: "需夜间巡查", 1: "需检查隐患点", 2: "需检查服务区", 3: "需夜间巡查", 5: "需检查服务区" })[weekdayIndex] || "";
         const todayClass = day === todayDay ? " saved-today-col" : "";
-        const tip = weekdayTip ? ` data-weekday-tip="${weekdayTip}" aria-expanded="false" tabindex="0"` : "";
+        const tipOpen = Boolean(weekdayTip && day === todayDay);
+        const tip = weekdayTip ? ` data-weekday-tip="${weekdayTip}" aria-expanded="${tipOpen}" tabindex="0"` : "";
         const bubble = weekdayTip ? `<span class="weekday-tip-bubble" role="status">${weekdayTip}</span>` : "";
-        return `<th class="saved-weekday-cell${todayClass}" data-saved-day="${day}"${tip}><span class="saved-day-number">${day}</span><span class="saved-weekday">${weekday}</span>${bubble}</th>`;
+        const openClass = tipOpen ? " weekday-tip-open" : "";
+        return `<th class="saved-weekday-cell${todayClass}${openClass}" data-saved-day="${day}"${tip}><span class="saved-day-number">${day}</span><span class="saved-weekday">${weekday}</span>${bubble}</th>`;
       }).join("")}${editMode ? "<th>操作</th>" : ""}`;
       table.appendChild(head);
       grid.forEach((row, rowIndex) => {

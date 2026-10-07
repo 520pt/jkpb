@@ -530,13 +530,29 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
       if (!['需夜间巡查', '需检查隐患点', '需检查服务区'].includes(view.tipText) || view.tipBubble === 'none') {{
         throw new Error(`周几提示气泡缺失：${{JSON.stringify(view)}}`);
       }}
+      const todayTip = page.locator(`#homeScheduleGrid th[data-saved-day="${{day}}"]`);
+      const todayHasTip = await todayTip.evaluate((el) => Boolean(el.dataset.weekdayTip));
+      if (todayHasTip) {{
+        const tipInitiallyShown = await todayTip.evaluate((el) => {{ const bubble = el.querySelector('.weekday-tip-bubble'); return {{ open: el.classList.contains('weekday-tip-open'), opacity: getComputedStyle(bubble).opacity, visibility: getComputedStyle(bubble).visibility }}; }});
+        if (!tipInitiallyShown.open || tipInitiallyShown.opacity !== '1' || tipInitiallyShown.visibility !== 'visible') throw new Error(`当天提示没有默认显示：${{JSON.stringify(tipInitiallyShown)}}`);
+        await todayTip.click();
+        const tipHidden = await todayTip.evaluate((el) => {{ const bubble = el.querySelector('.weekday-tip-bubble'); return {{ open: el.classList.contains('weekday-tip-open'), opacity: getComputedStyle(bubble).opacity, visibility: getComputedStyle(bubble).visibility }}; }});
+        if (tipHidden.open || tipHidden.opacity !== '0' || tipHidden.visibility !== 'hidden') throw new Error(`点击后隐藏提示失败：${{JSON.stringify(tipHidden)}}`);
+        await todayTip.click();
+        const tipRestored = await todayTip.evaluate((el) => {{ const bubble = el.querySelector('.weekday-tip-bubble'); return {{ open: el.classList.contains('weekday-tip-open'), opacity: getComputedStyle(bubble).opacity, visibility: getComputedStyle(bubble).visibility }}; }});
+        if (!tipRestored.open || tipRestored.opacity !== '1' || tipRestored.visibility !== 'visible') throw new Error(`再次点击显示提示失败：${{JSON.stringify(tipRestored)}}`);
+      }}
       const weekdayTip = page.locator('#homeScheduleGrid th[data-weekday-tip]').first();
-      await weekdayTip.click();
-      const tipShown = await weekdayTip.evaluate((el) => {{ const bubble = el.querySelector('.weekday-tip-bubble'); return {{ open: el.classList.contains('weekday-tip-open'), opacity: getComputedStyle(bubble).opacity, visibility: getComputedStyle(bubble).visibility }}; }});
-      if (!tipShown.open || tipShown.opacity !== '1' || tipShown.visibility !== 'visible') throw new Error(`提示气泡点击显示失败：${{JSON.stringify(tipShown)}}`);
-      await weekdayTip.click();
-      const tipHidden = await weekdayTip.evaluate((el) => {{ const bubble = el.querySelector('.weekday-tip-bubble'); return {{ open: el.classList.contains('weekday-tip-open'), opacity: getComputedStyle(bubble).opacity, visibility: getComputedStyle(bubble).visibility }}; }});
-      if (tipHidden.open || tipHidden.opacity !== '0' || tipHidden.visibility !== 'hidden') throw new Error(`提示气泡点击隐藏失败：${{JSON.stringify(tipHidden)}}`);
+      if (await weekdayTip.evaluate((el, currentDay) => el !== document.querySelector(`#homeScheduleGrid th[data-saved-day="${{currentDay}}"]`), day)) {{
+        const otherTipInitiallyHidden = await weekdayTip.evaluate((el) => getComputedStyle(el.querySelector('.weekday-tip-bubble')).visibility === 'hidden');
+        if (!otherTipInitiallyHidden) throw new Error('非当天提示不应默认展开');
+        await weekdayTip.click();
+        const otherTipShown = await weekdayTip.evaluate((el) => getComputedStyle(el.querySelector('.weekday-tip-bubble')).visibility === 'visible');
+        if (!otherTipShown) throw new Error('点击未显示其它日期提示');
+        await weekdayTip.click();
+        const otherTipHidden = await weekdayTip.evaluate((el) => getComputedStyle(el.querySelector('.weekday-tip-bubble')).visibility === 'hidden');
+        if (!otherTipHidden) throw new Error('再次点击未隐藏其它日期提示');
+      }}
       if (view.monitorBorder !== 'rgb(249, 115, 22)') {{
         throw new Error(`监控班颜色错误：${{JSON.stringify(view)}}`);
       }}
@@ -689,13 +705,29 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
   if (!['需夜间巡查', '需检查隐患点', '需检查服务区'].includes(view.tipText) || view.tipBubble === 'none') {{
     throw new Error(`周几提示气泡缺失：${{JSON.stringify(view)}}`);
   }}
+  const todayTip = page.locator(`#rosterGrid th[data-day="${{day}}"]`);
+  const todayHasTip = await todayTip.evaluate((el) => Boolean(el.dataset.weekdayTip));
+  if (todayHasTip) {{
+    const tipInitiallyShown = await todayTip.evaluate((el) => {{ const bubble = el.querySelector('.weekday-tip-bubble'); return {{ open: el.classList.contains('weekday-tip-open'), opacity: getComputedStyle(bubble).opacity, visibility: getComputedStyle(bubble).visibility }}; }});
+    if (!tipInitiallyShown.open || tipInitiallyShown.opacity !== '1' || tipInitiallyShown.visibility !== 'visible') throw new Error(`当天提示没有默认显示：${{JSON.stringify(tipInitiallyShown)}}`);
+    await todayTip.click();
+    const tipHidden = await todayTip.evaluate((el) => {{ const bubble = el.querySelector('.weekday-tip-bubble'); return {{ open: el.classList.contains('weekday-tip-open'), opacity: getComputedStyle(bubble).opacity, visibility: getComputedStyle(bubble).visibility }}; }});
+    if (tipHidden.open || tipHidden.opacity !== '0' || tipHidden.visibility !== 'hidden') throw new Error(`点击后隐藏提示失败：${{JSON.stringify(tipHidden)}}`);
+    await todayTip.click();
+    const tipRestored = await todayTip.evaluate((el) => {{ const bubble = el.querySelector('.weekday-tip-bubble'); return {{ open: el.classList.contains('weekday-tip-open'), opacity: getComputedStyle(bubble).opacity, visibility: getComputedStyle(bubble).visibility }}; }});
+    if (!tipRestored.open || tipRestored.opacity !== '1' || tipRestored.visibility !== 'visible') throw new Error(`再次点击显示提示失败：${{JSON.stringify(tipRestored)}}`);
+  }}
   const weekdayTip = page.locator('#rosterGrid th[data-weekday-tip]').first();
-  await weekdayTip.click();
-  const tipShown = await weekdayTip.evaluate((el) => {{ const bubble = el.querySelector('.weekday-tip-bubble'); return {{ open: el.classList.contains('weekday-tip-open'), opacity: getComputedStyle(bubble).opacity, visibility: getComputedStyle(bubble).visibility }}; }});
-  if (!tipShown.open || tipShown.opacity !== '1' || tipShown.visibility !== 'visible') throw new Error(`提示气泡点击显示失败：${{JSON.stringify(tipShown)}}`);
-  await weekdayTip.click();
-  const tipHidden = await weekdayTip.evaluate((el) => {{ const bubble = el.querySelector('.weekday-tip-bubble'); return {{ open: el.classList.contains('weekday-tip-open'), opacity: getComputedStyle(bubble).opacity, visibility: getComputedStyle(bubble).visibility }}; }});
-  if (tipHidden.open || tipHidden.opacity !== '0' || tipHidden.visibility !== 'hidden') throw new Error(`提示气泡点击隐藏失败：${{JSON.stringify(tipHidden)}}`);
+  if (await weekdayTip.evaluate((el, currentDay) => el !== document.querySelector(`#rosterGrid th[data-day="${{currentDay}}"]`), day)) {{
+    const otherTipInitiallyHidden = await weekdayTip.evaluate((el) => getComputedStyle(el.querySelector('.weekday-tip-bubble')).visibility === 'hidden');
+    if (!otherTipInitiallyHidden) throw new Error('非当天提示不应默认展开');
+    await weekdayTip.click();
+    const otherTipShown = await weekdayTip.evaluate((el) => getComputedStyle(el.querySelector('.weekday-tip-bubble')).visibility === 'visible');
+    if (!otherTipShown) throw new Error('点击未显示其它日期提示');
+    await weekdayTip.click();
+    const otherTipHidden = await weekdayTip.evaluate((el) => getComputedStyle(el.querySelector('.weekday-tip-bubble')).visibility === 'hidden');
+    if (!otherTipHidden) throw new Error('再次点击未隐藏其它日期提示');
+  }}
   if (view.monitorBorder !== 'rgb(249, 115, 22)') throw new Error(`监控班颜色错误：${{JSON.stringify(view)}}`);
   if (view.patrolBorder !== 'rgb(37, 99, 235)') throw new Error(`巡查班颜色错误：${{JSON.stringify(view)}}`);
   if (!view.patrolWheels.includes('radial-gradient') || view.patrolWheelHeight !== '8px') throw new Error(`巡查班立体轮子尺寸错误：${{JSON.stringify(view)}}`);
