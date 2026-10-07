@@ -8516,6 +8516,14 @@ async def _save_tunnel_mechanical_result_image(
         return {"result_query_error": "模板未配置 list_path，无法自动查询录入结果"}
     try:
         rows = await _query_tunnel_mechanical_records(request, base_url=base_url, headers=headers, list_path=list_path)
+        device_names = {
+            str(asset.get("assetName") or "").strip(): str(asset.get("devName") or "").strip()
+            for asset in list(template.get("assets") or [])
+            if isinstance(asset, dict)
+        }
+        for row in rows:
+            if not str(row.get("devName") or "").strip():
+                row["devName"] = device_names.get(str(row.get("assetName") or "").strip(), "")
         upload_dir.mkdir(parents=True, exist_ok=True)
         _cleanup_old_uploads(upload_dir)
         filename = f"tunnel-mechanical-result-{request.checkTime.isoformat()}-{uuid.uuid4().hex}.png"
@@ -8653,7 +8661,17 @@ def _normalize_tunnel_mechanical_result_rows(rows: list[Any]) -> list[dict[str, 
                 "weather": _first_present(row, domain, "weather"),
                 "checker": _first_present(row, domain, "checker", "checkerName"),
                 "recorder": _first_present(row, domain, "recorder", "recorderName"),
-                "devName": _first_present(row, domain, "devName", "deviceName", "facilitiesName"),
+                "devName": _first_present(
+                    row,
+                    domain,
+                    "devName",
+                    "deviceName",
+                    "device_name",
+                    "equipmentName",
+                    "equipment_name",
+                    "facilitiesName",
+                    "facilities_name",
+                ),
                 "location": _first_present(row, domain, "location", "checkLocation"),
                 "content": _first_present(row, domain, "content", "checkContent"),
                 "resultText": _tunnel_mechanical_result_text(result_value),

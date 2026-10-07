@@ -499,40 +499,51 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
   }}
   const homeSummary = await page.$eval('#homeScheduleSummary', (el) => (el.innerText || el.textContent || '').trim());
   if (homeSummary.includes('当天日期已居中')) throw new Error(`首页不应显示居中提示：${{homeSummary}}`);
-  const view = await page.$eval('#homeScheduleView .saved-wrap', (el, currentDay) => {{
-    const todayCell = el.querySelector(`th[data-saved-day="${{currentDay}}"]`);
-    const wrapperRect = el.getBoundingClientRect();
-    const cellRect = todayCell.getBoundingClientRect();
-    const monitorCell = el.querySelector('td.saved-monitor-cell');
-    const patrolCell = el.querySelector('td.saved-patrol-cell');
-    return {{
+      const view = await page.$eval('#homeScheduleView .saved-wrap', (el, currentDay) => {{
+        const todayCell = el.querySelector(`th[data-saved-day="${{currentDay}}"]`);
+        const tipCell = el.querySelector('th[data-weekday-tip]');
+        const wrapperRect = el.getBoundingClientRect();
+        const cellRect = todayCell.getBoundingClientRect();
+        const monitorCell = el.querySelector('td.saved-monitor-cell');
+        const patrolCell = el.querySelector('td.saved-patrol-cell');
+        return {{
       scrollLeft: Math.round(el.scrollLeft),
       expectedScrollLeft: Math.round(todayCell.offsetLeft - (el.clientWidth - todayCell.offsetWidth) / 2),
       todayCenter: Math.round((cellRect.left + cellRect.right) / 2),
-      wrapperCenter: Math.round((wrapperRect.left + wrapperRect.right) / 2),
-      monitorBorder: getComputedStyle(monitorCell, '::after').borderTopColor,
-      patrolBorder: getComputedStyle(patrolCell, '::after').borderTopColor,
-      monitorCount: el.querySelectorAll('td.saved-monitor-cell').length,
-      patrolCount: el.querySelectorAll('td.saved-patrol-cell').length,
-    }};
-  }}, day);
-  if (Math.abs(view.todayCenter - view.wrapperCenter) > 2) {{
-    throw new Error(`当天日期没有居中：${{JSON.stringify(view)}}`);
-  }}
-  if (view.monitorBorder !== 'rgb(249, 115, 22)') {{
-    throw new Error(`监控班颜色错误：${{JSON.stringify(view)}}`);
-  }}
-  if (view.patrolBorder !== 'rgb(37, 99, 235)') {{
-    throw new Error(`巡查班颜色错误：${{JSON.stringify(view)}}`);
-  }}
-  if (view.monitorCount !== 1 || view.patrolCount !== 1) throw new Error(`不应标注非当天班次：${{JSON.stringify(view)}}`);
+          wrapperCenter: Math.round((wrapperRect.left + wrapperRect.right) / 2),
+          weekday: todayCell.querySelector('.saved-weekday').textContent,
+          tipText: tipCell?.dataset.weekdayTip || '',
+          tipBubble: tipCell ? getComputedStyle(tipCell, '::after').content : '',
+          monitorBorder: getComputedStyle(monitorCell, '::after').borderTopColor,
+          patrolBorder: getComputedStyle(patrolCell, '::after').borderTopColor,
+          patrolWheels: getComputedStyle(patrolCell, '::before').backgroundImage,
+          monitorCount: el.querySelectorAll('td.saved-monitor-cell').length,
+          patrolCount: el.querySelectorAll('td.saved-patrol-cell').length,
+        }};
+      }}, day);
+      if (Math.abs(view.todayCenter - view.wrapperCenter) > 2) {{
+        throw new Error(`当天日期没有居中：${{JSON.stringify(view)}}`);
+      }}
+      const expectedWeekday = '日一二三四五六'[new Date(Date.UTC(year, month - 1, day)).getUTCDay()];
+      if (view.weekday !== expectedWeekday) throw new Error(`周几显示错误：${{JSON.stringify(view)}}`);
+      if (!['需夜间巡查', '需检查隐患点', '需检查服务区'].includes(view.tipText) || view.tipBubble === 'none') {{
+        throw new Error(`周几提示气泡缺失：${{JSON.stringify(view)}}`);
+      }}
+      if (view.monitorBorder !== 'rgb(249, 115, 22)') {{
+        throw new Error(`监控班颜色错误：${{JSON.stringify(view)}}`);
+      }}
+      if (view.patrolBorder !== 'rgb(37, 99, 235)') {{
+        throw new Error(`巡查班颜色错误：${{JSON.stringify(view)}}`);
+      }}
+      if (!view.patrolWheels.includes('radial-gradient')) throw new Error(`巡查班立体轮子缺失：${{JSON.stringify(view)}}`);
+      if (view.monitorCount !== 1 || view.patrolCount !== 1) throw new Error(`不应标注非当天班次：${{JSON.stringify(view)}}`);
   await page.click('#homeScheduleGrid td.shift-cell[data-saved-row="0"][data-saved-day="25"]');
   const homeFocus = await page.evaluate(() => ({{
     active: document.querySelectorAll('#homeScheduleGrid td.saved-active-cell').length,
     row: document.querySelectorAll('#homeScheduleGrid td.saved-row-highlight').length,
     column: document.querySelectorAll('#homeScheduleGrid .saved-col-highlight').length,
   }}));
-  if (homeFocus.active !== 1 || homeFocus.row !== 31 || homeFocus.column !== 3) {{
+  if (homeFocus.active !== 1 || homeFocus.row !== days + 1 || homeFocus.column !== 3) {{
     throw new Error(`首页点击排班后焦点错误：${{JSON.stringify(homeFocus)}}`);
   }}
   await browser.close();
@@ -624,7 +635,7 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
     row: document.querySelectorAll('#rosterGrid td.focus-row').length,
     column: document.querySelectorAll('#rosterGrid .focus-col').length,
   }}));
-  if (focus.active !== 1 || focus.row !== 31 || focus.column !== 3) {{
+  if (focus.active !== 1 || focus.row !== days + 1 || focus.column !== 3) {{
     throw new Error(`公开排班点击后焦点错误：${{JSON.stringify(focus)}}`);
   }}
   await page.locator('#previewTitle').click({{ clickCount: 3 }});
@@ -645,6 +656,7 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
   await page.goto('http://127.0.0.1:18083/preview', {{ waitUntil: 'networkidle' }});
   const view = await page.$eval('#tableWrap', (el, currentDay) => {{
     const todayCell = el.querySelector(`th[data-day="${{currentDay}}"]`);
+    const tipCell = el.querySelector('th[data-weekday-tip]');
     const wrapperRect = el.getBoundingClientRect();
     const cellRect = todayCell.getBoundingClientRect();
     const monitorCell = el.querySelector('td.monitor-cell');
@@ -652,15 +664,25 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
     return {{
       todayCenter: Math.round((cellRect.left + cellRect.right) / 2),
       wrapperCenter: Math.round((wrapperRect.left + wrapperRect.right) / 2),
+      weekday: todayCell.querySelector('.weekday').textContent,
+      tipText: tipCell?.dataset.weekdayTip || '',
+      tipBubble: tipCell ? getComputedStyle(tipCell, '::after').content : '',
       monitorBorder: getComputedStyle(monitorCell, '::after').borderTopColor,
       patrolBorder: getComputedStyle(patrolCell, '::after').borderTopColor,
+      patrolWheels: getComputedStyle(patrolCell, '::before').backgroundImage,
       monitorCount: el.querySelectorAll('td.monitor-cell').length,
       patrolCount: el.querySelectorAll('td.patrol-cell').length,
     }};
   }}, day);
   if (Math.abs(view.todayCenter - view.wrapperCenter) > 2) throw new Error(`当天日期没有居中：${{JSON.stringify(view)}}`);
+  const expectedWeekday = '日一二三四五六'[new Date(Date.UTC(year, month - 1, day)).getUTCDay()];
+  if (view.weekday !== expectedWeekday) throw new Error(`周几显示错误：${{JSON.stringify(view)}}`);
+  if (!['需夜间巡查', '需检查隐患点', '需检查服务区'].includes(view.tipText) || view.tipBubble === 'none') {{
+    throw new Error(`周几提示气泡缺失：${{JSON.stringify(view)}}`);
+  }}
   if (view.monitorBorder !== 'rgb(249, 115, 22)') throw new Error(`监控班颜色错误：${{JSON.stringify(view)}}`);
   if (view.patrolBorder !== 'rgb(37, 99, 235)') throw new Error(`巡查班颜色错误：${{JSON.stringify(view)}}`);
+  if (!view.patrolWheels.includes('radial-gradient')) throw new Error(`巡查班立体轮子缺失：${{JSON.stringify(view)}}`);
   if (view.monitorCount !== 1 || view.patrolCount !== 1) throw new Error(`不应标注非当天班次：${{JSON.stringify(view)}}`);
   await page.goto('http://127.0.0.1:18083/logout', {{ waitUntil: 'networkidle' }});
   await page.goto('http://127.0.0.1:18083/lufei', {{ waitUntil: 'networkidle' }});

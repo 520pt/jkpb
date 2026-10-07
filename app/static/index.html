@@ -1136,6 +1136,53 @@
     .saved-roster-grid td.shift-cell {
       min-width: 40px;
     }
+    .saved-roster-grid th.saved-weekday-cell {
+      position: relative;
+      min-width: 52px;
+      padding: 4px 2px 5px;
+      line-height: 1.15;
+    }
+    .saved-day-number,
+    .saved-weekday {
+      display: block;
+    }
+    .saved-day-number {
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .saved-weekday {
+      margin-top: 2px;
+      color: #475569;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .saved-roster-grid th.saved-weekday-cell[data-weekday-tip]::after {
+      content: attr(data-weekday-tip);
+      position: absolute;
+      z-index: 5;
+      left: 50%;
+      top: calc(100% + 5px);
+      width: max-content;
+      max-width: 112px;
+      padding: 5px 7px;
+      border: 1px solid #fbbf24;
+      border-radius: 7px;
+      background: #fffbeb;
+      box-shadow: 0 3px 8px rgba(15, 23, 42, 0.16);
+      color: #92400e;
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1.2;
+      opacity: 0;
+      pointer-events: none;
+      transform: translate(-50%, -2px);
+      transition: opacity 120ms ease, transform 120ms ease;
+    }
+    .saved-roster-grid th.saved-weekday-cell[data-weekday-tip]:hover::after,
+    .saved-roster-grid th.saved-weekday-cell[data-weekday-tip]:focus-visible::after {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
     #homeScheduleGrid td.shift-cell {
       cursor: pointer;
     }
@@ -1151,6 +1198,21 @@
     }
     .saved-roster-grid td.shift-cell.saved-patrol-cell::after {
       border: 2px solid #2563eb;
+      border-radius: 4px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65), 0 2px 0 #1d4ed8;
+    }
+    .saved-roster-grid td.shift-cell.saved-patrol-cell::before {
+      content: "";
+      position: absolute;
+      z-index: 1;
+      left: 4px;
+      right: 4px;
+      bottom: -3px;
+      height: 6px;
+      pointer-events: none;
+      background:
+        radial-gradient(circle at 6px 50%, #1e3a8a 0 2.5px, #93c5fd 2.5px 3.5px, transparent 3.6px),
+        radial-gradient(circle at calc(100% - 6px) 50%, #1e3a8a 0 2.5px, #93c5fd 2.5px 3.5px, transparent 3.6px);
     }
     .saved-roster-grid td.shift-cell.saved-today-monitor-cell::after {
       border-width: 3px;
@@ -9952,8 +10014,12 @@
       const head = document.createElement("tr");
       head.innerHTML = `<th class="name">姓名</th>${Array.from({ length: dayCount }, (_, i) => {
         const day = String(i + 1);
-        const todayClass = day === todayDay ? ' class="saved-today-col"' : "";
-        return `<th data-saved-day="${day}"${todayClass}>${day}</th>`;
+        const weekdayIndex = new Date(Date.UTC(Number(roster.year), Number(roster.month) - 1, Number(day))).getUTCDay();
+        const weekday = "日一二三四五六"[weekdayIndex];
+        const weekdayTip = ({ 0: "需夜间巡查", 1: "需检查隐患点", 2: "需检查服务区", 3: "需夜间巡查", 5: "需检查服务区" })[weekdayIndex] || "";
+        const todayClass = day === todayDay ? " saved-today-col" : "";
+        const tip = weekdayTip ? ` data-weekday-tip="${weekdayTip}" tabindex="0"` : "";
+        return `<th class="saved-weekday-cell${todayClass}" data-saved-day="${day}"${tip}><span class="saved-day-number">${day}</span><span class="saved-weekday">${weekday}</span></th>`;
       }).join("")}${editMode ? "<th>操作</th>" : ""}`;
       table.appendChild(head);
       grid.forEach((row, rowIndex) => {

@@ -1273,7 +1273,6 @@ def test_tunnel_mechanical_submit_generates_result_image(tmp_path, monkeypatch):
                             "weather": "晴",
                             "checker": "张三",
                             "recorder": "李四",
-                            "devName": "示例设备",
                             "location": "K1+000-K2+000示例隧道",
                             "content": "示例检查",
                             "result": 1,
@@ -1324,6 +1323,7 @@ def test_tunnel_mechanical_submit_generates_result_image(tmp_path, monkeypatch):
     body = response.json()
     assert body["success"] is True
     assert body["result_rows"][0]["resultText"] == "正常"
+    assert body["result_rows"][0]["devName"] == "示例设备"
     assert body["result_image_url"].startswith("/api/uploads/tunnel-mechanical-result-2026-07-24-")
     image_response = client.get(body["result_image_url"])
     assert image_response.status_code == 200
