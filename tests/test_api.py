@@ -4142,7 +4142,7 @@ def test_tunnel_mechanical_modify_queries_then_posts_edit_payload(tmp_path, monk
 
         async def get(self, url, headers=None, params=None):
             captured["gets"].append({"url": url, "headers": headers or {}, "params": params or {}})
-            if url == "https://example.test/prod-api/patrol/deviceCheck/get/check-1":
+            if url == "https://example.test/prod-api/patrol/deviceCheck/getByCheckId/check-1":
                 return FakeResponse(
                     {
                         "code": 200,
@@ -4237,7 +4237,7 @@ def test_tunnel_mechanical_modify_queries_then_posts_edit_payload(tmp_path, monk
     assert captured["gets"][0]["headers"]["Authorization"] == "Bearer cached-token"
     assert captured["gets"][0]["headers"]["Cookie"] == "sid=abc"
     assert captured["gets"][0]["params"]["checkTime"] == "2026-07-26"
-    assert captured["gets"][1]["url"] == "https://example.test/prod-api/patrol/deviceCheck/get/check-1"
+    assert captured["gets"][1]["url"] == "https://example.test/prod-api/patrol/deviceCheck/getByCheckId/check-1"
     assert captured["posts"][0]["url"] == "https://example.test/prod-api/patrol/deviceCheck/edit"
     payload = captured["posts"][0]["payload"]
     assert payload["id"] == "parent-check-1"

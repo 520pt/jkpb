@@ -8281,7 +8281,7 @@ async def _query_tunnel_mechanical_update_detail(
 ) -> dict[str, Any] | None:
     if not record_id:
         return None
-    url = f"{base_url}/prod-api/patrol/deviceCheck/get/{record_id}"
+    url = f"{base_url}/prod-api/patrol/deviceCheck/getByCheckId/{record_id}"
     try:
         async with tunnel_async_httpx_client(timeout=20) as client:
             response = await client.get(url, headers=headers)
