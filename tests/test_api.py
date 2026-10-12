@@ -1562,6 +1562,91 @@ def test_tunnel_mechanical_result_image_queries_by_date_only(tmp_path, monkeypat
     assert captured_params[0] == {"pageNum": "1", "pageSize": "50", "checkTime": "2026-07-24"}
 
 
+def test_tunnel_mechanical_result_image_enriches_summary_rows_from_detail(tmp_path, monkeypatch):
+    app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
+    client = TestClient(app)
+    repo: DutyRepository = app.state.repo
+    repo.save_tunnel_mechanical_state(
+        access_token="cached-token",
+        cookie_header="sid=abc",
+        token_expires_at=(datetime.now(main_module.TZ) + timedelta(hours=1)).isoformat(),
+    )
+    _import_tunnel_template(
+        client,
+        {
+            **TEST_TUNNEL_TEMPLATE,
+            "base_url": "https://example.test",
+            "list_path": "/prod-api/patrol/deviceCheck/list",
+        },
+    )
+    calls = []
+
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def __init__(self, body):
+            self.body = body
+
+        def json(self):
+            return self.body
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url, headers=None, params=None):
+            calls.append((url, params))
+            if url.endswith("/deviceCheck/list"):
+                return FakeResponse(
+                    {
+                        "code": 200,
+                        "rows": [{"id": "check-1", "assetName": "示例隧道上行", "checkTime": "2026-07-24"}],
+                    }
+                )
+            return FakeResponse(
+                {
+                    "code": 200,
+                    "data": {
+                        "id": "parent-check-1",
+                        "assetName": "示例隧道上行",
+                        "checkTime": "2026-07-24",
+                        "deviceCheckDomainVOList": [
+                            {
+                                "devName": "示例设备",
+                                "checkPosition": "K1+000-K2+000",
+                                "checkItem": "示例检查",
+                                "checkResult": 1,
+                                "carNumber": "示例车牌",
+                                "quantity": 2,
+                            }
+                        ],
+                    },
+                }
+            )
+
+    monkeypatch.setattr(main_module.httpx, "AsyncClient", FakeAsyncClient)
+    response = client.post(
+        "/api/tunnel-mechanical/result-image",
+        json={"base_url": "https://example.test", "checkTime": "2026-07-24", "rows": []},
+    )
+
+    assert response.status_code == 200
+    row = response.json()["result_rows"][0]
+    assert row["location"] == "K1+000-K2+000"
+    assert row["content"] == "示例检查"
+    assert row["resultText"] == "正常"
+    assert row["carLicense"] == "示例车牌"
+    assert row["nums"] == "2"
+    assert [item[0].rsplit("/", 1)[-1] for item in calls] == ["list", "check-1"]
+
+
 def test_today_reminders_endpoint_returns_today_plan(tmp_path):
     app = create_app(data_dir=tmp_path / "data", upload_dir=tmp_path / "uploads", start_scheduler=False)
     client = TestClient(app)

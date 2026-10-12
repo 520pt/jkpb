@@ -8559,7 +8559,18 @@ async def _query_tunnel_mechanical_records(
         headers=headers,
         list_path=list_path,
     )
-    return _normalize_tunnel_mechanical_result_rows(raw_rows)
+    enriched_rows = []
+    for row in raw_rows:
+        if not _first_tunnel_mechanical_domain(row):
+            detail = await _query_tunnel_mechanical_update_detail(
+                _tunnel_mechanical_record_id(row),
+                base_url=base_url,
+                headers=headers,
+            )
+            if detail:
+                row = {**row, **detail}
+        enriched_rows.append(row)
+    return _normalize_tunnel_mechanical_result_rows(enriched_rows)
 
 
 async def _query_tunnel_mechanical_raw_records(
@@ -8672,18 +8683,55 @@ def _normalize_tunnel_mechanical_result_rows(rows: list[Any]) -> list[dict[str, 
                     "facilitiesName",
                     "facilities_name",
                 ),
-                "location": _first_present(row, domain, "location", "checkLocation"),
-                "content": _first_present(row, domain, "content", "checkContent"),
+                "location": _first_present(
+                    row,
+                    domain,
+                    "location",
+                    "checkLocation",
+                    "checkPosition",
+                    "position",
+                    "checkSite",
+                    "site",
+                ),
+                "content": _first_present(
+                    row,
+                    domain,
+                    "content",
+                    "checkContent",
+                    "checkItem",
+                    "item",
+                    "checkProject",
+                    "projectName",
+                ),
                 "resultText": _tunnel_mechanical_result_text(result_value),
-                "carLicense": _first_present(row, domain, "carLicense", "carNo"),
-                "nums": _first_present(row, domain, "nums", "number"),
+                "carLicense": _first_present(
+                    row,
+                    domain,
+                    "carLicense",
+                    "carNo",
+                    "carNumber",
+                    "vehicleNo",
+                    "vehicleNumber",
+                    "licensePlate",
+                    "plateNumber",
+                ),
+                "nums": _first_present(row, domain, "nums", "number", "num", "quantity", "count"),
             }
         )
     return normalized
 
 
 def _first_tunnel_mechanical_domain(row: dict[str, Any]) -> dict[str, Any]:
-    domains = row.get("domains") or row.get("domainList") or row.get("deviceCheckDomainList")
+    domains = (
+        row.get("domains")
+        or row.get("domainList")
+        or row.get("deviceCheckDomainList")
+        or row.get("deviceCheckDomainVOList")
+        or row.get("deviceCheckDomainVos")
+        or row.get("checkDomainList")
+    )
+    if isinstance(domains, dict):
+        return domains
     if isinstance(domains, list) and domains and isinstance(domains[0], dict):
         return domains[0]
     return {}
