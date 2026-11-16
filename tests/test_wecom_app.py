@@ -721,7 +721,7 @@ def test_create_wecom_app_menu_endpoint_uses_limited_grouped_menu(tmp_path: Path
     assert buttons[1]["sub_button"][0]["name"] == "录入今日机电"
     assert [item["key"] for item in buttons[1]["sub_button"]] == [
         "DR_TUNNEL_TODAY_SUBMIT",
-        "DR_TUNNEL_TODAY_QUERY",
+        "DR_PATROL_LOG_TODAY_EXPORT",
         "DR_TUNNEL_TEMPLATE",
         "DR_TUNNEL_MODIFY_TEMPLATE",
         "DR_ORANGE_PATROL_RECORD",

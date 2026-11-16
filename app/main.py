@@ -132,13 +132,14 @@ WECOM_APP_MENU_COMMANDS = {
     "DR_TUNNEL_MODIFY_TEMPLATE": "修改模板",
     "DR_ORANGE_PATROL_RECORD": "橙色预警巡查记录查询",
     "DR_TUNNEL_TODAY_SUBMIT": "录入今日机电",
-    "DR_TUNNEL_TODAY_QUERY": "查询今日机电",
+    "DR_TUNNEL_TODAY_QUERY": "导出今日巡查日志",
     "DR_ROSTER_IMPORT": "导入排班",
     "DR_CONSTRUCTION_IMAGE": "施工图片",
     "DR_CONSTRUCTION_SITE_MANAGE": "施工点维护",
     "DR_NEXT_7_DAYS": "查询未来7天",
     "DR_BINDING": "查询我的绑定",
     "DR_PATROL_LOG_EXPORT": "巡查日志导出",
+    "DR_PATROL_LOG_TODAY_EXPORT": "导出今日巡查日志",
     "DR_HELP": "菜单",
 }
 WECOM_APP_MENU_COMMAND_KEYS = {command: key for key, command in WECOM_APP_MENU_COMMANDS.items()}
@@ -176,7 +177,7 @@ DEFAULT_WECOM_APP_MENU_GROUPS = [
         "name": "机电预警",
         "items": [
             {"name": "录入今日机电", "command": "录入今日机电"},
-            {"name": "今日机电", "command": "查询今日机电"},
+            {"name": "导出今日巡查日志", "command": "导出今日巡查日志"},
             {"name": "机电模板", "command": "模板"},
             {"name": "修改模板", "command": "修改模板"},
             {"name": "橙色预警巡查记录查询", "command": "橙色预警巡查记录查询"},
@@ -3184,10 +3185,10 @@ def _wecom_app_menu_groups(repo: DutyRepository | None = None) -> list[dict[str,
         if group.get("name") == "机电预警":
             forced = [
                 {"name": "录入今日机电", "command": "录入今日机电"},
-                {"name": "今日机电", "command": "查询今日机电"},
+                {"name": "导出今日巡查日志", "command": "导出今日巡查日志"},
             ]
             forced_commands = {item["command"] for item in forced}
-            items = [item for item in group.get("items", []) if str(item.get("command") or "").strip() not in forced_commands]
+            items = [item for item in group.get("items", []) if str(item.get("command") or "").strip() not in forced_commands | {"查询今日机电"}]
             group["items"] = [*forced, *items][: WECOM_APP_MENU_LIMITS["max_sub_buttons"]]
         if group.get("name") == "更多查询":
             removed_commands = {
@@ -4896,10 +4897,10 @@ def _patrol_log_date(text: str) -> date:
 
 def _is_patrol_log_export_text(text: str, query: WechatQueryRequest) -> bool:
     value = re.sub(r"\s+", "", str(text or ""))
-    if value.startswith(("巡查日志导出", "确认导出", "取消导出")):
+    if value == "导出今日巡查日志" or value.startswith(("巡查日志导出", "确认导出", "取消导出")):
         return True
     pending = WECOM_APP_PENDING_PATROL_LOG_EXPORTS.get(_wecom_app_pending_key(query))
-    return bool(pending) and (value in {"今天", "今日", "昨天", "昨日"} or bool(re.fullmatch(PATROL_LOG_DATE_PATTERN, value)))
+    return bool(pending) and (value in {"确认", "1", "取消", "今天", "今日", "昨天", "昨日"} or bool(re.fullmatch(PATROL_LOG_DATE_PATTERN, value)))
 
 
 async def _patrol_log_api(
@@ -5021,10 +5022,91 @@ def _patrol_log_export_prompt(pending: dict[str, Any]) -> str:
         counts[group] = counts.get(group, 0) + 1
     lines = [f"巡查日志导出｜{pending['date']}｜{pending['person_name']}", f"共查询到 {len(pending['rows'])} 条："]
     lines.extend(f"{category} · {section}：{count} 条" for (category, section), count in sorted(counts.items()))
+    if pending.get("destination") == "webdav":
+        plan = pending.get("plan")
+        lines.append("保存方式：WebDAV（不会发送文件到企业微信）")
+        if plan:
+            lines.append("保存根目录：/" + plan["base_directory"])
+            lines.extend("待新建目录：/" + folder["path"] for folder in plan["folders"] if not folder["exists"])
+            lines.extend(("已存在，不覆盖：/" if item["exists"] else "待保存：/") + item["path"] for item in plan["files"])
+            if plan["can_confirm"]:
+                lines.append(f"确认后导出 {plan['records']} 条到以上路径。回复：确认 或 1；回复：取消 可退出。有效期10分钟。")
+            else:
+                lines.append("存在已导出文件或没有可导出记录，未执行写入；请调整目录或日期后重新查询。")
+        else:
+            lines.append("没有可导出记录，不会创建目录或上传文件。")
+        return "\n".join(lines)
     if pending["rows"]:
         lines.append("回复“确认导出”下载全部；也可回复“确认导出日常巡查”“确认导出夜间巡查”或“确认导出及时巡查”。")
     lines.append("回复日期（如11月15日）可切换查询；回复“取消导出”退出。确认有效期10分钟。")
     return "\n".join(lines)
+
+
+def _patrol_webdav_config_fingerprint(config: dict[str, str]) -> str:
+    return hashlib.sha256(json.dumps(config, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+async def _prepare_wecom_patrol_webdav(repo: DutyRepository, pending: dict[str, Any]) -> None:
+    pending["plan"] = None
+    if not pending["rows"]:
+        return
+    config = normalize_webdav_config(repo.get_patrol_webdav_config())
+    target = date.fromisoformat(pending["date"])
+    rows = [{"id": str(row["id"]), "category": _patrol_log_category(row),
+             "section": str(row.get("maintenanceSectionName") or ""), "filename": _patrol_log_filename(target, row)}
+            for row in pending["rows"]]
+    pending["plan"] = await plan_patrol_webdav(config, target, rows)
+    pending["config_hash"] = _patrol_webdav_config_fingerprint(config)
+    pending["expires_at"] = time.time() + WECOM_APP_PENDING_PATROL_LOG_EXPORT_TTL_SECONDS
+
+
+async def _confirm_wecom_patrol_webdav(repo: DutyRepository, pending: dict[str, Any], key: str, query: WechatQueryRequest, reply) -> None:
+    target = date.fromisoformat(pending["date"])
+    confirmed_plan = pending.get("plan")
+    confirmed_hash = pending.get("config_hash")
+    pending["rows"] = await _query_patrol_log_rows(repo, target, pending["person_name"])
+    await _prepare_wecom_patrol_webdav(repo, pending)
+    if pending["plan"] != confirmed_plan or pending.get("config_hash") != confirmed_hash:
+        await reply("条数、记录或保存目录已变化，请重新确认：\n" + _patrol_log_export_prompt(pending))
+        return
+    if not confirmed_plan or not confirmed_plan["can_confirm"]:
+        await reply(_patrol_log_export_prompt(pending), False)
+        return
+    workbooks, total_bytes = {}, 0
+    for item in confirmed_plan["files"]:
+        content = await _download_patrol_log_workbook(repo, target, item["id"])
+        total_bytes += len(content)
+        if total_bytes > 100 * 1024 * 1024:
+            raise HTTPException(413, "本次导出超过100 MiB，请到网页端分批选择。")
+        workbooks[item["id"]] = content
+    person = _person_for_wechat_query(repo, query)
+    if WECOM_APP_PENDING_PATROL_LOG_EXPORTS.get(key) is not pending or not person or str(person["name"]) != pending["person_name"] or time.time() > pending["expires_at"]:
+        await reply("导出已取消、确认已过期或绑定已变化，未上传 WebDAV。", False)
+        return
+    config = normalize_webdav_config(repo.get_patrol_webdav_config())
+    if _patrol_webdav_config_fingerprint(config) != confirmed_hash:
+        await _prepare_wecom_patrol_webdav(repo, pending)
+        await reply("WebDAV 配置已变化，未上传，请重新确认：\n" + _patrol_log_export_prompt(pending))
+        return
+    rows = [{"id": item["id"], "category": item["category"], "section": item["section"], "filename": item["filename"]} for item in confirmed_plan["files"]]
+    current_plan = await plan_patrol_webdav(config, target, rows)
+    if current_plan != confirmed_plan:
+        pending["plan"] = current_plan
+        await reply("远端目录或文件已变化，未上传，请重新确认：\n" + _patrol_log_export_prompt(pending))
+        return
+    person = _person_for_wechat_query(repo, query)
+    if WECOM_APP_PENDING_PATROL_LOG_EXPORTS.get(key) is not pending or not person or str(person["name"]) != pending["person_name"] or time.time() > pending["expires_at"]:
+        await reply("导出已取消、确认已过期或绑定已变化，未上传 WebDAV。", False)
+        return
+    if _patrol_webdav_config_fingerprint(normalize_webdav_config(repo.get_patrol_webdav_config())) != confirmed_hash:
+        pending["plan"] = None
+        await reply("WebDAV 配置已变化，未上传，请重新点击“导出今日巡查日志”确认保存位置。", False)
+        return
+    # A partial upload must be previewed again; never reuse its confirmation.
+    pending["plan"] = None
+    result = await upload_patrol_webdav(config, confirmed_plan, workbooks)
+    WECOM_APP_PENDING_PATROL_LOG_EXPORTS.pop(key, None)
+    await reply(f"已导出 {result['records']} 条巡查日志到 WebDAV：\n" + "\n".join("/" + path for path in result["paths"]))
 
 
 async def _handle_wecom_app_patrol_log_export(
@@ -5036,7 +5118,10 @@ async def _handle_wecom_app_patrol_log_export(
 
     async def reply(content: str, success: bool = True) -> None:
         _save_wechat_interaction_log(repo, query, {"success": success, "query_type": "patrol_log_export", "reply": content})
-        await client.send_text(key, content)
+        while content:
+            chunk = content.encode("utf-8")[:2000].decode("utf-8", errors="ignore")
+            await client.send_text(key, chunk)
+            content = content[len(chunk):]
 
     try:
         person = _person_for_wechat_query(repo, query)
@@ -5046,16 +5131,16 @@ async def _handle_wecom_app_patrol_log_export(
             return
         person_name = str(person["name"])
         pending = WECOM_APP_PENDING_PATROL_LOG_EXPORTS.get(key)
-        if value == "取消导出":
+        if value in {"取消导出", "取消"}:
             WECOM_APP_PENDING_PATROL_LOG_EXPORTS.pop(key, None)
             await reply("已取消巡查日志导出。")
             return
-        if value.startswith("确认导出"):
+        if value.startswith("确认导出") or value in {"确认", "1"}:
             if not pending or time.time() > pending["expires_at"] or pending["person_name"] != person_name:
                 WECOM_APP_PENDING_PATROL_LOG_EXPORTS.pop(key, None)
                 await reply("没有有效的待导出清单，或清单已过期/绑定已变更，请先点击“巡查日志导出”重新查询。", False)
                 return
-            category = value.removeprefix("确认导出")
+            category = "" if value in {"确认", "1"} else value.removeprefix("确认导出")
             if category not in {"", "全部", *PATROL_LOG_TYPES.values()}:
                 await reply("请选择：确认导出、确认导出日常巡查、确认导出夜间巡查、确认导出及时巡查。", False)
                 return
@@ -5064,6 +5149,9 @@ async def _handle_wecom_app_patrol_log_export(
                 return
             pending["sending"] = True
             sending = pending
+            if pending.get("destination") == "webdav":
+                await _confirm_wecom_patrol_webdav(repo, pending, key, query, reply)
+                return
             target = date.fromisoformat(pending["date"])
             rows = await _query_patrol_log_rows(repo, target, person_name)
             if {str(row["id"]) for row in rows} != {str(row["id"]) for row in pending["rows"]}:
@@ -5099,7 +5187,8 @@ async def _handle_wecom_app_patrol_log_export(
         if pending and pending.get("sending"):
             await reply("正在导出，请等待完成后再切换日期；可回复“取消导出”停止后续发送。")
             return
-        target = _patrol_log_date(value)
+        webdav = value == "导出今日巡查日志" or bool(pending and pending.get("destination") == "webdav")
+        target = _today_in_tz() if value == "导出今日巡查日志" else _patrol_log_date(value)
         await reply(f"正在查询 {person_name} {target} 的巡查日志，请稍候…")
         rows = await _query_patrol_log_rows(repo, target, person_name)
         pending = {
@@ -5107,12 +5196,18 @@ async def _handle_wecom_app_patrol_log_export(
             "sent_ids": set(), "expires_at": time.time() + WECOM_APP_PENDING_PATROL_LOG_EXPORT_TTL_SECONDS,
         }
         WECOM_APP_PENDING_PATROL_LOG_EXPORTS[key] = pending
+        if webdav:
+            pending["destination"] = "webdav"
+            await _prepare_wecom_patrol_webdav(repo, pending)
         await reply(_patrol_log_export_prompt(pending))
     except HTTPException as exc:
-        await reply(f"巡查日志导出失败：{exc.detail}。已发送的文件不会重复发送；需要重试可再次回复“确认导出”。", False)
+        if (WECOM_APP_PENDING_PATROL_LOG_EXPORTS.get(key) or {}).get("destination") == "webdav":
+            await reply(f"WebDAV 巡查日志导出失败：{exc.detail}。请检查网页端 WebDAV 配置；回复“确认”或“1”将重新核验目录，已有文件不覆盖。", False)
+        else:
+            await reply(f"巡查日志导出失败：{exc.detail}。已发送的文件不会重复发送；需要重试可再次回复“确认导出”。", False)
     except Exception as exc:
         LOGGER.warning("巡查日志导出失败：%s", type(exc).__name__)
-        await reply("巡查日志导出失败，请稍后重试；已成功发送的文件不会重复发送。", False)
+        await reply("巡查日志导出失败，请重新查询后确认；WebDAV 已有文件不覆盖，已成功发送的文件不会重复发送。", False)
     finally:
         if sending is not None:
             sending["sending"] = False
@@ -5124,6 +5219,7 @@ async def _handle_wecom_app_message(repo: DutyRepository, uploads: Path, message
         return
     client = _wecom_app_client_from_repo(repo)
     if str(message.msg_type or "").strip() == "image":
+        WECOM_APP_PENDING_PATROL_LOG_EXPORTS.pop(userid, None)
         if await _handle_wecom_app_construction_image(repo, uploads, client, message):
             return
         await _handle_wecom_app_roster_image(repo, uploads, client, message)
@@ -5135,6 +5231,7 @@ async def _handle_wecom_app_message(repo: DutyRepository, uploads: Path, message
     if _is_patrol_log_export_text(text, query):
         await _handle_wecom_app_patrol_log_export(repo, client, query, text)
         return
+    WECOM_APP_PENDING_PATROL_LOG_EXPORTS.pop(_wecom_app_pending_key(query), None)
     if await _handle_wecom_app_construction_text(repo, uploads, client, message, text, query):
         return
     roster_pending = WECOM_APP_PENDING_ROSTER_IMPORTS.get(_wecom_app_pending_key(query))
