@@ -75,7 +75,8 @@ def _write_test_roster_workbook(path: Path) -> None:
     def cell(ref: str, value):
         if isinstance(value, int):
             return f'<c r="{ref}"><v>{value}</v></c>'
-        return f'<c r="{ref}" t="inlineStr"><is><t>{escape(str(value))}</t></is></c>'
+        style = ' s="1"' if value == "中" else ""
+        return f'<c r="{ref}"{style} t="inlineStr"><is><t>{escape(str(value))}</t></is></c>'
 
     def sheet_xml(cells: dict[str, object]) -> str:
         rows: dict[int, list[str]] = {}
@@ -107,6 +108,7 @@ def _write_test_roster_workbook(path: Path) -> None:
         z.writestr("xl/worksheets/sheet1.xml", sheet_xml(hidden))
         z.writestr("xl/worksheets/sheet2.xml", sheet_xml(july))
         z.writestr("xl/worksheets/sheet3.xml", sheet_xml(august))
+        z.writestr("xl/styles.xml", """<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fills><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0070C0"/></patternFill></fill></fills><cellXfs><xf fillId="0"/><xf fillId="1"/></cellXfs></styleSheet>""")
 
 
 

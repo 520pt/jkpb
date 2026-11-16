@@ -40,6 +40,7 @@ def extract_roster_workbook(path: str | Path, *, default_year: int | None = None
     months: list[dict[str, Any]] = []
     with zipfile.ZipFile(source) as archive:
         shared_strings = _read_shared_strings(archive)
+        colored_styles = _read_colored_styles(archive)
         workbook = ET.fromstring(archive.read("xl/workbook.xml"))
         rels = _read_workbook_relationships(archive)
         workbook_year = _year_from_text(source.name) or default_year
@@ -54,8 +55,14 @@ def extract_roster_workbook(path: str | Path, *, default_year: int | None = None
             target_name = _sheet_target_path(rels.get(rel_id, ""))
             if not target_name or target_name not in archive.namelist():
                 continue
-            cells = _read_cells(archive, target_name, shared_strings)
-            parsed = _parse_month_sheet(cells, sheet_name=sheet_name, month=month, default_year=workbook_year)
+            cells, styles = _read_cells(archive, target_name, shared_strings, colored_styles)
+            parsed = _parse_month_sheet(
+                cells,
+                styles,
+                sheet_name=sheet_name,
+                month=month,
+                default_year=workbook_year,
+            )
             if parsed["grid"]:
                 parsed["source_image_path"] = str(source)
                 months.append(parsed)
@@ -90,9 +97,15 @@ def _sheet_target_path(target: str) -> str:
     return posixpath.normpath(posixpath.join("xl", target))
 
 
-def _read_cells(archive: zipfile.ZipFile, target_name: str, shared_strings: list[str]) -> dict[tuple[int, int], str]:
+def _read_cells(
+    archive: zipfile.ZipFile,
+    target_name: str,
+    shared_strings: list[str],
+    colored_styles: list[bool],
+) -> tuple[dict[tuple[int, int], str], dict[tuple[int, int], bool]]:
     root = ET.fromstring(archive.read(target_name))
     cells: dict[tuple[int, int], str] = {}
+    styles: dict[tuple[int, int], bool] = {}
     for cell in root.findall(".//m:c", NS):
         ref = cell.attrib.get("r", "")
         position = _cell_position(ref)
@@ -101,7 +114,47 @@ def _read_cells(archive: zipfile.ZipFile, target_name: str, shared_strings: list
         value = _cell_text(cell, shared_strings)
         if value != "":
             cells[position] = value
-    return cells
+            style_id = int(cell.attrib.get("s") or 0)
+            if not 0 <= style_id < len(colored_styles):
+                raise ValueError("排班表包含无效的单元格样式编号")
+            styles[position] = colored_styles[style_id]
+    return cells, styles
+
+
+def _read_colored_styles(archive: zipfile.ZipFile) -> list[bool]:
+    if "xl/styles.xml" not in archive.namelist():
+        return [False]
+    styles = ET.fromstring(archive.read("xl/styles.xml"))
+    xfs = styles.find("m:cellXfs", NS)
+    fills = styles.find("m:fills", NS)
+    if xfs is None or fills is None:
+        return [False]
+    colored_fills = [_fill_has_visible_color(fill) for fill in fills]
+    result = []
+    for xf in xfs:
+        fill_id = int(xf.attrib.get("fillId") or 0)
+        if not 0 <= fill_id < len(colored_fills):
+            raise ValueError("排班表包含无效的填充样式编号")
+        result.append(colored_fills[fill_id])
+    return result or [False]
+
+
+def _fill_has_visible_color(fill: ET.Element) -> bool:
+    pattern = fill.find("m:patternFill", NS)
+    if pattern is None or pattern.attrib.get("patternType") != "solid":
+        return False
+    color = pattern.find("m:fgColor", NS)
+    if color is None:
+        return False
+    if color.attrib.get("indexed") in {"1", "9", "64", "65"}:
+        return False
+    if color.attrib.get("theme") == "0":
+        return False
+    rgb = color.attrib.get("rgb", "")[-6:]
+    if rgb:
+        channels = [int(rgb[index:index + 2], 16) for index in (0, 2, 4)]
+        return not (min(channels) > 200 and max(channels) - min(channels) < 30)
+    return True
 
 
 def _cell_text(cell: ET.Element, shared_strings: list[str]) -> str:
@@ -132,7 +185,14 @@ def _column_number(letters: str) -> int:
     return value
 
 
-def _parse_month_sheet(cells: dict[tuple[int, int], str], *, sheet_name: str, month: int, default_year: int | None) -> dict[str, Any]:
+def _parse_month_sheet(
+    cells: dict[tuple[int, int], str],
+    styles: dict[tuple[int, int], bool],
+    *,
+    sheet_name: str,
+    month: int,
+    default_year: int | None,
+) -> dict[str, Any]:
     title_text = " ".join(value for (row, _), value in cells.items() if row <= 4)
     year = _year_from_text(title_text) or default_year or 2026
     day_columns = _day_columns(cells, year, month)
@@ -143,12 +203,20 @@ def _parse_month_sheet(cells: dict[tuple[int, int], str], *, sheet_name: str, mo
             if not name:
                 continue
             days: dict[str, str] = {}
+            cell_meta: dict[str, dict[str, bool]] = {}
             for day, column in day_columns:
                 value = _normalize_shift_value(cells.get((row_index, column), ""))
+                if value == "中" and not styles.get((row_index, column), False):
+                    days[str(day)] = ""
+                    cell_meta[str(day)] = {"white_middle": True}
+                    continue
                 if value:
                     days[str(day)] = value
+            row = {"name": name, "days": days}
+            if cell_meta:
+                row["cell_meta"] = cell_meta
             if days:
-                grid.append({"name": name, "days": days})
+                grid.append(row)
     return {"year": int(year), "month": int(month), "sheet_name": sheet_name.strip(), "grid": grid}
 
 

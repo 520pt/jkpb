@@ -811,7 +811,8 @@ def create_app(
         try:
             if target.suffix.lower() == ".xlsx":
                 result = extract_roster_workbook(target, default_year=_today_in_tz().year)
-                months = list(result.get("months") or [])
+                months = [_apply_roster_role_semantics(repo, month) for month in list(result.get("months") or [])]
+                result = {**result, "months": months}
                 selected_index = _select_workbook_month_index(months)
                 selected = months[selected_index] if months else {}
                 return {
