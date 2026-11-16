@@ -6939,13 +6939,42 @@
       }
     }
   </style>
+  <link rel="stylesheet" href="/static/admin.css?v=20261116c" />
+<style>
+  #patrolLogExportPanel { min-width: 0; }
+  #patrolWebDAVDirectoryLabel { display: block; min-height: 34px; padding: 6px; border: 1px solid var(--line); border-radius: 4px; overflow-wrap: anywhere; }
+  #patrolLogExportPanel dialog { width: min(760px, calc(100vw - 24px)); box-sizing: border-box; max-height: 85dvh; padding: 20px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); }
+  #patrolLogExportPanel dialog::backdrop { background: rgb(0 0 0 / 42%); }
+  #patrolLogExportPanel dialog .settings-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  #patrolLogExportPanel .webdav-path { padding: 8px; background: var(--panel); border: 1px solid var(--line); overflow-wrap: anywhere; }
+  #patrolWebDAVDirectoryList { display: grid; gap: 6px; max-height: 42dvh; overflow: auto; }
+  #patrolWebDAVDirectoryList button { width: 100%; min-height: 44px; text-align: left; overflow-wrap: anywhere; }
+  #patrolWebDAVPreviewTree { display: grid; gap: 6px; margin: 12px 0; }
+  #patrolWebDAVPreviewTree .webdav-plan-row { padding: 6px 8px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+  #patrolWebDAVPreviewTree .webdav-conflict { color: #d43b35; }
+  #patrolLogExportPanel dialog h3 { margin-top: 0; }
+  #patrolWebDAVForm { padding: 16px; margin-bottom: 20px; border: 1px solid var(--line); border-radius: 8px; }
+  #patrolWebDAVForm .settings-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  #tunnelMechanicalPage[data-active-panel="patrolLogExportPanel"] .tunnel-subnav { display: none !important; }
+  #tunnelMechanicalPage[data-active-panel="patrolLogExportPanel"] .tunnel-workspace { min-height: 0; align-content: start; }
+  #patrolLogExportPanel .patrol-log-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  #patrolLogResults { min-width: 0; max-width: 100%; overflow-x: auto; }
+  #patrolLogResults table { width: 100%; min-width: 800px; }
+  #patrolLogResults .patrol-log-check { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; }
+  #patrolLogResults input[type="checkbox"] { width: 18px; height: 18px; margin: 0; }
+</style>
 </head>
 <body>
+  <svg class="admin-icon-sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs><symbol id="admin-icon-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10H3Z M9 20v-7h6v7"/></symbol><symbol id="admin-icon-schedule" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 11h18m-13 4h2m4 0h2"/></symbol><symbol id="admin-icon-reminder" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 9h18c0-1-3-2-3-9M9 21h6"/></symbol><symbol id="admin-icon-mech" viewBox="0 0 24 24"><path d="m14 6 4 4M5 20l-2-2L15 6l3-3 3 3-3 3ZM3 4l4 1 12 14-2 2L5 8Z"/></symbol><symbol id="admin-icon-warning" viewBox="0 0 24 24"><path d="m12 3 10 18H2Z M12 9v5m0 3v1"/></symbol><symbol id="admin-icon-notify" viewBox="0 0 24 24"><path d="M21 4H3v14h5v4l5-4h8ZM7 9h10M7 13h7"/></symbol><symbol id="admin-icon-people" viewBox="0 0 24 24"><circle cx="9" cy="7" r="4"/><path d="M2 21v-3a7 7 0 0 1 14 0v3M17 3a4 4 0 0 1 0 8m2 3a6 6 0 0 1 3 5v2"/></symbol><symbol id="admin-icon-records" viewBox="0 0 24 24"><path d="M5 3h10l4 4v14H5ZM14 3v5h5M9 12h6m-6 4h6"/></symbol><symbol id="admin-icon-preview" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></symbol><symbol id="admin-icon-search" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/></symbol><symbol id="admin-icon-status" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></symbol></defs></svg>
   <header>
-    <h1>提醒中心</h1>
+    <a class="admin-brand" href="/lufei" aria-label="提醒中心管理首页"><svg class="admin-brand-mark" viewBox="0 0 36 36" aria-hidden="true"><path d="m18 2 15 8v16l-15 8L3 26V10Z" fill="#e7f0ff"/><path d="m18 6 11 6v12l-11 6-11-6V12Z" fill="none" stroke="#2671ec" stroke-width="4"/><path d="m12 13 6-3 7 4-7 4v8l-6-3Z" fill="#24b2d1"/><path d="m18 18 7-4v8l-7 4Z" fill="#2465ed"/></svg><h1>提醒中心<span>排班与日常协同管理</span></h1></a>
+    <label class="admin-global-search" aria-label="搜索功能分类"><svg class="admin-icon" aria-hidden="true"><use href="#admin-icon-search"/></svg><input id="sidebarSearchInput" type="search" autocomplete="off" placeholder="搜索功能分类" /></label>
+    <div class="admin-breadcrumb"><span>工作台</span><span>/</span><strong id="adminCurrentGroup">首页</strong></div>
     <div class="header-actions">
+      <a class="admin-preview-link" href="/preview" target="_blank" rel="noopener"><svg class="admin-icon" aria-hidden="true"><use href="#admin-icon-preview"/></svg><span>排班预览</span></a>
       <button id="themeToggleBtn" class="theme-toggle-btn" type="button" aria-pressed="false">切换主题</button>
       <span id="clock"></span>
+      <span class="admin-account"><span aria-hidden="true">管</span>管理员</span>
       <a class="logout-link" href="/logout">退出</a>
     </div>
   </header>
@@ -7005,27 +7034,48 @@
     <!-- legacy compatibility strings: 配置中心 | 交互功能 | 通知渠道 | 人员中心 | 人员与驾驶 | 今日在岗人员 | 今日在岗信息 | 监控班：早班：{early}，中班：{middle}，晚班：{night} | 监控班：今日早班：示例丁，明日早班：示例辛，中班：示例己，晚班：示例甲 | 监控提醒登录 | @ 对象统一使用“通知渠道”的通知 @ 配置 | 图片发送目标取自“通知渠道” | 实际发送仍使用“通知渠道”里选择的通知通道 | 保存监控提醒 | 已配置监控提醒 | 正在发送监控提醒测试... | 监控提醒测试已发送： | 保存巡查预警配置 | 预览今日在岗 | 测试发送今日在岗 | data-tab="settings">配置中心 -->
     <aside id="mainSidebar" aria-label="主导航">
       <div class="sidebar-title">
-        <strong>提醒中心</strong>
-        <span>按日常使用场景分组</span>
+        <strong>工作空间</strong>
+        <span>排班 · 提醒 · 协同</span>
         <span class="sr-only">首页</span>
       </div>
-      <label class="sidebar-search" aria-label="搜索分类">
-        <input id="sidebarSearchInput" type="search" autocomplete="off" placeholder="搜索分类..." />
-      </label>
-      <button type="button" data-main-group="home">首页</button>
-      <button type="button" data-main-group="schedule">排班与在岗</button>
-      <button type="button" data-main-group="reminder">提醒中心</button>
-      <button type="button" data-main-group="mech">机电施工</button>
-      <button type="button" data-main-group="warning">巡查预警</button>
-      <button type="button" data-main-group="notify">消息通知</button>
-      <button type="button" data-main-group="people">人员管理</button>
-      <button type="button" data-main-group="records">记录与工具</button>
+      <button type="button" data-main-group="home"><svg class="admin-icon" aria-hidden="true"><use href="#admin-icon-home"/></svg>首页</button>
+      <button type="button" data-main-group="schedule"><svg class="admin-icon" aria-hidden="true"><use href="#admin-icon-schedule"/></svg>排班与在岗</button>
+      <button type="button" data-main-group="reminder"><svg class="admin-icon" aria-hidden="true"><use href="#admin-icon-reminder"/></svg>提醒中心</button>
+      <button type="button" data-main-group="mech"><svg class="admin-icon" aria-hidden="true"><use href="#admin-icon-mech"/></svg>机电施工</button>
+      <button type="button" data-main-group="warning"><svg class="admin-icon" aria-hidden="true"><use href="#admin-icon-warning"/></svg>巡查预警</button>
+      <button type="button" data-main-group="notify"><svg class="admin-icon" aria-hidden="true"><use href="#admin-icon-notify"/></svg>消息通知</button>
+      <button type="button" data-main-group="people"><svg class="admin-icon" aria-hidden="true"><use href="#admin-icon-people"/></svg>人员管理</button>
+      <button type="button" data-main-group="records"><svg class="admin-icon" aria-hidden="true"><use href="#admin-icon-records"/></svg>记录与工具</button>
+      <div class="admin-sidebar-footer"><div><svg class="admin-icon" aria-hidden="true"><use href="#admin-icon-preview"/></svg><strong>公开排班</strong></div><p>独立预览，随时查看每日安排</p><a href="/preview" target="_blank" rel="noopener">打开排班预览</a></div>
     </aside>
   <nav class="tabs" id="mainSubnav"></nav>
   <!-- data-subnav-kind="main" data-subnav-kind="settings" data-subnav-kind="tunnel" data-subnav-kind="scroll" -->
 
   <main>
     <section id="todayPage" class="tab-page">
+      <div class="admin-overview" data-subview-scope="home-schedule">
+        <div class="admin-welcome">
+          <div><h2 id="adminGreeting">今日工作台</h2><p>排班有序，提醒及时。掌握今天的工作安排。</p><span id="adminOverviewDate"></span></div>
+          <svg class="admin-welcome-art" viewBox="0 0 320 150" aria-hidden="true"><defs><linearGradient id="adminArtBlue" x2=".8" y2="1"><stop stop-color="#78b1ff"/><stop offset="1" stop-color="#2a67df"/></linearGradient><linearGradient id="adminArtPale" x2="1" y2="1"><stop stop-color="#eff7ff"/><stop offset="1" stop-color="#b7d6ff"/></linearGradient></defs><ellipse cx="178" cy="123" rx="130" ry="22" fill="#b9d5fc" opacity=".2"/><path d="m36 99 133-64 122 62-131 51Z" fill="#cee3ff" opacity=".55"/><path d="m63 86 100-48 101 48-102 46Z" fill="url(#adminArtPale)"/><path d="m63 86 99 46v10L63 96Z" fill="#a9c9f7"/><path d="m162 132 102-46v10l-102 46Z" fill="#8eb6f0"/><path d="m102 56 58-27 61 30-59 27Z" fill="#eaf4ff"/><path d="m102 56 60 30v26l-60-29Z" fill="#bdd8fb"/><path d="m162 86 59-27v26l-59 27Z" fill="#8eb7f0"/><g transform="translate(168 19) skewY(25)"><rect width="72" height="62" rx="5" fill="url(#adminArtBlue)"/><rect x="9" y="12" width="54" height="5" rx="2" fill="#e3f0ff"/><path d="M12 28h12m9 0h12m9 0h7M12 40h12m9 0h12m9 0h7M12 52h12m9 0h12" stroke="#e3f0ff" stroke-width="5" stroke-linecap="round" opacity=".8"/></g><g transform="translate(70 41) skewY(-24)"><rect width="67" height="64" rx="5" fill="#f6fbff" stroke="#d5e7ff"/><rect x="10" y="39" width="8" height="15" rx="2" fill="#9ac3ff"/><rect x="24" y="28" width="8" height="26" rx="2" fill="#69a3fa"/><rect x="38" y="16" width="8" height="38" rx="2" fill="#3478ee"/><path d="M10 11h40" stroke="#b9d4f8" stroke-width="3"/></g><path d="m40 37 10-5 10 5-10 5Z" fill="#8fbdfb"/><path d="m40 37 10 5v10l-10-5Z" fill="#c8e0ff"/><path d="m50 42 10-5v10l-10 5Z" fill="#6ba4f4"/><circle cx="274" cy="42" r="7" fill="#d5e8ff"/></svg>
+        </div>
+        <div class="admin-kpis">
+          <div class="admin-kpi"><span>排班月份</span><strong id="adminRosterMonth">—</strong><small id="adminRosterNote">等待加载排班</small></div>
+          <div class="admin-kpi"><span>排班人员</span><strong><b id="adminRosterPeople">—</b><em>人</em></strong><small>当前所选月份</small></div>
+          <div class="admin-kpi"><span>今日提醒</span><strong><b id="adminEventCount">—</b><em>条</em></strong><small>按当前提醒计划统计</small></div>
+          <div class="admin-kpi"><span>待发送提醒</span><strong><b id="adminPendingCount">—</b><em>条</em></strong><small id="adminNextNote">正在计算下一次提醒</small></div>
+          <div class="admin-kpi"><span>近期发送异常</span><strong><b id="adminFailedCount">—</b><em>条</em></strong><small>最近 100 条发送记录</small></div>
+        </div>
+        <div class="admin-quick-panel"><div class="admin-panel-heading"><h3>常用功能</h3><span>日常工作，快速开始</span></div><div class="admin-quick-actions" aria-label="常用操作">
+          <button type="button" data-admin-group="schedule" data-admin-view="schedule-review"><span><svg class="admin-icon" aria-hidden="true"><use href="#admin-icon-schedule"/></svg></span><strong>导入排班</strong></button>
+          <button type="button" data-admin-group="schedule" data-admin-view="schedule-saved"><span><svg class="admin-icon" aria-hidden="true"><use href="#admin-icon-records"/></svg></span><strong>排班管理</strong></button>
+          <button type="button" data-admin-group="reminder" data-admin-view="schedule-monitor"><span><svg class="admin-icon" aria-hidden="true"><use href="#admin-icon-reminder"/></svg></span><strong>监控提醒</strong></button>
+          <button type="button" data-admin-group="reminder" data-admin-view="schedule-custom"><span><svg class="admin-icon" aria-hidden="true"><use href="#admin-icon-schedule"/></svg></span><strong>自定义提醒</strong></button>
+          <button type="button" data-admin-group="mech" data-admin-view="mech-entry"><span><svg class="admin-icon" aria-hidden="true"><use href="#admin-icon-mech"/></svg></span><strong>机电录入</strong></button>
+          <button type="button" data-admin-group="warning" data-admin-view="warning-query"><span><svg class="admin-icon" aria-hidden="true"><use href="#admin-icon-warning"/></svg></span><strong>巡查查询</strong></button>
+          <button type="button" data-admin-group="notify" data-admin-view="notify-channel-group"><span><svg class="admin-icon" aria-hidden="true"><use href="#admin-icon-notify"/></svg></span><strong>通知设置</strong></button>
+          <button type="button" data-admin-group="people" data-admin-view="people-names"><span><svg class="admin-icon" aria-hidden="true"><use href="#admin-icon-people"/></svg></span><strong>人员管理</strong></button>
+        </div></div>
+      </div>
       <div class="section-head">
         <div>
           <h2>首页</h2>
@@ -7036,6 +7086,7 @@
         </div>
       </div>
       <div class="body">
+        <div class="admin-dashboard-content" data-subview-scope="home-schedule">
         <div id="homeScheduleView" class="home-schedule-view" data-subview-scope="home-schedule">
           <div class="home-schedule-head">
             <div>
@@ -7051,7 +7102,14 @@
           <p id="homeScheduleStatus" class="status"></p>
           <div class="saved-wrap home-schedule-wrap">
             <table id="homeScheduleGrid" class="saved-roster-grid"></table>
+            <div class="admin-empty-roster"><svg class="admin-icon" aria-hidden="true"><use href="#admin-icon-schedule"/></svg><strong>还没有本月排班</strong><p>导入本月排班图片，核对后即可查看每日安排。</p><button type="button" class="primary" data-admin-group="schedule" data-admin-view="schedule-review">导入排班</button></div>
           </div>
+        </div>
+        <div class="admin-dashboard-aside">
+          <section class="admin-widget"><div class="admin-panel-heading"><h3>今日提醒分布</h3><button type="button" data-admin-group="home" data-admin-view="home-today">查看明细</button></div><div id="adminReminderBars" class="admin-reminder-bars"><p>正在加载提醒计划</p></div></section>
+          <section class="admin-widget"><div class="admin-panel-heading"><h3>近期发送情况</h3><button type="button" data-admin-group="records" data-admin-view="records-send">发送记录</button></div><p class="admin-widget-caption">最近 100 条记录，含所有发送状态</p><div class="admin-send-summary"><div id="adminSendRing" class="admin-send-ring" role="img" aria-label="正在加载发送记录"><div><strong id="adminSendTotal">—</strong><span>发送记录</span></div></div><dl><div><dt><i class="admin-dot success"></i>成功</dt><dd id="adminSendSuccess">—</dd></div><div><dt><i class="admin-dot failed"></i>失败</dt><dd id="adminSendFailed">—</dd></div><div><dt><i class="admin-dot other"></i>其他</dt><dd id="adminSendOther">—</dd></div></dl></div><p id="adminSendStatus" class="admin-widget-caption" aria-live="polite"></p></section>
+          <section class="admin-widget admin-workflow-note"><div class="admin-panel-heading"><h3>工作提示</h3></div><ul><li><strong>先核对，再确认</strong><span>导入排班后，请检查姓名与班次。</span></li><li><strong>让提醒准确送达</strong><span>人员绑定与发送通道统一在后台维护。</span></li></ul></section>
+        </div>
         </div>
         <div class="home-summary-grid" id="homeSummaryGrid" data-subview-scope="home-today home-next home-duty home-records">
           <div class="home-summary-card" id="homeTodayReminderCard" data-home-summary-card data-subview-scope="home-today">
@@ -7219,9 +7277,80 @@
             <div class="settings-nav-group">操作界面</div>
             <button class="active" type="button" data-tunnel-panel-target="tunnelEntryPanel">登录与录入</button>
             <button type="button" data-tunnel-panel-target="tunnelTemplatePanel">隧道模板</button>
+            <button type="button" data-tunnel-panel-target="patrolLogExportPanel">巡查日志导出</button>
           </div>
 
           <div class="tunnel-panel-stack">
+            <div class="tunnel-panel" id="patrolLogExportPanel">
+              <form id="patrolWebDAVForm" class="stack">
+                <h3>WebDAV 存储配置</h3>
+                <div class="patrol-log-filters">
+                  <label>WebDAV 地址<input id="patrolWebDAVUrl" type="url" required maxlength="2048" placeholder="https://服务器/WebDAV路径/" /></label>
+                  <label>账号<input id="patrolWebDAVUsername" maxlength="200" autocomplete="off" /></label>
+                  <label>密码<input id="patrolWebDAVPassword" type="password" autocomplete="new-password" placeholder="请输入 WebDAV 密码" /></label>
+                  <div>保存目录<input id="patrolWebDAVDirectory" type="hidden" value="" /><output id="patrolWebDAVDirectoryLabel">尚未选择真实文件夹</output><button id="patrolWebDAVBrowseBtn" type="button">选择目录</button></div>
+                </div>
+                <div class="settings-actions">
+
+                  <button id="patrolWebDAVSaveBtn" class="primary" type="submit">保存 WebDAV 配置</button>
+                  <button id="patrolWebDAVTestBtn" type="button">测试连接</button>
+                </div>
+                <p id="patrolWebDAVStatus" class="status" role="status" aria-live="polite">正在读取 WebDAV 配置…</p>
+              </form>
+              <dialog id="patrolWebDAVBrowserDialog" aria-labelledby="patrolWebDAVBrowserTitle">
+                <h3 id="patrolWebDAVBrowserTitle">选择真实 WebDAV 文件夹</h3>
+                <p id="patrolWebDAVBrowserPath" class="webdav-path" aria-live="polite">/</p>
+                <div class="settings-actions">
+                  <button id="patrolWebDAVParentBtn" type="button">上一级</button>
+                  <button id="patrolWebDAVRefreshBtn" type="button">刷新目录</button>
+                </div>
+                <p id="patrolWebDAVBrowserStatus" role="status" aria-live="polite">正在读取真实远端目录…</p>
+                <div id="patrolWebDAVDirectoryList" class="webdav-directory-list"></div>
+                <div class="settings-actions">
+                  <button id="patrolWebDAVBrowserCancelBtn" type="button">取消</button>
+                  <button id="patrolWebDAVChooseBtn" class="primary" type="button" disabled>选择当前文件夹</button>
+                </div>
+              </dialog>
+              <dialog id="patrolWebDAVPreviewDialog" aria-labelledby="patrolWebDAVPreviewTitle">
+                <h3 id="patrolWebDAVPreviewTitle">确认保存目录与文件结构</h3>
+                <p>以下状态来自实际读取的 WebDAV 目录。只有点击“确认创建并保存”后，才会新建缺少的文件夹并上传 Excel；已有同名文件不覆盖。</p>
+                <p id="patrolWebDAVPreviewBase" class="webdav-path"></p>
+                <div id="patrolWebDAVPreviewTree"></div>
+                <p id="patrolWebDAVPreviewStatus" role="status" aria-live="polite"></p>
+                <div class="settings-actions">
+                  <button id="patrolWebDAVPreviewCancelBtn" type="button">取消</button>
+                  <button id="patrolWebDAVConfirmBtn" class="primary" type="button" disabled>确认创建并保存</button>
+                </div>
+              </dialog>
+              <form id="patrolLogQueryForm" class="stack">
+                <div class="patrol-log-filters">
+                  <label>巡查日期<input id="patrolLogDate" type="date" required /></label>
+                  <label>巡查人员<input id="patrolLogPerson" maxlength="100" placeholder="姓名，留空查询全部" /></label>
+                  <label>巡查类型<select id="patrolLogType">
+                    <option value="">全部类型</option>
+                    <option value="1">日常巡查</option>
+                    <option value="2">夜间巡查</option>
+                    <option value="3">及时巡查</option>
+                  </select></label>
+                </div>
+                <div class="settings-actions">
+                  <button class="primary" id="patrolLogQueryBtn" type="submit">查询日志</button>
+                  <button id="patrolLogExportBtn" type="button" disabled>导出选中（0）</button>
+                  <button id="patrolLogWebDAVBtn" type="button" disabled>上传选中到 WebDAV</button>
+                </div>
+              </form>
+              <p id="patrolLogStatus" class="status" role="status" aria-live="polite">请选择日期查询巡查日志。</p>
+              <div id="patrolLogResults" tabindex="0" aria-label="巡查日志查询结果">
+                <table>
+                  <thead><tr>
+                    <th scope="col"><label class="patrol-log-check"><input id="patrolLogSelectAll" type="checkbox" aria-label="全选巡查日志" disabled /></label></th>
+                    <th scope="col">日期</th><th scope="col">类型</th><th scope="col">路段</th>
+                    <th scope="col">巡查人员</th><th scope="col">开始时间</th><th scope="col">结束时间</th><th scope="col">下载</th>
+                  </tr></thead>
+                  <tbody id="patrolLogRows"><tr><td colspan="8">尚未查询</td></tr></tbody>
+                </table>
+              </div>
+            </div>
             <div class="tunnel-panel active" id="tunnelEntryPanel">
               <p class="tunnel-panel-note">这里处理平台登录、每日录入参数、提交记录和查询结果图。需要先在“隧道模板”里导入模板并选择要提交的记录。</p>
               <div class="tunnel-mechanical-layout">
@@ -7384,6 +7513,7 @@
     </section>
 
     <aside id="settingsPage" class="tab-page hidden">
+      <div class="admin-module-heading"><h2 id="adminModuleTitle">业务配置</h2><p id="adminModuleDescription"></p></div>
       <div class="settings-shell">
         <nav class="settings-nav">
           <h3 class="sr-only">分类配置</h3>
@@ -7467,14 +7597,13 @@
                     <p class="settings-panel-note">
                       用于在企业微信群或单聊中直接发送文字命令，例如“菜单、查询今日在岗、查询今日监控、模板”，不需要 artifacts 或 JSON。
                     </p>
-                    <div class="settings-panel-note">
-                      <strong>Bot ID / Secret 获取方式：</strong><br />
+                    <details class="admin-setup-help"><summary>Bot ID / Secret 获取方式</summary><div class="settings-panel-note">
                       1）企业微信电脑端 → 工作台 → 智能机器人 → 创建机器人。<br />
                       2）弹出“你需要一个什么样的机器人”时，不要在大输入框里创建，点击左下角“手动创建”。<br />
                       3）进入手动创建页后，把右侧配置页一直滚动到最底部，在保存按钮上方/页面底部找到“API 模式创建 / 切换至 API 模式创建”。<br />
                       4）在 API 配置里选择“使用长连接”，复制 Bot ID；Secret 必须点击“点击获取”后复制真实值，不能留空，也不能填写普通机器人/Webhook 的密钥。<br />
                       5）不要使用普通“群机器人 Webhook”，也不要在 DeepSeek 快速回答/知识库/API/MCP 插件普通机器人页里配置；这些都不能接收群内命令。
-                    </div>
+                    </div></details>
                     <div id="wecomAiBotFields" class="field-grid">
                       <label>智能机器人 Bot ID（API 模式）
                         <input id="wecomAiBotId" autocomplete="off" placeholder="创建 API 模式智能机器人后复制 Bot ID" />
@@ -8803,6 +8932,7 @@
         { label: "修改模板", mobileLabel: "修改", kind: "settings", panel: "featureChannelSettings", view: "mech-modify-template" },
         { label: "施工图片", mobileLabel: "图片", kind: "settings", panel: "constructionSettings", view: "construction-images" },
         { label: "施工点维护", mobileLabel: "点位", kind: "settings", panel: "constructionSettings", view: "construction-sites" },
+        { label: "巡查日志导出", mobileLabel: "日志", kind: "tunnel", panel: "patrolLogExportPanel", view: "mech-patrol-logs" },
       ],
       warning: [
         { label: "公路巡查预警", mobileLabel: "预警", kind: "settings", panel: "patrolWarningSettings", view: "warning-config-group" },
@@ -8888,6 +9018,7 @@
           { label: "修改模板", panel: "featureChannelSettings", view: "mech-modify-template" },
           { label: "施工图片", panel: "constructionSettings", view: "construction-images" },
           { label: "施工点维护", panel: "constructionSettings", view: "construction-sites" },
+          { label: "巡查日志导出", tab: "tunnelMechanical", view: "mech-patrol-logs" },
         ],
       },
       warning: {
@@ -8927,7 +9058,26 @@
       },
     };
     let currentSettingsTarget = "settingsOverview";
-    const currentMainSubviewByGroup = {};
+    const MAIN_SUBVIEW_STORAGE_KEY = "duty-reminder:lastActiveMainSubviews";
+    function getSavedMainSubviews() {
+      try {
+        const value = JSON.parse(localStorage.getItem(MAIN_SUBVIEW_STORAGE_KEY) || "{}");
+        return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+      } catch (error) {
+        void error;
+        return {};
+      }
+    }
+    function saveMainSubview(group, subview) {
+      try {
+        const saved = getSavedMainSubviews();
+        saved[group] = subview;
+        localStorage.setItem(MAIN_SUBVIEW_STORAGE_KEY, JSON.stringify(saved));
+      } catch (error) {
+        void error;
+      }
+    }
+    const currentMainSubviewByGroup = getSavedMainSubviews();
     const MAIN_SUBVIEW_TITLE_MAP = {
       home: {
         "home-schedule": "排班查看",
@@ -8955,6 +9105,7 @@
         "mech-modify-template": "修改模板",
         "construction-images": "施工图片",
         "construction-sites": "施工点维护",
+        "mech-patrol-logs": "巡查日志导出",
       },
       warning: {
         "warning-config-group": "公路巡查预警",
@@ -8985,8 +9136,20 @@
     };
     function syncVisiblePageTitles(group, subviewKey) {
       const targetGroup = SIDEBAR_GROUP_META[group] ? group : "home";
+      $("adminCurrentGroup").textContent = SETTINGS_NAV_SCHEMA[targetGroup].title;
       const key = String(subviewKey || currentMainSubviewByGroup[targetGroup] || "").trim();
       const title = (MAIN_SUBVIEW_TITLE_MAP[targetGroup] || {})[key] || "";
+      $("adminModuleTitle").textContent = title || SETTINGS_NAV_SCHEMA[targetGroup].title;
+      $("adminModuleDescription").textContent = ({
+        schedule: "维护排班与在岗安排，确认后用于每日提醒。",
+        reminder: "设置提醒对象、触发班次与发送时间，右侧查看已配置内容。",
+        mech: "管理隧道机电录入、施工图片与业务模板。",
+        warning: "统一管理巡查预警、查询条件与提醒内容。",
+        notify: "维护消息发送通道、接收人员与交互功能。",
+        people: "维护人员名单、岗位分组与通知身份绑定。",
+        records: "查看发送结果，完成诊断、备份与系统维护。",
+      })[targetGroup] || "";
+      if (key === "mech-patrol-logs") $("adminModuleDescription").textContent = "按日期、人员和类型查询巡查日志，下载或保存到 WebDAV。";
       if ($("tunnelMechanicalTitle")) {
         $("tunnelMechanicalTitle").textContent = targetGroup === "mech" && title ? title : "隧道机电每日录入";
       }
@@ -9068,6 +9231,8 @@
     function applyMainSubview(subviewKey) {
       const activeKey = String(subviewKey || "").trim();
       document.documentElement.dataset.mainSubview = activeKey;
+      const tunnelPanels = { "mech-entry": "tunnelEntryPanel", "mech-template": "tunnelTemplatePanel", "mech-patrol-logs": "patrolLogExportPanel" };
+      if (tunnelPanels[activeKey]) switchTunnelMechanicalPanel(tunnelPanels[activeKey]);
       const groupedScopes = new Set([activeKey, ...(MAIN_SUBVIEW_SCOPE_GROUPS[activeKey] || [])]);
       document.querySelectorAll("[data-subview-scope]").forEach((element) => {
         if (element.hasAttribute("data-home-summary-card")) {
@@ -9089,6 +9254,7 @@
       const targetGroup = SIDEBAR_GROUP_META[group] ? group : "home";
       const resolved = String(subviewKey || "").trim() || getMainSubnavDefaultKey(targetGroup);
       currentMainSubviewByGroup[targetGroup] = resolved;
+      saveMainSubview(targetGroup, resolved);
       applyMainSubview(resolved);
       syncVisiblePageTitles(targetGroup, resolved);
       if (targetGroup === "reminder") scheduleReminderImagePreviews();
@@ -9168,7 +9334,8 @@
         : (allowedTabs.includes(savedTab) ? savedTab : meta.tab);
       activateMainTab(targetTab, { sidebarGroup: group });
       if (meta.settingsTarget && targetTab === "settings") {
-        requestAnimationFrame(() => switchSettingsPanel(meta.settingsTarget));
+        const savedItem = (MAIN_SUBNAV_SCHEMA[group] || []).find((item) => getMainSubnavKey(item) === currentMainSubviewByGroup[group]);
+        requestAnimationFrame(() => switchSettingsPanel(savedItem?.kind === "settings" ? savedItem.panel : meta.settingsTarget));
       }
     }
     const MAIN_TAB_STORAGE_KEY = "duty-reminder:lastActiveMainTab";
@@ -9226,6 +9393,9 @@
     document.querySelectorAll("#mainSidebar [data-main-group]").forEach((button) => {
       button.addEventListener("click", () => openMainGroup(button.dataset.mainGroup));
     });
+    document.querySelectorAll("[data-admin-view]").forEach((button) => {
+      button.addEventListener("click", () => window.jump(button.dataset.adminGroup, button.dataset.adminView));
+    });
     if ($("sidebarSearchInput")) {
       $("sidebarSearchInput").addEventListener("input", (event) => {
         const keyword = String(event.target.value || "").trim().toLowerCase();
@@ -9266,7 +9436,8 @@
     function restoreSettingsPanelForGroup(group, tab = getSavedMainTab()) {
       if (tab !== "settings") return;
       const targetGroup = SIDEBAR_GROUP_META[group] ? group : "home";
-      const targetPanel = (SIDEBAR_GROUP_META[targetGroup] || SIDEBAR_GROUP_META.home).settingsTarget;
+      const savedItem = (MAIN_SUBNAV_SCHEMA[targetGroup] || []).find((item) => getMainSubnavKey(item) === currentMainSubviewByGroup[targetGroup]);
+      const targetPanel = savedItem?.kind === "settings" ? savedItem.panel : (SIDEBAR_GROUP_META[targetGroup] || SIDEBAR_GROUP_META.home).settingsTarget;
       if (targetPanel) {
         requestAnimationFrame(() => switchSettingsPanel(targetPanel));
       }
@@ -9304,6 +9475,10 @@
       if (groupKey === "schedule" && viewKey === "schedule-saved") activateMainTab("saved", { sidebarGroup: "schedule" });
       if (groupKey === "mech" && viewKey === "mech-entry") activateMainTab("tunnelMechanical", { sidebarGroup: "mech" });
       if (groupKey === "mech" && viewKey === "mech-template") activateMainTab("tunnelMechanical", { sidebarGroup: "mech" });
+      if (groupKey === "mech" && viewKey === "mech-patrol-logs") {
+        activateMainTab("tunnelMechanical", { sidebarGroup: "mech" });
+        switchTunnelMechanicalPanel("patrolLogExportPanel");
+      }
       if (groupKey === "mech" && viewKey === "mech-modify-template") activateMainTab("settings", { sidebarGroup: "mech" });
       if (groupKey === "warning" && (viewKey === "warning-query" || viewKey === "warning-stats")) activateMainTab("orangeWarning", { sidebarGroup: "warning" });
       if (groupKey === "warning" && (viewKey === "warning-config-group" || viewKey === "warning-reminders" || viewKey === "warning-start" || viewKey === "warning-end")) activateMainTab("settings", { sidebarGroup: "warning" });
@@ -9408,11 +9583,10 @@
           return;
         }
         if (kind === "tunnel") {
+          const panel = button.dataset.subnavPanel || "tunnelEntryPanel";
           activateMainTab("tunnelMechanical", { sidebarGroup: "mech" });
-          requestAnimationFrame(() => {
-            switchTunnelMechanicalPanel(button.dataset.subnavPanel || "tunnelEntryPanel");
-          });
           if (viewKey) setMainSubview("mech", viewKey);
+          switchTunnelMechanicalPanel(panel);
         }
       });
     }
@@ -9445,6 +9619,7 @@
     });
 
     function switchTunnelMechanicalPanel(targetId) {
+      $("tunnelMechanicalPage").dataset.activePanel = targetId;
       document.querySelectorAll("[data-tunnel-panel-target]").forEach((button) => {
         button.classList.toggle("active", button.dataset.tunnelPanelTarget === targetId);
       });
@@ -9454,7 +9629,12 @@
     }
 
     document.querySelectorAll("[data-tunnel-panel-target]").forEach((button) => {
-      button.addEventListener("click", () => switchTunnelMechanicalPanel(button.dataset.tunnelPanelTarget));
+      button.addEventListener("click", () => {
+        switchTunnelMechanicalPanel(button.dataset.tunnelPanelTarget);
+        const views = { tunnelEntryPanel: "mech-entry", tunnelTemplatePanel: "mech-template", patrolLogExportPanel: "mech-patrol-logs" };
+        const view = views[button.dataset.tunnelPanelTarget];
+        if (view) setMainSubview("mech", view);
+      });
     });
 
     function overviewNotificationText() {
@@ -10130,6 +10310,7 @@
       const roster = state.savedRosters.find((item) => savedRosterKey(item) === state.homeSelectedRoster);
       if (!table) return;
       renderRosterTable(table, roster, { activeCell: state.homeActiveCell });
+      renderAdminDashboard();
       if (!roster) {
         state.homeActiveCell = null;
         $("homeScheduleStatus").textContent = "暂无已确认导入的排班表";
@@ -11586,6 +11767,7 @@
           </div>
           <div class="people-stat-row">${stats}</div>
         </div>
+        <div class="admin-directory-columns" aria-hidden="true"><span>人员 / 通知身份</span><span>岗位分组</span><span>操作</span></div>
         <div class="people-directory-list">
           ${cards || `<div class="people-empty"><strong>${escapeHtml(selected.length ? "没有匹配人员" : config.emptyLabel || "暂无人员")}</strong><small>${escapeHtml(selected.length ? "换个关键词搜索，或清空搜索条件。" : "可以先导入排班，也可以在上方手动添加姓名。")}</small></div>`}
         </div>
@@ -15637,7 +15819,56 @@
       `;
     }
 
+    async function loadAdminRecords() {
+      try {
+        const response = await fetch("/api/send-records?limit=100");
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.detail || "无法加载发送记录");
+        state.adminRecords = body.records || [];
+        $("adminSendStatus").textContent = state.adminRecords.length ? "按实际发送结果统计" : "暂无发送记录";
+        renderAdminDashboard();
+      } catch (error) {
+        state.adminRecords = null;
+        $("adminSendStatus").textContent = `加载失败：${error.message || error}`;
+      }
+    }
+
+    function renderAdminDashboard() {
+      const events = state.todayReminderEvents || [];
+      const now = new Date();
+      const future = events.filter((event) => new Date(event.send_at) > now).sort((a, b) => new Date(a.send_at) - new Date(b.send_at));
+      const roster = state.savedRosters.find((item) => savedRosterKey(item) === state.homeSelectedRoster);
+      const hour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Shanghai", hour: "numeric", hourCycle: "h23" }).format(now));
+      $("adminGreeting").textContent = `${hour < 12 ? "上午好" : hour < 18 ? "下午好" : "晚上好"}，今天也有条不紊`;
+      $("adminOverviewDate").textContent = new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", month: "long", day: "numeric", weekday: "long" }).format(now);
+      $("adminRosterMonth").textContent = roster ? `${roster.year}.${String(roster.month).padStart(2, "0")}` : "未导入";
+      $("adminRosterNote").textContent = roster ? `已导入 ${state.savedRosters.length} 个月排班` : "导入排班后即可开始管理";
+      $("adminRosterPeople").textContent = roster ? roster.grid.length : 0;
+      $("adminEventCount").textContent = events.length;
+      $("adminPendingCount").textContent = future.length;
+      $("adminNextNote").textContent = future.length ? `下一次 ${formatIsoMinute(future[0].send_at)}` : "今日暂无待发送提醒";
+      const groups = new Map();
+      events.forEach((event) => {
+        const label = todayReminderGroupLabel(todayReminderGroupKey(event.kind));
+        groups.set(label, (groups.get(label) || 0) + 1);
+      });
+      const max = Math.max(1, ...groups.values());
+      $("adminReminderBars").innerHTML = groups.size ? [...groups].map(([label, count]) => `<div class="admin-bar-row"><div><span>${escapeHtml(label)}</span><strong>${count}<small> 条</small></strong></div><div class="admin-bar-track"><span style="width:${count / max * 100}%"></span></div></div>`).join("") : '<div class="admin-inline-empty">今日暂无提醒计划<small>可在提醒中心配置班次提醒</small></div>';
+      if (!Array.isArray(state.adminRecords)) return;
+      const total = state.adminRecords.length;
+      const success = state.adminRecords.filter((item) => item.status === "success").length;
+      const failed = state.adminRecords.filter((item) => item.status === "failed").length;
+      $("adminFailedCount").textContent = failed;
+      $("adminSendTotal").textContent = total;
+      $("adminSendSuccess").textContent = success;
+      $("adminSendFailed").textContent = failed;
+      $("adminSendOther").textContent = total - success - failed;
+      $("adminSendRing").style.background = total ? `conic-gradient(var(--admin-success) 0 ${success / total * 100}%, var(--admin-danger) 0 ${(success + failed) / total * 100}%, var(--admin-line) 0)` : "var(--admin-line)";
+      $("adminSendRing").setAttribute("aria-label", `最近 ${total} 条发送记录：成功 ${success} 条，失败 ${failed} 条，其他 ${total - success - failed} 条`);
+    }
+
     function renderHomeDashboard() {
+      renderAdminDashboard();
       const events = Array.isArray(state.todayReminderEvents) ? state.todayReminderEvents : [];
       const now = new Date();
       const activeView = currentMainSubviewByGroup.home || "home-today";
@@ -15830,6 +16061,7 @@
         const response = await fetch("/api/reminders/today");
         const body = await response.json();
         if (!response.ok) throw new Error(body.detail || "加载失败");
+        loadAdminRecords();
         state.todayReminderDate = body.target_date || "";
         state.todayReminderNow = body.now_beijing || "";
         renderTodayReminders(body.events || [], body.group_statuses || []);
@@ -16574,5 +16806,6 @@
     loadVacationReminderConfig().catch(() => null);
     loadPeople();
   </script>
+<script src="/static/patrol-logs.js" defer></script>
 </body>
 </html>

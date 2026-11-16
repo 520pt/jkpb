@@ -1,6 +1,7 @@
 .venv/
 .codex-test-venv/
 .pytest_cache/
+.finesse/
 .pytest-tmp/
 __pycache__/
 *.py[cod]

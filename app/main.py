@@ -14,12 +14,14 @@ import re
 import secrets
 import time
 import uuid
+import zipfile
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 from functools import lru_cache
+from io import BytesIO
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, unquote, urljoin, urlparse
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -36,6 +38,7 @@ from app.construction_docx import (
 )
 from app.daily_duty_image import has_cjk_font, render_daily_duty_image
 from app.http_client import tunnel_async_httpx_client
+from app.patrol_webdav import browse_patrol_webdav, normalize_webdav_config, patrol_webdav_access, plan_patrol_webdav, upload_patrol_webdav
 from app.ocr import extract_roster_image, extract_template_roster_image, recheck_template_roster_cells
 from app.patrol_warning import (
     PatrolWarningError,
@@ -135,6 +138,7 @@ WECOM_APP_MENU_COMMANDS = {
     "DR_CONSTRUCTION_SITE_MANAGE": "施工点维护",
     "DR_NEXT_7_DAYS": "查询未来7天",
     "DR_BINDING": "查询我的绑定",
+    "DR_PATROL_LOG_EXPORT": "巡查日志导出",
     "DR_HELP": "菜单",
 }
 WECOM_APP_MENU_COMMAND_KEYS = {command: key for key, command in WECOM_APP_MENU_COMMANDS.items()}
@@ -184,7 +188,7 @@ DEFAULT_WECOM_APP_MENU_GROUPS = [
             {"name": "施工图片", "command": "施工图片"},
             {"name": "施工点维护", "command": "施工点维护"},
             {"name": "未来7天", "command": "查询未来7天"},
-            {"name": "查询休息", "command": "查询休息"},
+            {"name": "巡查日志导出", "command": "巡查日志导出"},
             {"name": "导入排班", "command": "导入排班"},
         ],
     },
@@ -200,6 +204,10 @@ WECOM_APP_PENDING_ROSTER_TTL_SECONDS = 5 * 60
 WECOM_APP_PENDING_CONSTRUCTION_IMAGES: dict[str, dict[str, Any]] = {}
 WECOM_APP_PENDING_CONSTRUCTION_SITES: dict[str, dict[str, Any]] = {}
 WECOM_APP_PENDING_CONSTRUCTION_TTL_SECONDS = 30 * 60
+WECOM_APP_PENDING_PATROL_LOG_EXPORTS: dict[str, dict[str, Any]] = {}
+WECOM_APP_PENDING_PATROL_LOG_EXPORT_TTL_SECONDS = 10 * 60
+PATROL_LOG_TYPES = {"1": "日常巡查", "2": "夜间巡查", "3": "及时巡查"}
+PATROL_LOG_DATE_PATTERN = r"(?:[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}|(?:[0-9]{4}年)?[0-9]{1,2}月[0-9]{1,2}日?)"
 WECOM_APP_SHARED_PENDING_KEY = "__shared__"
 WECHAT_QUERY_PENDING_MENUS: dict[str, float] = {}
 WECHAT_QUERY_MENU_TTL_SECONDS = 5 * 60
@@ -535,6 +543,24 @@ class TunnelMechanicalResultImageRequest(BaseModel):
     authorization: str = ""
     cookie: str = ""
     checkTime: date
+
+
+class PatrolWebDAVConfigRequest(BaseModel):
+    base_url: str = Field(default="", max_length=2048)
+    username: str = Field(default="", max_length=200)
+    password: str = ""
+    directory: str = Field(default="", max_length=512)
+
+
+class PatrolLogExportRequest(BaseModel):
+    target: date
+    person_name: str = ""
+    patrol_type: str = ""
+    record_ids: list[str] = Field(min_length=1, max_length=100)
+
+
+class PatrolWebDAVExportRequest(PatrolLogExportRequest):
+    plan_token: str = Field(default="", max_length=128)
 
 
 class TunnelMechanicalModifyRequest(BaseModel):
@@ -1430,6 +1456,158 @@ def create_app(
     async def tunnel_mechanical_result_image(request: TunnelMechanicalResultImageRequest):
         return await _query_tunnel_mechanical_result_image(repo, request, uploads)
 
+    patrol_webdav_plans: dict[str, dict[str, Any]] = {}
+
+    def resolve_patrol_webdav_config(request: PatrolWebDAVConfigRequest):
+        config = normalize_webdav_config(request.model_dump())
+        existing = repo.get_patrol_webdav_config()
+        if not config["password"]:
+            changed = any(config[key] != existing[key] for key in ("base_url", "username"))
+            if existing["password"] and changed:
+                raise HTTPException(400, "更换 WebDAV 服务器或账号时，请重新填写密码。")
+            config["password"] = existing["password"]
+        return config
+
+    def patrol_webdav_selection(request: PatrolLogExportRequest):
+        return {"target": request.target.isoformat(), "person_name": request.person_name.strip(), "patrol_type": request.patrol_type, "record_ids": sorted(set(request.record_ids))}
+
+    def patrol_webdav_config_hash(config):
+        return hashlib.sha256(json.dumps(config, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+    async def selected_patrol_log_rows(request):
+        current = await list_patrol_logs(request.target, request.person_name, request.patrol_type)
+        selected = set(request.record_ids)
+        if not selected.issubset({row["id"] for row in current["rows"]}):
+            raise HTTPException(404, "记录不在当前日期、人员和类别的查询结果中，请重新查询。")
+        return [row for row in current["rows"] if row["id"] in selected]
+
+    @app.get("/api/patrol-logs/webdav/config")
+    def get_patrol_webdav_config():
+        config = repo.get_patrol_webdav_config()
+        return {"config": {
+            "base_url": config["base_url"], "username": config["username"],
+            "directory": config["directory"], "password": "",
+            "password_configured": bool(config["password"]),
+        }}
+
+    @app.post("/api/patrol-logs/webdav/directories")
+    async def list_patrol_webdav_directories(request: PatrolWebDAVConfigRequest):
+        config = resolve_patrol_webdav_config(request)
+        return await browse_patrol_webdav(config, config["directory"])
+
+    @app.post("/api/patrol-logs/webdav/config")
+    async def save_patrol_webdav_config(request: PatrolWebDAVConfigRequest):
+        config = resolve_patrol_webdav_config(request)
+        await browse_patrol_webdav(config, config["directory"])
+        repo.save_patrol_webdav_config(**config)
+        return get_patrol_webdav_config()
+
+    @app.post("/api/patrol-logs/webdav/test")
+    async def test_patrol_webdav():
+        return await patrol_webdav_access(repo.get_patrol_webdav_config())
+
+    @app.post("/api/patrol-logs/webdav/preview")
+    async def preview_patrol_webdav(request: PatrolLogExportRequest):
+        config = normalize_webdav_config(repo.get_patrol_webdav_config())
+        rows = await selected_patrol_log_rows(request)
+        plan = await plan_patrol_webdav(config, request.target, rows)
+        now = time.time()
+        for token in list(patrol_webdav_plans):
+            if now > patrol_webdav_plans[token]["expires"]:
+                patrol_webdav_plans.pop(token, None)
+        while len(patrol_webdav_plans) >= 32:
+            patrol_webdav_plans.pop(next(iter(patrol_webdav_plans)))
+        token = secrets.token_urlsafe(24) if plan["can_confirm"] else ""
+        expires = now + 600
+        if token:
+            patrol_webdav_plans[token] = {"plan": plan, "selection": patrol_webdav_selection(request), "config_hash": patrol_webdav_config_hash(config), "expires": expires}
+        return {**plan, "plan_token": token, "expires_at": expires}
+
+    @app.post("/api/patrol-logs/webdav/export")
+    async def export_patrol_logs_to_webdav(request: PatrolWebDAVExportRequest):
+        saved = patrol_webdav_plans.pop(request.plan_token, None)
+        if not saved:
+            raise HTTPException(428, "请先读取真实目录、预览并确认保存计划。")
+        config = normalize_webdav_config(repo.get_patrol_webdav_config())
+        if time.time() > saved["expires"] or saved["selection"] != patrol_webdav_selection(request) or saved["config_hash"] != patrol_webdav_config_hash(config):
+            raise HTTPException(409, "预览已过期或配置、所选记录发生变化，请重新预览。")
+        rows = await selected_patrol_log_rows(request)
+        workbooks, total_bytes = {}, 0
+        for row in rows:
+            content = await _download_patrol_log_workbook(repo, request.target, row["id"])
+            total_bytes += len(content)
+            if total_bytes > 100 * 1024 * 1024:
+                raise HTTPException(413, "本次导出超过100 MiB，请分批选择。")
+            workbooks[row["id"]] = content
+        current_config = normalize_webdav_config(repo.get_patrol_webdav_config())
+        if saved["config_hash"] != patrol_webdav_config_hash(current_config) or time.time() > saved["expires"]:
+            raise HTTPException(409, "配置已变化或预览已过期，请重新预览。")
+        current_plan = await plan_patrol_webdav(config, request.target, rows)
+        if current_plan != saved["plan"] or not current_plan["can_confirm"]:
+            raise HTTPException(409, "远端目录、文件或记录已发生变化，请重新预览后确认；未执行写入。")
+        return await upload_patrol_webdav(config, current_plan, workbooks)
+
+    @app.get("/api/patrol-logs")
+    async def list_patrol_logs(target: date, person_name: str = "", patrol_type: str = ""):
+        if patrol_type and patrol_type not in PATROL_LOG_TYPES:
+            raise HTTPException(status_code=400, detail="巡查类型无效")
+        rows = await _query_patrol_log_rows(repo, target, person_name.strip())
+        result = [
+            {
+                "id": str(row["id"]),
+                "date": target.isoformat(),
+                "category": _patrol_log_category(row),
+                "patrol_type": str(row.get("patrolType") or ""),
+                "section": str(row.get("maintenanceSectionName") or ""),
+                "person_names": str(row.get("userNames") or ""),
+                "start_time": str(row.get("startTime") or row.get("collectTime") or ""),
+                "end_time": str(row.get("endTime") or ""),
+                "filename": _patrol_log_filename(target, row),
+            }
+            for row in rows
+            if not patrol_type or str(row.get("patrolType")) == patrol_type
+        ]
+        return {"date": target.isoformat(), "rows": result, "total": len(result)}
+
+    @app.post("/api/patrol-logs/export-status")
+    async def patrol_log_export_status(request: PatrolLogExportRequest, response: Response):
+        rows = await selected_patrol_log_rows(request)
+        history = repo.get_patrol_log_export_history(request.target.isoformat(), [row["id"] for row in rows])
+        response.headers["Cache-Control"] = "no-store"
+        return {
+            "total": len(rows),
+            "exported": [{"id": row["id"], "filename": history[row["id"]]["filename"], "exported_at": history[row["id"]]["exported_at"]} for row in rows if row["id"] in history],
+            "unexported": [{"id": row["id"], "filename": row["filename"]} for row in rows if row["id"] not in history],
+        }
+
+    @app.post("/api/patrol-logs/export")
+    async def export_patrol_logs(request: PatrolLogExportRequest):
+        rows = await selected_patrol_log_rows(request)
+        if len(rows) == 1:
+            row = rows[0]
+            content = await _download_patrol_log_workbook(repo, request.target, row["id"])
+            repo.record_patrol_log_exports(request.target.isoformat(), rows)
+            return Response(
+                content,
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-Disposition": "attachment; filename*=UTF-8''" + quote(row["filename"]), "Cache-Control": "no-store"},
+            )
+        buffer = BytesIO()
+        total_bytes = 0
+        with zipfile.ZipFile(buffer, "w") as archive:
+            for row in rows:
+                content = await _download_patrol_log_workbook(repo, request.target, row["id"])
+                total_bytes += len(content)
+                if total_bytes > 100 * 1024 * 1024:
+                    raise HTTPException(status_code=413, detail="本次导出超过100 MiB，请缩小查询范围或分批选择。")
+                archive.writestr(row["filename"], content)
+        filename = f"巡查日志_{request.target}.zip"
+        repo.record_patrol_log_exports(request.target.isoformat(), rows)
+        return Response(
+            buffer.getvalue(), media_type="application/zip",
+            headers={"Content-Disposition": "attachment; filename*=UTF-8''" + quote(filename), "Cache-Control": "no-store"},
+        )
+
     @app.get("/api/construction-sites")
     def list_construction_sites():
         return {"sites": repo.list_construction_sites()}
@@ -1640,6 +1818,7 @@ def create_app(
             or is_pending_account_help
             or is_pending_roster
             or is_pending_construction
+            or _is_patrol_log_export_text(command_text, callback_query)
             or _is_tunnel_mechanical_partner_command(command_text)
             or _looks_like_duty_wechat_command(_normalize_wechat_query_text(command_text), repo, query=callback_query)
         ):
@@ -3011,12 +3190,23 @@ def _wecom_app_menu_groups(repo: DutyRepository | None = None) -> list[dict[str,
             items = [item for item in group.get("items", []) if str(item.get("command") or "").strip() not in forced_commands]
             group["items"] = [*forced, *items][: WECOM_APP_MENU_LIMITS["max_sub_buttons"]]
         if group.get("name") == "更多查询":
-            removed_commands = {"查询今日机电", "查询我的绑定", "导入排班", "施工图片", "施工点维护"}
+            removed_commands = {
+                "查询今日机电",
+                "查询我的绑定",
+                "导入排班",
+                "施工图片",
+                "施工点维护",
+            }
             forced = [
                 {"name": "施工图片", "command": "施工图片"},
                 {"name": "施工点维护", "command": "施工点维护"},
             ]
-            items = [item for item in group.get("items", []) if str(item.get("command") or "").strip() not in removed_commands]
+            items = [
+                {"name": "巡查日志导出", "command": "巡查日志导出"}
+                if str(item.get("command") or "").strip() == "查询休息" else item
+                for item in group.get("items", [])
+                if str(item.get("command") or "").strip() not in removed_commands
+            ]
             group["items"] = [
                 *forced,
                 *items[: max(0, WECOM_APP_MENU_LIMITS["max_sub_buttons"] - len(forced) - 1)],
@@ -4686,6 +4876,248 @@ def _wecom_app_notify_client_from_config(config: dict[str, Any], repo: DutyRepos
     )
 
 
+def _patrol_log_date(text: str) -> date:
+    value = re.sub(r"\s+", "", text).removeprefix("巡查日志导出")
+    today = _today_in_tz()
+    if value in {"", "今天", "今日"}:
+        return today
+    if value in {"昨天", "昨日"}:
+        return today - timedelta(days=1)
+    if not re.fullmatch(PATROL_LOG_DATE_PATTERN, value):
+        raise HTTPException(status_code=400, detail="请发送日期，例如：巡查日志导出 2026-11-15，或 11月15日。")
+    parts = value.replace("年", "-").replace("月", "-").removesuffix("日").split("-")
+    if len(parts) == 2:
+        parts.insert(0, str(today.year))
+    try:
+        return date(*(int(part) for part in parts))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="日期无效，请检查月份和天数。") from None
+
+
+def _is_patrol_log_export_text(text: str, query: WechatQueryRequest) -> bool:
+    value = re.sub(r"\s+", "", str(text or ""))
+    if value.startswith(("巡查日志导出", "确认导出", "取消导出")):
+        return True
+    pending = WECOM_APP_PENDING_PATROL_LOG_EXPORTS.get(_wecom_app_pending_key(query))
+    return bool(pending) and (value in {"今天", "今日", "昨天", "昨日"} or bool(re.fullmatch(PATROL_LOG_DATE_PATTERN, value)))
+
+
+async def _patrol_log_api(
+    repo: DutyRepository,
+    target: date,
+    path: str,
+    *,
+    params: dict[str, Any] | None = None,
+    payload: dict[str, Any] | None = None,
+) -> tuple[str, dict[str, Any]]:
+    request = TunnelMechanicalResultImageRequest(checkTime=target)
+    for attempt in range(2):
+        base, headers, _ = await _tunnel_mechanical_request_context(repo, request, force_login=bool(attempt))
+        try:
+            async with tunnel_async_httpx_client(timeout=60) as client:
+                response = await client.request(
+                    "GET" if payload is None else "POST",
+                    base + path,
+                    headers=headers,
+                    params=params,
+                    **({"json": payload} if payload is not None else {}),
+                )
+                body = response.json()
+        except (httpx.HTTPError, ValueError):
+            raise HTTPException(status_code=502, detail="智慧养护巡查日志接口连接失败或返回格式异常，请稍后重试。") from None
+        if attempt == 0 and _tunnel_mechanical_response_auth_expired(response.status_code, body):
+            continue
+        if response.status_code != 200 or not isinstance(body, dict) or str(body.get("code")) not in {"0", "200"}:
+            raise HTTPException(status_code=502, detail="智慧养护巡查日志请求失败，请检查账号登录状态和巡查日志权限。")
+        return base, body
+    raise HTTPException(status_code=401, detail="智慧养护登录失效，请在隧道机电配置中重新登录。")
+
+
+async def _query_patrol_log_rows(repo: DutyRepository, target: date, person_name: str) -> list[dict[str, Any]]:
+    received: dict[str, dict[str, Any]] = {}
+    page = 1
+    while True:
+        params = {
+            "pageNum": page, "pageSize": 100,
+            "collectTimee": target.isoformat(), "collectTimes": target.isoformat(),
+        }
+        if person_name:
+            params["userNameLike"] = person_name
+        _, body = await _patrol_log_api(repo, target, "/prod-api/patrol/inspectionLogs/list", params=params)
+        rows, total = body.get("rows"), body.get("total")
+        if not isinstance(rows, list) or type(total) is not int or not total >= 0:
+            raise HTTPException(status_code=502, detail="巡查日志分页格式异常，未生成待导出清单。")
+        previous = len(received)
+        for row in rows:
+            if not isinstance(row, dict) or not str(row.get("id") or "").strip():
+                raise HTTPException(status_code=502, detail="巡查日志缺少记录编号，未生成待导出清单。")
+            received[str(row["id"])] = row
+        if len(received) >= total:
+            break
+        if len(received) == previous:
+            raise HTTPException(status_code=502, detail="巡查日志分页不完整，请重新查询，暂不导出部分结果。")
+        page += 1
+    return [
+        row for row in received.values()
+        if str(row.get("collectTime") or row.get("startTime") or "")[:10] == target.isoformat()
+        and (not person_name or person_name in re.split(r"[,，、;；\s]+", str(row.get("userNames") or "")))
+    ]
+
+
+async def _download_patrol_log_workbook(repo: DutyRepository, target: date, record_id: str) -> bytes:
+    base, body = await _patrol_log_api(
+        repo, target, "/prod-api/patrol/inspectionLogs/getPreviewUrl", payload={"ids": [record_id]},
+    )
+    data = body.get("data")
+    raw_url = data.get("previewUrl") if isinstance(data, dict) else None
+    if not isinstance(raw_url, str) or not raw_url.strip():
+        raise HTTPException(status_code=502, detail="平台没有返回原格式巡查记录表下载地址。")
+    url = urljoin(base + "/", raw_url)
+    parsed, origin = urlparse(url), urlparse(base)
+    if (
+        parsed.scheme != "https" or parsed.netloc != origin.netloc
+        or parsed.username or parsed.password or not parsed.path.lower().endswith(".xlsx")
+    ):
+        raise HTTPException(status_code=502, detail="平台返回的原格式下载地址不符合预期，已停止下载。")
+    content = bytearray()
+    try:
+        async with tunnel_async_httpx_client(timeout=60) as client:
+            async with client.stream("GET", url) as response:
+                if response.status_code != 200:
+                    raise HTTPException(status_code=502, detail="原格式巡查记录表下载失败，请重新确认导出。")
+                async for chunk in response.aiter_bytes():
+                    content.extend(chunk)
+                    if len(content) > 20 * 1024 * 1024:
+                        raise HTTPException(status_code=502, detail="巡查记录表超过企业微信20 MiB文件限制。")
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="原格式巡查记录表下载连接失败，请重试。") from None
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as archive:
+            if (
+                not {"[Content_Types].xml", "xl/workbook.xml"}.issubset(archive.namelist())
+                or sum(item.file_size for item in archive.infolist()) > 100 * 1024 * 1024
+                or archive.testzip() is not None
+            ):
+                raise ValueError("invalid workbook")
+    except (zipfile.BadZipFile, ValueError, RuntimeError):
+        raise HTTPException(status_code=502, detail="平台下载结果不是有效的Excel记录表，未发送文件。") from None
+    return bytes(content)
+
+
+def _patrol_log_category(row: dict[str, Any]) -> str:
+    return PATROL_LOG_TYPES.get(str(row.get("patrolType")), "其他巡查")
+
+
+def _patrol_log_filename(target: date, row: dict[str, Any]) -> str:
+    section = str(row.get("maintenanceSectionName") or "未标注路段")
+    value = f"巡查记录表_{target}_{_patrol_log_category(row)}_{section}_{row['id']}.xlsx"
+    return "".join(char if char.isalnum() or char in "_().（）-" else "_" for char in value)
+
+
+def _patrol_log_export_prompt(pending: dict[str, Any]) -> str:
+    counts: dict[tuple[str, str], int] = {}
+    for row in pending["rows"]:
+        group = (_patrol_log_category(row), str(row.get("maintenanceSectionName") or "未标注路段"))
+        counts[group] = counts.get(group, 0) + 1
+    lines = [f"巡查日志导出｜{pending['date']}｜{pending['person_name']}", f"共查询到 {len(pending['rows'])} 条："]
+    lines.extend(f"{category} · {section}：{count} 条" for (category, section), count in sorted(counts.items()))
+    if pending["rows"]:
+        lines.append("回复“确认导出”下载全部；也可回复“确认导出日常巡查”“确认导出夜间巡查”或“确认导出及时巡查”。")
+    lines.append("回复日期（如11月15日）可切换查询；回复“取消导出”退出。确认有效期10分钟。")
+    return "\n".join(lines)
+
+
+async def _handle_wecom_app_patrol_log_export(
+    repo: DutyRepository, client: WeComClient, query: WechatQueryRequest, text: str,
+) -> None:
+    key = _wecom_app_pending_key(query)
+    value = re.sub(r"\s+", "", text)
+    sending: dict[str, Any] | None = None
+
+    async def reply(content: str, success: bool = True) -> None:
+        _save_wechat_interaction_log(repo, query, {"success": success, "query_type": "patrol_log_export", "reply": content})
+        await client.send_text(key, content)
+
+    try:
+        person = _person_for_wechat_query(repo, query)
+        if not person:
+            WECOM_APP_PENDING_PATROL_LOG_EXPORTS.pop(key, None)
+            await reply(str(_wecom_app_bind_required_response(repo, query).get("reply") or "请先发送“绑定姓名”再查询。"), False)
+            return
+        person_name = str(person["name"])
+        pending = WECOM_APP_PENDING_PATROL_LOG_EXPORTS.get(key)
+        if value == "取消导出":
+            WECOM_APP_PENDING_PATROL_LOG_EXPORTS.pop(key, None)
+            await reply("已取消巡查日志导出。")
+            return
+        if value.startswith("确认导出"):
+            if not pending or time.time() > pending["expires_at"] or pending["person_name"] != person_name:
+                WECOM_APP_PENDING_PATROL_LOG_EXPORTS.pop(key, None)
+                await reply("没有有效的待导出清单，或清单已过期/绑定已变更，请先点击“巡查日志导出”重新查询。", False)
+                return
+            category = value.removeprefix("确认导出")
+            if category not in {"", "全部", *PATROL_LOG_TYPES.values()}:
+                await reply("请选择：确认导出、确认导出日常巡查、确认导出夜间巡查、确认导出及时巡查。", False)
+                return
+            if pending.get("sending"):
+                await reply("正在导出，请勿重复确认。")
+                return
+            pending["sending"] = True
+            sending = pending
+            target = date.fromisoformat(pending["date"])
+            rows = await _query_patrol_log_rows(repo, target, person_name)
+            if {str(row["id"]) for row in rows} != {str(row["id"]) for row in pending["rows"]}:
+                pending["rows"] = rows
+                pending["expires_at"] = time.time() + WECOM_APP_PENDING_PATROL_LOG_EXPORT_TTL_SECONDS
+                await reply("平台记录有变化，请核对后重新确认：\n" + _patrol_log_export_prompt(pending))
+                return
+            selected = [
+                row for row in rows
+                if (category in {"", "全部"} or _patrol_log_category(row) == category)
+                and str(row["id"]) not in pending["sent_ids"]
+            ]
+            if not selected:
+                await reply("该日期和分类没有尚待导出的记录。")
+                return
+            await reply(f"开始导出 {len(selected)} 条原格式巡查记录表，按日期、类别、路段逐条发送。")
+            for row in selected:
+                content = await _download_patrol_log_workbook(repo, target, str(row["id"]))
+                current_person = _person_for_wechat_query(repo, query)
+                if WECOM_APP_PENDING_PATROL_LOG_EXPORTS.get(key) is not pending or not current_person or str(current_person["name"]) != person_name:
+                    await reply("导出已取消或人员绑定已变化，已停止后续文件发送。", False)
+                    return
+                filename = _patrol_log_filename(target, row)
+                await client.send_file(key, filename, content)
+                pending["sent_ids"].add(str(row["id"]))
+            remaining = {str(row["id"]) for row in rows} - pending["sent_ids"]
+            if not remaining:
+                WECOM_APP_PENDING_PATROL_LOG_EXPORTS.pop(key, None)
+            else:
+                pending["expires_at"] = time.time() + WECOM_APP_PENDING_PATROL_LOG_EXPORT_TTL_SECONDS
+            await reply(f"本次已发送 {len(selected)} 个巡查记录表文件，清单还剩 {len(remaining)} 条未发送。")
+            return
+        if pending and pending.get("sending"):
+            await reply("正在导出，请等待完成后再切换日期；可回复“取消导出”停止后续发送。")
+            return
+        target = _patrol_log_date(value)
+        await reply(f"正在查询 {person_name} {target} 的巡查日志，请稍候…")
+        rows = await _query_patrol_log_rows(repo, target, person_name)
+        pending = {
+            "person_name": person_name, "date": target.isoformat(), "rows": rows,
+            "sent_ids": set(), "expires_at": time.time() + WECOM_APP_PENDING_PATROL_LOG_EXPORT_TTL_SECONDS,
+        }
+        WECOM_APP_PENDING_PATROL_LOG_EXPORTS[key] = pending
+        await reply(_patrol_log_export_prompt(pending))
+    except HTTPException as exc:
+        await reply(f"巡查日志导出失败：{exc.detail}。已发送的文件不会重复发送；需要重试可再次回复“确认导出”。", False)
+    except Exception as exc:
+        LOGGER.warning("巡查日志导出失败：%s", type(exc).__name__)
+        await reply("巡查日志导出失败，请稍后重试；已成功发送的文件不会重复发送。", False)
+    finally:
+        if sending is not None:
+            sending["sending"] = False
+
+
 async def _handle_wecom_app_message(repo: DutyRepository, uploads: Path, message) -> None:
     userid = str(message.from_user or "").strip()
     if not userid:
@@ -4700,6 +5132,9 @@ async def _handle_wecom_app_message(repo: DutyRepository, uploads: Path, message
     if not text:
         return
     query = _wecom_app_query_from_message(message, text)
+    if _is_patrol_log_export_text(text, query):
+        await _handle_wecom_app_patrol_log_export(repo, client, query, text)
+        return
     if await _handle_wecom_app_construction_text(repo, uploads, client, message, text, query):
         return
     roster_pending = WECOM_APP_PENDING_ROSTER_IMPORTS.get(_wecom_app_pending_key(query))

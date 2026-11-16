@@ -154,6 +154,7 @@ CONFIG_EXPORT_TABLES = [
     "vacation_reminder_config",
     "patrol_warning_config",
     "tunnel_mechanical_config",
+    "patrol_webdav_config",
     "tunnel_mechanical_template",
 ]
 
@@ -295,6 +296,14 @@ class DutyRepository:
                     source_image_path TEXT NOT NULL DEFAULT '',
                     confirmed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (year, month)
+                );
+
+                CREATE TABLE IF NOT EXISTS patrol_log_export_history (
+                    target_date TEXT NOT NULL,
+                    record_id TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    exported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (target_date, record_id)
                 );
 
                 CREATE TABLE IF NOT EXISTS roster_versions (
@@ -519,6 +528,14 @@ class DutyRepository:
                     backoff_until TEXT NOT NULL DEFAULT '',
                     last_error TEXT NOT NULL DEFAULT '',
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS patrol_webdav_config (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    base_url TEXT NOT NULL DEFAULT '',
+                    username TEXT NOT NULL DEFAULT '',
+                    password TEXT NOT NULL DEFAULT '',
+                    directory TEXT NOT NULL DEFAULT '巡查日志'
                 );
 
                 CREATE TABLE IF NOT EXISTS tunnel_mechanical_config (
@@ -2356,6 +2373,40 @@ class DutyRepository:
                     next_backoff_until,
                     next_last_error,
                 ),
+            )
+
+    def get_patrol_log_export_history(self, target: str, record_ids: list[str]) -> dict[str, dict[str, Any]]:
+        placeholders = ",".join("?" for _ in record_ids)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT record_id, filename, exported_at FROM patrol_log_export_history WHERE target_date = ? AND record_id IN ({placeholders})",
+                (target, *record_ids),
+            ).fetchall()
+        return {row["record_id"]: dict(row) for row in rows}
+
+    def record_patrol_log_exports(self, target: str, rows: list[dict[str, Any]]) -> None:
+        with self._connect() as conn:
+            conn.executemany(
+                """INSERT INTO patrol_log_export_history (target_date, record_id, filename) VALUES (?, ?, ?)
+                   ON CONFLICT(target_date, record_id) DO UPDATE SET
+                   filename=excluded.filename, exported_at=CURRENT_TIMESTAMP""",
+                [(target, row["id"], row["filename"]) for row in rows],
+            )
+
+    def get_patrol_webdav_config(self) -> dict[str, str]:
+        defaults = {"base_url": "", "username": "", "password": "", "directory": "巡查日志"}
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM patrol_webdav_config WHERE id = 1").fetchone()
+        return {key: str(row[key] or "") for key in defaults} if row else defaults
+
+    def save_patrol_webdav_config(self, *, base_url: str, username: str, password: str, directory: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO patrol_webdav_config (id, base_url, username, password, directory)
+                   VALUES (1, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET
+                   base_url=excluded.base_url, username=excluded.username,
+                   password=excluded.password, directory=excluded.directory""",
+                (base_url, username, password, directory),
             )
 
     def save_tunnel_mechanical_config(

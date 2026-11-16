@@ -18,7 +18,7 @@ EXPECTED_SUBNAV = {
     "home": ["排班查看", "今日提醒", "下次提醒", "今日在岗摘要", "最近发送情况", "配置总览"],
     "schedule": ["导入/核对", "已导入排班", "今日在岗"],
     "reminder": ["监控班提醒", "自定义提醒", "休息提醒", "查询休息", "假期余额提醒"],
-    "mech": ["隧道机电录入", "隧道模板", "修改模板", "施工图片", "施工点维护"],
+    "mech": ["隧道机电录入", "隧道模板", "修改模板", "施工图片", "施工点维护", "巡查日志导出"],
     "warning": ["公路巡查预警", "橙色预警查询", "预警提醒"],
     "notify": ["通知通道", "通知接收人", "交互菜单", "发送测试", "手动模拟发送"],
     "people": ["人员名单", "岗位分组", "绑定状态"],
@@ -145,6 +145,10 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
   page.on('console', (message) => {{
     if (message.type() === 'error') errors.push(`console: ${{message.text()}}`);
   }});
+  await page.route('**/api/send-records?limit=100', (route) => route.fulfill({{
+    contentType: 'application/json',
+    body: JSON.stringify({{ records: [{{ status: 'success' }}, {{ status: 'success' }}, {{ status: 'failed' }}, {{ status: 'queued' }}] }}),
+  }}));
   await page.goto('http://127.0.0.1:18081/', {{ waitUntil: 'networkidle' }});
 
   const theme = await page.evaluate(() => document.documentElement.dataset.theme);
@@ -187,6 +191,33 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
   if (sidebarDisplay === 'none' || tabbarDisplay !== 'none') {{
     throw new Error(`desktop nav mismatch: sidebar=${{sidebarDisplay}}, tabbar=${{tabbarDisplay}}`);
   }}
+
+  const header = page.locator('body > header');
+  if (!(await header.isVisible())) throw new Error('管理端顶部工具栏未显示');
+  await page.waitForFunction(() => document.querySelector('#adminSendTotal').textContent === '4');
+  const dashboard = await page.evaluate(() => ({{
+    counts: ['adminSendSuccess', 'adminSendFailed', 'adminSendOther', 'adminFailedCount'].map((id) => document.getElementById(id).textContent),
+    shortcuts: document.querySelectorAll('.admin-quick-actions button').length,
+    bars: document.querySelector('#adminReminderBars').textContent,
+    diagonalArrow: document.body.textContent.includes('↗'),
+  }}));
+  if (JSON.stringify(dashboard.counts) !== JSON.stringify(['2', '1', '1', '1'])) throw new Error(`发送统计错误：${{JSON.stringify(dashboard)}}`);
+  if (dashboard.shortcuts !== 8 || dashboard.diagonalArrow || dashboard.bars.includes('[object Object]')) throw new Error(`业务总览渲染错误：${{JSON.stringify(dashboard)}}`);
+  const shortcuts = {{ schedule: 'schedule-review', reminder: 'schedule-monitor', notify: 'notify-channel-group', people: 'people-names' }};
+  for (const [group, view] of Object.entries(shortcuts)) {{
+    await page.click('#mainSidebar [data-main-group="home"]');
+    await page.click(`.admin-quick-actions [data-admin-view="${{view}}"]`);
+    const target = await page.evaluate(() => ({{ group: document.documentElement.dataset.mainGroup, view: document.documentElement.dataset.mainSubview }}));
+    if (target.group !== group || target.view !== view) throw new Error(`快捷入口跳转错误：${{JSON.stringify(target)}}`);
+    const panel = group === 'schedule' ? '#reviewPage' : '#settingsPage .settings-panel.active';
+    await page.locator(panel).waitFor({{ state: 'visible' }});
+  }}
+  await page.locator('#sidebarSearchInput').fill('人员');
+  if (await page.locator('#mainSidebar [data-main-group]:visible').count() !== 1) throw new Error('侧栏搜索未筛选分类');
+  await page.locator('#sidebarSearchInput').fill('');
+  await page.locator('#themeToggleBtn').click();
+  if (await page.evaluate(() => document.documentElement.dataset.theme) !== 'dark') throw new Error('暗色主题按钮未生效');
+  await page.locator('#themeToggleBtn').click();
 
   for (const [group, expectedLabels] of Object.entries(expected)) {{
     await page.click(`#mainSidebar [data-main-group="${{group}}"]`);
@@ -410,6 +441,54 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
       }}
     }}
   }}
+  await page.evaluate(() => {{
+    jump('people', 'people-groups');
+    setNameMultiSelectValues('personnelNames', ['张三', '李四']);
+    setNameMultiSelectValues('stationNames', ['张三', '李四']);
+  }});
+  for (const width of [320, 375, 768, 1440]) {{
+    await page.setViewportSize({{ width, height: 1000 }});
+    for (const theme of ['light', 'dark']) {{
+      await page.evaluate((value) => document.documentElement.dataset.theme = value, theme);
+      const issues = await page.evaluate(() => {{
+        const issues = [];
+        for (const chip of document.querySelectorAll('#stationNamesMultiSelect .name-multi-select-chip')) {{
+          const button = chip.querySelector('button');
+          const outer = chip.getBoundingClientRect();
+          const inner = button.getBoundingClientRect();
+          const style = getComputedStyle(button);
+          if (inner.top < outer.top || inner.bottom > outer.bottom ||
+              style.backgroundColor !== 'rgba(0, 0, 0, 0)' || style.boxShadow !== 'none') {{
+            issues.push('姓名移除按钮撑出标签或出现多余底色/阴影');
+          }}
+        }}
+        for (const head of document.querySelectorAll('.patrol-team-group-head')) {{
+          const input = head.querySelector('input').getBoundingClientRect();
+          const button = head.querySelector('button').getBoundingClientRect();
+          if (Math.abs(input.top - button.top) > 1 || Math.abs(input.height - button.height) > 1) {{
+            issues.push('班组删除按钮与名称输入框未对齐');
+          }}
+        }}
+        const addButton = document.querySelector('[data-patrol-team-action="add"]');
+        if (addButton.scrollHeight > addButton.clientHeight + 3) issues.push('新增班组文字溢出');
+        for (const selector of ['.patrol-team-group-name-field input', '.patrol-team-group-remove']) {{
+          if (parseFloat(getComputedStyle(document.querySelector(selector)).fontSize) < 14) {{
+            issues.push('管理表单字号太小');
+          }}
+        }}
+        if (document.documentElement.scrollWidth > innerWidth + 1) issues.push('页面横向溢出');
+        return issues;
+      }});
+      if (issues.length) throw new Error(`${{width}}px ${{theme}}: ${{issues.join('; ')}}`);
+    }}
+  }}
+  await page.locator('#stationNamesMultiSelect [data-name-multi-remove="张三"]').click();
+  if (await page.locator('#stationNamesMultiSelect [data-name-multi-remove="张三"]').count()) {{
+    throw new Error('姓名移除按钮未生效');
+  }}
+  if (await page.locator('#stationNamesMultiSelect .name-multi-select-control').getAttribute('aria-expanded') !== 'false') {{
+    throw new Error('移除姓名意外展开了选择器');
+  }}
   if (errors.length) {{
     throw new Error(errors.join('\\n'));
   }}
@@ -490,6 +569,8 @@ const {{ chromium }} = require({json.dumps(str(PLAYWRIGHT_DIR.as_posix()))});
   }});
   await page.goto('http://127.0.0.1:18082/', {{ waitUntil: 'networkidle' }});
   await page.waitForSelector('#homeScheduleGrid tr:nth-child(3)');
+  const rosterPeople = await page.locator('#adminRosterPeople').innerText();
+  if (rosterPeople !== '2') throw new Error(`总览人员数未使用所选排班：${{rosterPeople}}`);
 
   const activeHomeTab = await page.$eval('#mainSubnav .tab-button.active', (el) => (el.innerText || el.textContent || '').trim());
   if (activeHomeTab !== '排班查看') throw new Error(`首页默认子页错误：${{activeHomeTab}}`);
